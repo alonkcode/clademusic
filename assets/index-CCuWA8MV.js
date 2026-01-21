@@ -1,0 +1,1 @@
+import{r as s,w as o,a9 as u}from"./index-BwSIv_Kv.js";var i=u[" useId ".trim().toString()]||(()=>{}),c=0;function n(r){const[t,a]=s.useState(i());return o(()=>{a(e=>e??String(c++))},[r]),t?`radix-${t}`:""}export{n as u};
