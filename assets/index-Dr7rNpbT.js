@@ -1,1 +1,0 @@
-import{r as s,v as o,a5 as u}from"./index-EHvL_Hjc.js";var i=u[" useId ".trim().toString()]||(()=>{}),c=0;function n(r){const[t,a]=s.useState(i());return o(()=>{a(e=>e??String(c++))},[r]),t?`radix-${t}`:""}export{n as u};
