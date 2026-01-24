@@ -1,0 +1,1 @@
+import{r as s,p as o,aj as u}from"./index-KzbM75DX.js";var c=u[" useId ".trim().toString()]||(()=>{}),n=0;function i(t){const[a,r]=s.useState(c());return o(()=>{r(e=>e??String(n++))},[t]),t||(a?`radix-${a}`:"")}export{i as u};
