@@ -1,1 +1,0 @@
-import{r as s,K as o,ac as u}from"./index-CVWCVr76.js";var c=u[" useId ".trim().toString()]||(()=>{}),i=0;function n(r){const[t,a]=s.useState(c());return o(()=>{a(e=>e??String(i++))},[r]),t?`radix-${t}`:""}export{n as u};
