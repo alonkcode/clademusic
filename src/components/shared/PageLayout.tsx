@@ -1,6 +1,5 @@
 import { ReactNode } from 'react';
 import { BottomNav } from '@/components/BottomNav';
-import { CladeLogoAnimated } from '@/components/icons/CladeIcon';
 import { ProfileCircle } from './ProfileCircle';
 
 interface PageLayoutProps {
@@ -46,9 +45,6 @@ export function PageLayout({
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="fixed top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none select-none">
-        <CladeLogoAnimated size={44} className="drop-shadow-lg" />
-      </div>
       {/* Header */}
       <header className={`z-40 glass-strong safe-top ${headerPositionClass}`}>
         <div className={`${headerPaddingClass} ${containerWidth}`}>
@@ -56,10 +52,7 @@ export function PageLayout({
             headerContent
           ) : (
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <CladeLogoAnimated size={28} className="text-primary" />
-                <h1 className="text-xl font-bold">{title}</h1>
-              </div>
+              <h1 className="text-xl font-bold">{title}</h1>
               <div className="flex items-center gap-3">
                 {headerActions}
                 <ProfileCircle />

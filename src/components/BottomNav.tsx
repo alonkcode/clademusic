@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { CladeWordmark } from '@/components/shared/CladeWordmark';
+import { CladeBrand } from '@/components/shared/CladeBrand';
 
 const navItems = [
   { to: '/feed', icon: Home, label: 'Feed' },
@@ -61,13 +61,7 @@ export function BottomNav() {
         </SheetContent>
       </Sheet>
 
-      <NavLink
-        to="/feed"
-        className="select-none leading-none drop-shadow-sm"
-        aria-label="Clade home"
-      >
-        <CladeWordmark size="md" className="tracking-tight" />
-      </NavLink>
+      <CladeBrand size="md" />
 
       {/* Keep a hidden feed link in DOM for accessibility/tests even when sheet is closed */}
       <NavLink to="/feed" className="sr-only" aria-hidden="true">

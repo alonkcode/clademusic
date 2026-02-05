@@ -17,7 +17,6 @@ import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
 import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
 import { ResponsiveContainer, ResponsiveGrid } from '@/components/layout/ResponsiveLayout';
 import { QuickStreamButtons } from '@/components/QuickStreamButtons';
-import { CladeLogoAnimated } from '@/components/icons/CladeIcon';
 import { ProfileCircle } from '@/components/shared';
 import { usePlayer } from '@/player/PlayerContext';
 import { 
@@ -393,7 +392,6 @@ export default function SearchPage() {
           <div className="py-4 space-y-3">
             <div className="flex items-center justify-between pl-36 sm:pl-44">
               <div className="flex items-center gap-3">
-                <CladeLogoAnimated size={22} className="text-primary" />
                 <h1 className="text-xl lg:text-2xl font-bold">Search</h1>
               </div>
               <ProfileCircle />

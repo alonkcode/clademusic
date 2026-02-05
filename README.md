@@ -155,6 +155,17 @@ bun run typecheck
 # Run tests
 bun test
 
+# Seed demo tracks (requires secret key)
+# Set `SUPABASE_SERVICE_ROLE_KEY` (or `SUPABASE_SECRET_KEY`) and `SUPABASE_URL` (or `VITE_SUPABASE_URL`)
+bun run seed
+
+# Seed nearby bot users (requires secret key)
+# Use your auth user id after enabling location sharing in-app
+bun run seed:bots -- --near-user-id <your-user-uuid> --count 50 --spread-km 10
+
+# Clear seeded bot users (same tag/count as used to create them)
+bun run seed:bots:clear -- --tag nearby --count 50
+
 # Build for production
 bun run build
 
