@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -13,6 +13,11 @@ import { LoadingSpinner } from "@/components/shared";
 import { AdminRoute } from "@/components/AdminRoute";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+
+// Import diagnostics in development
+if (import.meta.env.DEV) {
+  import('@/lib/spotifyDiagnostics');
+}
 
 // Lazy load pages for code splitting
 const Index = lazy(() => import("./pages/Index")); // Landing Page

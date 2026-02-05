@@ -8,14 +8,37 @@ const IS_TEST =
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
   (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
 
+// Validate environment variables
+if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+  if (!IS_TEST) {
+    console.error(
+      '❌ Supabase configuration missing!\n' +
+      'Please create a .env.local file with:\n' +
+      '  VITE_SUPABASE_URL=your_supabase_url\n' +
+      '  VITE_SUPABASE_PUBLISHABLE_KEY=your_anon_key'
+    );
+  }
+}
+
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    // In tests, disable session persistence and token auto-refresh timers so vitest can exit cleanly.
-    storage: IS_TEST ? undefined : localStorage,
-    persistSession: !IS_TEST,
-    autoRefreshToken: !IS_TEST,
+export const supabase = createClient<Database>(
+  SUPABASE_URL || 'https://placeholder.supabase.co',
+  SUPABASE_PUBLISHABLE_KEY || 'placeholder-key',
+  {
+    auth: {
+      // In tests, disable session persistence and token auto-refresh timers so vitest can exit cleanly.
+      storage: IS_TEST ? undefined : localStorage,
+      persistSession: !IS_TEST,
+      autoRefreshToken: !IS_TEST,
+    }
   }
-});
+);
+
+// Helper to check if Supabase is properly configured
+export const isSupabaseConfigured = (): boolean => {
+  return Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY && 
+    SUPABASE_URL !== 'https://placeholder.supabase.co' &&
+    SUPABASE_PUBLISHABLE_KEY !== 'placeholder-key');
+};

@@ -72,16 +72,19 @@ export async function getRecentlyPlayedTracks(
   userId: string,
   limit = 20
 ): Promise<{ tracks: Track[]; source: 'spotify' } | null> {
-  const accessToken = await getValidAccessToken(userId);
-  
-  if (!accessToken) {
-    return null;
-  }
-
   try {
+    const accessToken = await getValidAccessToken(userId);
+    
+    if (!accessToken) {
+      console.warn('[Spotify User] No access token available - user needs to connect Spotify');
+      return null;
+    }
+
     const params = new URLSearchParams({
       limit: Math.min(limit, 50).toString(), // Spotify max is 50
     });
+
+    console.log('[Spotify User] Fetching recently played tracks...');
 
     const response = await fetch(
       `${SPOTIFY_API_BASE}/me/player/recently-played?${params}`,
@@ -93,40 +96,70 @@ export async function getRecentlyPlayedTracks(
     );
 
     if (!response.ok) {
-      if (response.status === 401) {
+      if (response.status === 401 || response.status === 403) {
         // Token invalid, try to refresh
+        console.log('[Spotify User] Token invalid (401/403), attempting refresh...');
         const newToken = await refreshSpotifyToken(userId);
         if (!newToken) {
-          console.error('Spotify token refresh failed');
+          console.error('[Spotify User] Token refresh failed - user needs to reconnect');
           return null;
         }
-        // Retry with new token
-        return getRecentlyPlayedTracks(userId, limit);
+        // Retry with new token (prevent infinite loop with single retry)
+        console.log('[Spotify User] Retrying with refreshed token...');
+        const retryResponse = await fetch(
+          `${SPOTIFY_API_BASE}/me/player/recently-played?${params}`,
+          {
+            headers: {
+              Authorization: `Bearer ${newToken}`,
+            },
+          }
+        );
+        if (!retryResponse.ok) {
+          console.error('[Spotify User] Retry failed:', retryResponse.status);
+          return null;
+        }
+        const retryData: SpotifyRecentlyPlayedResponse = await retryResponse.json();
+        return processRecentlyPlayedData(retryData, limit);
       }
-      console.error('Failed to fetch recently played:', response.status);
+      console.error('[Spotify User] Failed to fetch recently played:', response.status, response.statusText);
       return null;
     }
 
     const data: SpotifyRecentlyPlayedResponse = await response.json();
-
-    const unique: Track[] = [];
-    const seen = new Set<string>();
-
-    for (const item of data.items) {
-      const t = transformSpotifyTrack(item);
-      const key = t.spotify_id || t.id;
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        unique.push(t);
-      }
-      if (unique.length >= limit) break;
-    }
-
-    return { tracks: unique.slice(0, limit), source: 'spotify' };
+    return processRecentlyPlayedData(data, limit);
   } catch (error) {
-    console.error('Error fetching recently played:', error);
+    console.error('[Spotify User] Exception fetching recently played:', error);
     return null;
   }
+}
+
+/**
+ * Helper to process recently played response data
+ */
+function processRecentlyPlayedData(
+  data: SpotifyRecentlyPlayedResponse,
+  limit: number
+): { tracks: Track[]; source: 'spotify' } {
+  if (!data.items || !Array.isArray(data.items)) {
+    console.warn('[Spotify User] No recently played items in response');
+    return { tracks: [], source: 'spotify' };
+  }
+
+  const unique: Track[] = [];
+  const seen = new Set<string>();
+
+  for (const item of data.items) {
+    const t = transformSpotifyTrack(item);
+    const key = t.spotify_id || t.id;
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      unique.push(t);
+    }
+    if (unique.length >= limit) break;
+  }
+
+  console.log(`[Spotify User] Retrieved ${unique.length} recently played tracks`);
+  return { tracks: unique.slice(0, limit), source: 'spotify' };
 }
 
 /**

@@ -24,18 +24,29 @@ interface UserProviderRow {
  * Get user's Spotify credentials from database
  */
 export async function getSpotifyCredentials(userId: string): Promise<UserProviderRow | null> {
-  const { data, error } = await supabase
-    .from('user_providers')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('provider', 'spotify')
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from('user_providers')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('provider', 'spotify')
+      .maybeSingle();
 
-  if (error || !data) {
+    if (error) {
+      console.error('[Spotify Auth] Failed to get credentials:', error.message);
+      return null;
+    }
+
+    if (!data) {
+      console.log('[Spotify Auth] No Spotify connection found for user');
+      return null;
+    }
+
+    return data as UserProviderRow;
+  } catch (error) {
+    console.error('[Spotify Auth] Exception getting credentials:', error);
     return null;
   }
-
-  return data as UserProviderRow;
 }
 
 /**
@@ -45,24 +56,26 @@ export async function refreshSpotifyToken(
   userId: string,
   refreshToken?: string
 ): Promise<string | null> {
-  // If caller didn't provide a refresh token, read it from DB
-  if (!refreshToken) {
-    const creds = await getSpotifyCredentials(userId);
-    refreshToken = creds?.refresh_token ?? '';
-  }
-
-  const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
-  
-  if (!clientId) {
-    console.error('Spotify client ID not configured');
-    return null;
-  }
-  if (!refreshToken) {
-    console.warn('Spotify refresh token missing; reconnect required');
-    return null;
-  }
-
   try {
+    // If caller didn't provide a refresh token, read it from DB
+    if (!refreshToken) {
+      const creds = await getSpotifyCredentials(userId);
+      refreshToken = creds?.refresh_token ?? '';
+    }
+
+    const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
+    
+    if (!clientId) {
+      console.error('[Spotify Auth] Client ID not configured. Add VITE_SPOTIFY_CLIENT_ID to .env.local');
+      return null;
+    }
+    if (!refreshToken) {
+      console.warn('[Spotify Auth] Refresh token missing; user needs to reconnect Spotify');
+      return null;
+    }
+
+    console.log('[Spotify Auth] Refreshing access token...');
+
     const response = await fetch(SPOTIFY_TOKEN_URL, {
       method: 'POST',
       headers: {
@@ -76,16 +89,23 @@ export async function refreshSpotifyToken(
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Failed to refresh Spotify token:', errorData);
+      const errorData = await response.json().catch(() => ({ error: 'unknown' }));
+      console.error('[Spotify Auth] Token refresh failed:', errorData);
+      
+      // If refresh token is invalid, user needs to reconnect
+      if (response.status === 400 || response.status === 401) {
+        console.warn('[Spotify Auth] Invalid refresh token - user must reconnect');
+      }
       return null;
     }
 
     const data = await response.json();
     const newExpiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString();
 
+    console.log('[Spotify Auth] Token refreshed successfully');
+
     // Update token in database
-    await supabase
+    const { error: updateError } = await supabase
       .from('user_providers')
       .update({
         access_token: data.access_token,
@@ -96,9 +116,13 @@ export async function refreshSpotifyToken(
       .eq('user_id', userId)
       .eq('provider', 'spotify');
 
+    if (updateError) {
+      console.error('[Spotify Auth] Failed to save refreshed token:', updateError.message);
+    }
+
     return data.access_token;
   } catch (error) {
-    console.error('Error refreshing Spotify token:', error);
+    console.error('[Spotify Auth] Exception refreshing token:', error);
     return null;
   }
 }
