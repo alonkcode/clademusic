@@ -10,8 +10,16 @@ export interface AuthState {
   guestMode: boolean;
 }
 
+export interface SignUpResult {
+  error: Error | null;
+  /** Account created, but the email link must be clicked before sign-in works. */
+  needsEmailConfirmation: boolean;
+  /** The email already has an account. Supabase reports this without an error. */
+  alreadyRegistered: boolean;
+}
+
 interface AuthContextType extends AuthState {
-  signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, displayName?: string) => Promise<SignUpResult>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   enterGuestMode: () => void;
@@ -88,9 +96,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = async (email: string, password: string, displayName?: string) => {
-    const redirectUrl = `${window.location.origin}/`;
-    
-    const { error } = await supabase.auth.signUp({
+    // BASE_URL matters: the app is served from /clademusic/ on GitHub Pages, so
+    // a bare origin would send the confirmation link to a 404.
+    const base = import.meta.env.BASE_URL || '/';
+    const redirectUrl = `${window.location.origin}${base.endsWith('/') ? base : `${base}/`}`;
+
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -100,7 +111,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       },
     });
-    return { error: error as Error | null };
+
+    if (error) {
+      return { error: error as Error, needsEmailConfirmation: false, alreadyRegistered: false };
+    }
+
+    // Supabase deliberately does not error on a duplicate email (that would let
+    // anyone enumerate accounts). It returns a user with an empty identities
+    // array instead - that is the only reliable signal.
+    const alreadyRegistered = (data.user?.identities?.length ?? 0) === 0;
+
+    // With email confirmation enabled we get a user but no session; the account
+    // is not usable until the link is clicked.
+    const needsEmailConfirmation = !alreadyRegistered && !data.session && !!data.user;
+
+    return { error: null, needsEmailConfirmation, alreadyRegistered };
   };
 
   const signIn = async (email: string, password: string) => {

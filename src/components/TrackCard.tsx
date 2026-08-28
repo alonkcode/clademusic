@@ -375,6 +375,7 @@ export function TrackCard({
               detectedMode={track.detected_mode}
               cadenceType={track.cadence_type}
               confidenceScore={track.confidence_score}
+              bpm={track.tempo}
               matchReason="Same vi–IV–I–V loop with similar energy"
             />
           </motion.div>

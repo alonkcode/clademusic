@@ -1,8 +1,61 @@
 # 🎯 Clade - Task List & Progress
 
-**Last Updated**: January 21, 2026
+**Last Updated**: August 28, 2026
+
+## 🚧 Active — Supabase project migration
+
+The app was repointed at a **new, empty** Supabase project
+(`jlmddkchldgcjmdpvibm`). Nothing works against it until the schema is applied.
+
+- [x] Env repointed in `.env` (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`)
+- [x] Confirmed the project is empty (`PGRST205` on every table, not a connection fault)
+- [x] Generated SQL Editor parts + single-file bundle + verification queries
+- [x] Hardened the signup trigger (migration `20260828120000`)
+- [ ] **Apply the schema** — `supabase/sql-editor/01…06`, then `99-verify.sql`
+- [ ] **Seed** — `node scripts/seed.js` with `VITE_SUPABASE_URL` and `SUPABASE_SERVICE_KEY` exported
+- [ ] Set env vars in the **Vercel dashboard** (`.env` is gitignored, so the deploy has none)
+- [ ] Update `VITE_SPOTIFY_REDIRECT_URI` for the Vercel origin + Spotify allowed URIs
+
+**Blocked:** `supabase db push` is unavailable — the logged-in CLI account gets
+**403** on this project ref. Either log in as the owning account or use the SQL
+Editor route. See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md).
+
+**Unresolved:** three project refs exist in the repo's history —
+`jlmddkchldgcjmdpvibm` (current), `fteefcvikpowcewuqqez` (`supabase/config.toml`
++ `scripts/seed.js` fallback) and a `gbmz…` ref formerly in `.env`. Decide which
+holds real data before seeding. `config.toml` still points at the old ref.
 
 ## ✅ Completed Features
+
+### Harmonic Loop — audible progressions (Aug 2026)
+- [x] **Theory layer** — `src/lib/harmony/theory.ts`; numeral parsing, accidentals, qualities, octave voice leading
+- [x] **Web Audio engine** — lookahead scheduler for drift-free timing; synthesised voices, no samples
+- [x] **React binding** — `useHarmonicLoop`; live key/tempo/volume, auto-stop on tab hide
+- [x] **Loop dial UI** — `HarmonicLoop.tsx`; rotating dial, 12-key transpose, tempo/volume
+- [x] **Wired into `HarmonyCard`** — appears in feed, compare page and player drawer
+- [x] **Unit tested** — 14 tests over parsing, transposition, voicing, MIDI/frequency
+- [x] **Documented** — [docs/HARMONIC_LOOP.md](docs/HARMONIC_LOOP.md)
+
+### Auth correctness (Aug 2026)
+- [x] **Signup trigger hardened** — `ON CONFLICT` + per-insert exception handling; fixes "Database error saving new user"
+- [x] **Backfill** — users missing profile/role/credit rows are repaired
+- [x] **Render-phase `navigate()` removed** — was routing during render in `AuthPage`
+- [x] **Email-confirmation state surfaced** — no longer claims "you can now sign in" when the account is unconfirmed
+- [x] **Duplicate-email detection** — via empty `identities`, since Supabase returns success by design
+- [x] **`emailRedirectTo` respects `BASE_URL`** — confirmation links no longer 404 on GitHub Pages
+- [x] **Autocomplete/a11y** — `email`/`new-password`/`current-password`, aria-label on the reveal toggle
+
+### Feed & player polish (Aug 2026)
+- [x] **Renamed** HarmonyFeed → CladeMusic
+- [x] **Guest CTAs consolidated** — three competing prompts reduced to one dismissible banner
+- [x] **`dvh` layout** — `100vh` was clipped by mobile browser chrome
+- [x] **Header hierarchy** — single primary sign-in + gradient progress rail
+- [x] **Touch targets** — player controls raised from 28px to the 44px minimum
+- [x] **Desktop arrows** — moved `md:` → `lg:` to stop tablet collisions
+
+### Hosting (Aug 2026)
+- [x] **Env-aware base path** — `/clademusic/` on Pages, `/` on Vercel, `VITE_BASE_PATH` override
+- [x] **`vercel.json`** — SPA rewrite (deep links 404'd on refresh) + asset caching
 
 ### Harmonic Analysis Architecture (Jan 2026)
 - [x] **Relative theory type system** — HarmonicFingerprint, RomanChord, CadenceType, ModalColor types
@@ -94,10 +147,10 @@
   - Error handling and retry logic
 
 ### Database
-- [ ] Create `track_connections` table in Supabase
-  - Columns: id, from_track_id, to_track_id, connection_type, confidence, evidence_url, evidence_text, created_by, created_at
-  - Connection types: 'sample', 'cover', 'remix', 'interpolation', 'reference'
-  - Enable RLS policies
+- [x] ~~Create `track_connections` table in Supabase~~ — exists in
+      `20260115092130_unified_music_schema.sql`; ships with the schema bundle
+- [ ] Reconcile `supabase/config.toml` `project_id` with the active project ref
+- [ ] Resolve the two-lockfile split (`bun.lockb` + `package-lock.json`)
 
 ### API Integrations (Placeholder → Real)
 - [ ] Hooktheory API integration
@@ -247,9 +300,12 @@
 ## 🐛 Known Issues
 
 ### Minor
-- [ ] HTML title still says "TODO" (index.html line 6)
-  - Update to "Clade - Find Your Harmony"
-  
+- [x] ~~HTML title still says "TODO"~~ — now "Clade - Find Your Harmony" (index.html:6)
+
+- [ ] Branding split: `index.html` and docs say "Clade", the UI now says
+      "CladeMusic". Pick one and make it consistent.
+
+
 - [ ] Spotify embed doesn't support timestamp seek
   - YouTube supports seekTo, Spotify restarts
   - Consider switching to Spotify Web Playback SDK
@@ -263,7 +319,7 @@
 ## 🚀 Performance Optimizations
 
 - [ ] Implement virtual scrolling for large track lists
-- [ ] Optimize bundle size (currently 627 kB)
+- [ ] Optimize bundle size (main chunk **807 kB**, 245 kB gzipped, as of Aug 2026)
   - Consider code splitting by route
   - Lazy load heavy components
   - Tree-shake unused dependencies
@@ -291,7 +347,6 @@
 
 ---
 
-**Last Updated**: January 21, 2026
-**Total Completed**: 30+ features
-**Total Pending**: 35+ tasks
-**Priority**: Database setup, API integrations, Queue UI
+**Last Updated**: August 28, 2026
+**Priority**: Apply the schema to the new Supabase project, seed it, then set
+Vercel env vars. Everything else is blocked behind a working database.

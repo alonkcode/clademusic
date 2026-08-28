@@ -129,7 +129,7 @@ export default function LoginPage() {
           <div className="p-3 rounded-2xl bg-primary/20 glow-primary">
             <Music className="w-8 h-8 text-primary" />
           </div>
-          <h1 className="text-3xl font-bold gradient-text">HarmonyFeed</h1>
+          <h1 className="text-3xl font-bold gradient-text">CladeMusic</h1>
         </motion.div>
 
         <motion.div

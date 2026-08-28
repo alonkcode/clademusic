@@ -335,9 +335,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const seekValueSecRaw = Math.min(effectivePositionSec, seekMaxSec);
   const seekValueSec = Number.isFinite(seekValueSecRaw) ? seekValueSecRaw : 0;
   
-  const volumePercent = Math.round((isMuted ? 0 : Number.isFinite(volume) ? volume : 0) * 100);
+  const safeVolume = Number.isFinite(volume) ? volume : 0;
+  // Show 0 while muted so the slider matches what is audible, but keep the
+  // stored level so unmuting restores it.
+  const volumePercent = Math.round((isMuted ? 0 : safeVolume) * 100);
   const isIdle = !isOpen || !provider || !trackId;
-  const effectiveCanNext = canNext ?? (safeQueue.length > 1 || Boolean(onNext));
+  // A queue of >1 does not mean a next track exists - at the last index there
+  // is nothing to advance to, which left the button enabled but inert.
+  const hasQueueNext =
+    (safeQueueIndex >= 0 && safeQueueIndex < safeQueue.length - 1) ||
+    (safeQueueIndex === -1 && safeQueue.length > 0);
+  const effectiveCanNext = canNext ?? (!isIdle && (hasQueueNext || Boolean(onNext)));
+  // Previous is available whenever it can do something: step back, restart the
+  // current track, or defer to the host page.
   const effectiveCanPrev = canPrev ?? !isIdle;
   const authoritativePositionMs = safeMs(positionMs);
 
@@ -627,6 +637,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   }, [isIdle, positionMs, safeQueueIndex, safeQueue.length, playFromQueue, seekToMs, onPrev]);
 
   const handleNext = useCallback(() => {
+    if (isIdle) return;
     if (safeQueueIndex >= 0 && safeQueueIndex < safeQueue.length - 1) {
       playFromQueue(safeQueueIndex + 1);
       return;
@@ -638,7 +649,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     if (onNext) {
       onNext();
     }
-  }, [safeQueueIndex, safeQueue.length, playFromQueue, onNext]);
+  }, [isIdle, safeQueueIndex, safeQueue.length, playFromQueue, onNext]);
 
   // Drag-to-resize for video: adjust scale based on diagonal drag of the handle
   const handleResizeStart = useCallback((clientX: number, clientY: number) => {
@@ -817,7 +828,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               <button
                 type="button"
                 onClick={() => setQueueOpen(true)}
-                className="inline-flex h-7 w-7 md:h-9 md:w-9 items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                className="inline-flex h-9 w-9 md:h-9 md:w-9 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
                 aria-label="Show queue"
                 title="Show queue"
               >
@@ -827,7 +838,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 type="button"
                 onClick={() => (effectiveCanPrev ? handlePrev() : null)}
                 disabled={!effectiveCanPrev}
-                className="inline-flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex h-10 w-10 md:h-10 md:w-10 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Previous track"
                 title="Previous track"
               >
@@ -836,7 +847,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               <button
                 type="button"
                 onClick={togglePlayPause}
-                className="inline-flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-full border-2 border-primary/70 bg-primary/20 text-primary transition hover:border-primary hover:bg-primary hover:text-white"
+                className="inline-flex h-10 w-10 md:h-10 md:w-10 touch-manipulation items-center justify-center rounded-full border-2 border-primary/70 bg-primary/20 text-primary transition hover:border-primary hover:bg-primary hover:text-white"
                 aria-label={isPlaying ? 'Pause' : 'Play'}
                 title={isPlaying ? 'Pause' : 'Play'}
               >
@@ -848,7 +859,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   onClick={() => {
                     setIsCompact(false);
                   }}
-                  className="inline-flex h-7 w-7 md:h-9 md:w-9 items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                  className="inline-flex h-9 w-9 md:h-9 md:w-9 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
                   aria-label="Show video and expand player"
                   title="Show video"
                 >
@@ -859,7 +870,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 type="button"
                 onClick={() => (effectiveCanNext ? handleNext() : null)}
                 disabled={!effectiveCanNext}
-                className="inline-flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex h-10 w-10 md:h-10 md:w-10 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Next track"
                 title="Next track"
               >
@@ -871,7 +882,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   onClick={() => {
                     setIsCompact(true);
                   }}
-                  className="inline-flex h-7 w-7 md:h-9 md:w-9 items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                  className="inline-flex h-9 w-9 md:h-9 md:w-9 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
                   aria-label="Compact player and hide video"
                   title="Compact (hide video)"
                 >
@@ -881,7 +892,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               <button
                 type="button"
                 onClick={toggleFullscreen}
-                className="inline-flex h-7 w-7 md:h-9 md:w-9 items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                className="inline-flex h-9 w-9 md:h-9 md:w-9 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
                 aria-label={isCinema ? 'Exit full screen' : 'Enter full screen'}
                 title={isCinema ? 'Exit full screen' : 'Enter full screen'}
               >
@@ -896,7 +907,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   setMiniPosition(targetPos);
                   collapseToMini();
                 }}
-                className="inline-flex h-7 w-7 md:h-9 md:w-9 items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                className="inline-flex h-9 w-9 md:h-9 md:w-9 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
                 aria-label="Minimize to mini player"
                 title="Minimize to mini player"
               >
@@ -1049,6 +1060,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               onMouseDownCapture={(e) => e.stopPropagation()}
               onTouchStartCapture={(e) => e.stopPropagation()}
               onChange={(e) => setVolumeLevel(Number(e.target.value) / 100)}
+              aria-valuetext={`${volumePercent}%`}
               className="w-20 md:w-28 h-1 bg-white/20 rounded-full appearance-none cursor-pointer
                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 
                        [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full 

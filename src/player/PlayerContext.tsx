@@ -117,6 +117,9 @@ const QUEUE_STORAGE_KEY = 'clade_queue_v1';
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
+/** Starting volume, and the level restored when unmuting from silence. */
+const DEFAULT_VOLUME = 0.7;
+
 const dedupeArtists = (artist: string | null) => {
   if (!artist) return null;
   const seen = new Set<string>();
@@ -220,6 +223,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const providerControlsRef = useRef<Partial<Record<MusicProvider, ProviderControls>>>({});
   const activeProviderRef = useRef<MusicProvider | null>(null);
   const positionMsRef = useRef<number>(0);
+  // Mirror volume/mute so newly-registered provider controls can be brought up
+  // to the user's current setting without depending on render timing.
+  const volumeRef = useRef<number>(DEFAULT_VOLUME);
+  const mutedRef = useRef<boolean>(false);
   const opChainRef = useRef<Promise<void>>(Promise.resolve());
 
   const enqueuePlayerOp = useCallback((name: string, op: () => Promise<void>) => {
@@ -239,6 +246,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     activeProviderRef.current = state.provider;
   }, [state.provider]);
+
+  // Keep the volume/mute mirrors true for every path that touches state,
+  // including openPlayer and switchProvider, which force isMuted back to false.
+  useEffect(() => {
+    volumeRef.current = state.volume;
+    mutedRef.current = state.isMuted;
+  }, [state.volume, state.isMuted]);
 
   useEffect(() => {
     positionMsRef.current = state.positionMs;
@@ -306,24 +320,42 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const setVolumeLevel = useCallback((volume: number) => {
     const clamped = clamp01(volume);
-    setState((prev) => ({ ...prev, volume: clamped, isMuted: clamped === 0 ? true : prev.isMuted && clamped === 0 }));
-    const activeProvider = state.provider;
+    // Dragging to zero mutes; dragging above zero always unmutes, so the slider
+    // is never a control that appears to do nothing.
+    const nextMuted = clamped === 0;
+
+    volumeRef.current = clamped;
+    mutedRef.current = nextMuted;
+    setState((prev) => ({ ...prev, volume: clamped, isMuted: nextMuted }));
+
+    // Read the provider from the ref, not from `state` captured in this
+    // closure: a stale closure would send the volume to the previous provider
+    // after a switch.
+    const activeProvider = activeProviderRef.current;
     if (activeProvider) {
-      providerControlsRef.current[activeProvider]?.setVolume?.(clamped);
-      if (clamped > 0) {
-        providerControlsRef.current[activeProvider]?.setMute?.(false);
-      }
+      const controls = providerControlsRef.current[activeProvider];
+      controls?.setVolume?.(clamped);
+      controls?.setMute?.(nextMuted);
     }
-  }, [state.provider]);
+  }, []);
 
   const toggleMute = useCallback(() => {
     setState((prev) => {
       const nextMuted = !prev.isMuted;
-      const activeProvider = prev.provider;
+      // Unmuting at zero volume would stay silent and look like a dead button,
+      // so restore an audible level.
+      const nextVolume = !nextMuted && prev.volume === 0 ? DEFAULT_VOLUME : prev.volume;
+
+      volumeRef.current = nextVolume;
+      mutedRef.current = nextMuted;
+
+      const activeProvider = activeProviderRef.current ?? prev.provider;
       if (activeProvider) {
-        providerControlsRef.current[activeProvider]?.setMute?.(nextMuted);
+        const controls = providerControlsRef.current[activeProvider];
+        if (nextVolume !== prev.volume) controls?.setVolume?.(nextVolume);
+        controls?.setMute?.(nextMuted);
       }
-      return { ...prev, isMuted: nextMuted };
+      return { ...prev, isMuted: nextMuted, volume: nextVolume };
     });
   }, []);
 
@@ -355,6 +387,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const registerProviderControls = useCallback((provider: MusicProvider, controls: ProviderControls) => {
     providerControlsRef.current[provider] = controls;
+    // A freshly-mounted player starts at its own default, which silently
+    // discarded the user's volume/mute on every track change or provider
+    // switch. Push the current setting as soon as the controls exist.
+    controls.setVolume?.(volumeRef.current);
+    controls.setMute?.(mutedRef.current);
   }, []);
 
   const updatePlaybackState = useCallback((updates: Partial<Pick<PlayerState, 'positionMs' | 'durationMs' | 'isPlaying' | 'volume' | 'isMuted' | 'trackTitle' | 'trackArtist' | 'trackAlbum' | 'lastKnownTitle' | 'lastKnownArtist' | 'lastKnownAlbum'>>) => {

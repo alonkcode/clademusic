@@ -22,12 +22,14 @@ Clade is a TikTok-style music discovery platform that analyzes songs by **harmon
 
 ### Development
 - [Development Guide](development.md) — Local development workflow
+- [Database Setup](DATABASE_SETUP.md) — Provisioning Supabase from empty, seeding, verification
 - [Testing](testing.md) — Vitest and Cypress testing
 - [Building for Production](build.md) — Production builds
-- [Deployment](deployment.md) — GitHub Pages and hosting
+- [Deployment](deployment.md) — GitHub Pages, Vercel, and base paths
 
 ### Architecture
 - [Harmonic Analysis Architecture](HARMONIC_ANALYSIS_ARCHITECTURE.md) — **Core system design** (relative theory, hybrid pipeline, similarity engine)
+- [Harmonic Loop](HARMONIC_LOOP.md) — Web Audio playback of progressions in any key
 - [Architecture Summary](ARCHITECTURE_SUMMARY.md) — Quick reference for technical decisions
 
 ### Contributing

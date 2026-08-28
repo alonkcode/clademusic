@@ -13,6 +13,8 @@ declare global {
   }
 }
 
+const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
+
 let ytPromise: Promise<void> | null = null;
 let ytReady = false;
 
@@ -42,12 +44,15 @@ const loadYouTubeApi = () => {
  * YouTube player using IFrame API for reliable autoplay + unmute.
  */
 export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlayerProps) {
-  const { provider, isMuted, registerProviderControls, updatePlaybackState, clearSeek, seekToSec } = usePlayer();
+  const { provider, isMuted, volume, registerProviderControls, updatePlaybackState, clearSeek, seekToSec } = usePlayer();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const playerHostRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
   const mutedRef = useRef(isMuted);
+  // YouTube takes 0-100. Mirror the app volume so player events can restore the
+  // user's level instead of forcing full volume.
+  const volumeRef = useRef(isMuted ? 0 : volume);
   const autoplayRef = useRef(autoplay);
   const seekRetryRef = useRef<number | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
@@ -84,6 +89,10 @@ export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlaye
   }, [isMuted]);
 
   useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
+
+  useEffect(() => {
     autoplayRef.current = autoplay;
   }, [autoplay]);
 
@@ -105,17 +114,22 @@ export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlaye
           player.mute?.();
           return;
         }
-        player.setVolume?.(100);
+        // Restore the user's level, not full volume. These retries exist to beat
+        // YouTube's autoplay policy, which can silently re-mute shortly after
+        // load; forcing 100 here was overriding the volume slider every time.
+        const ytVolume = () => Math.round(clamp01(volumeRef.current) * 100);
+
+        player.setVolume?.(ytVolume());
         window.setTimeout(() => {
           player.unMute?.();
-          player.setVolume?.(100);
+          player.setVolume?.(ytVolume());
           if (player.getPlayerState?.() !== window.YT?.PlayerState?.PLAYING) {
             player.playVideo?.();
           }
         }, 200);
         window.setTimeout(() => {
           player.unMute?.();
-          player.setVolume?.(100);
+          player.setVolume?.(ytVolume());
         }, 650);
       };
 
@@ -211,7 +225,12 @@ export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlaye
             pendingSeekRef.current = seconds;
           }
         },
-        setVolume: async (vol: number) => playerRef.current?.setVolume?.(Math.round(vol * 100)),
+        setVolume: async (vol: number) => {
+          // Track it here too: the post-load retry timers read volumeRef, and a
+          // stale value would undo a volume change made moments after load.
+          volumeRef.current = clamp01(vol);
+          playerRef.current?.setVolume?.(Math.round(clamp01(vol) * 100));
+        },
         setMute: async (muted: boolean) => {
           mutedRef.current = muted;
           if (muted) playerRef.current?.mute?.();
@@ -293,10 +312,10 @@ export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlaye
       updatePlaybackState({ isMuted: true });
     } else {
       playerRef.current.unMute?.();
-      playerRef.current.setVolume?.(100);
+      playerRef.current.setVolume?.(Math.round(clamp01(volume) * 100));
       updatePlaybackState({ isMuted: false });
     }
-  }, [provider, isMuted, updatePlaybackState]);
+  }, [provider, isMuted, volume, updatePlaybackState]);
 
   if (provider !== 'youtube' || !providerTrackId) return null;
 

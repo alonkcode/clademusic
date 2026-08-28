@@ -7,7 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Harmonic Loop (Aug 28, 2026)
+- **Audible chord progressions** — any track's Roman-numeral progression plays
+  back as real synthesised chords, transposable to all 12 keys, tempo-locked to
+  the track BPM. Turns Clade's relative-harmony data from metadata into
+  something you can compare by ear.
+  - `src/lib/harmony/theory.ts` — numeral parsing (accidentals, qualities,
+    modal context) and octave-preserving voice leading
+  - `src/lib/harmony/LoopEngine.ts` — Web Audio lookahead scheduler; timing
+    rides the audio clock so it cannot drift with React renders
+  - `src/hooks/useHarmonicLoop.ts`, `src/components/HarmonicLoop.tsx`
+  - Surfaced through `HarmonyCard` (feed, compare page, player drawer)
+  - 14 unit tests; see [docs/HARMONIC_LOOP.md](docs/HARMONIC_LOOP.md)
+
+### Added — Database provisioning
+- `scripts/build-sql-editor-parts.sh` and `scripts/build-schema-bundle.sh`
+  generate paste-ready SQL for the Supabase SQL Editor, for when the CLI has no
+  access to the target project. Includes `99-verify.sql` post-install checks.
+- [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md)
+- `vercel.json` — SPA rewrite and asset caching.
+
+### Fixed — Authentication
+- **"Database error saving new user"** — `handle_new_user()` ran three unguarded
+  inserts inside the signup transaction, so any single failure rolled back the
+  entire account creation. Inserts are now idempotent and individually
+  exception-handled; orphaned users are backfilled.
+  (`supabase/migrations/20260828120000_harden_signup_trigger.sql`)
+- **Signup reported success for unconfirmed accounts** — it told users they
+  could sign in when email confirmation left the account inert. Now reports the
+  confirmation requirement.
+- **Duplicate emails reported as new accounts** — Supabase returns success for
+  existing emails by design (anti-enumeration); detected via empty `identities`.
+- **Confirmation links 404'd on GitHub Pages** — `emailRedirectTo` ignored
+  `BASE_URL`.
+- **`navigate()` called during render** in `AuthPage`, which updates the router
+  mid-render and can loop.
+- Added missing `autoComplete` attributes and a reveal-toggle aria-label.
+
+### Fixed — Feed, player, hosting
+- Feed stage used `100vh`, clipped by mobile browser chrome; now `dvh` with a
+  min-height floor.
+- Three overlapping guest CTAs consolidated into one dismissible banner.
+- Player controls were 28px on mobile, below the 44px minimum touch target.
+- Desktop feed arrows moved `md:` → `lg:` to stop colliding on tablets.
+- Vite `base` is now resolved per host — `/clademusic/` on Pages, `/` on Vercel
+  (`VERCEL`), overridable with `VITE_BASE_PATH`. It was hardcoded, so every
+  asset would have 404'd on Vercel.
+
 ### Changed
+- Renamed "HarmonyFeed" → "CladeMusic" in the UI (feed header, auth pages,
+  share text).
 - **REBRAND TO CLADE** — Simplified brand name from "CladeAI" to "Clade"
   - New tagline: "Find Your Harmony"
   - Updated all documentation (README, docs, TASKS, CHANGELOG)

@@ -17,7 +17,7 @@ export function ShareSheet({ track, onShare }: ShareSheetProps) {
   const { toast } = useToast();
 
   const shareUrl = `${window.location.origin}/track/${track.id}`;
-  const shareText = `Check out "${track.title}" by ${track.artist} on HarmonyFeed! 🎵`;
+  const shareText = `Check out "${track.title}" by ${track.artist} on CladeMusic! 🎵`;
 
   const handleCopyLink = async () => {
     try {

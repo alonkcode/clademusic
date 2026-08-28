@@ -223,81 +223,69 @@ export default function FeedPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col touch-pan-y" ref={containerRef} data-feed>
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-strong safe-top">
+      <header className="fixed top-0 left-0 right-0 z-40 glass-strong safe-top border-b border-border/50">
         <ResponsiveContainer maxWidth="full">
-          <div className="flex items-center justify-between py-3">
-            <div className="flex items-center gap-3">
-              <h1 className="text-lg lg:text-xl font-bold gradient-text">HarmonyFeed</h1>
-            </div>
-            <div className="flex items-center gap-3 lg:gap-4">
-              <span className="text-xs lg:text-sm text-muted-foreground flex items-center gap-1">
-                {currentIndex + 1} / {tracks.length}
-              </span>
+          <div className="flex items-center justify-between gap-3 py-2.5 sm:py-3 min-w-0">
+            <h1 className="text-base sm:text-lg lg:text-xl font-bold gradient-text tracking-tight shrink-0">
+              CladeMusic
+            </h1>
+
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              {tracks.length > 0 && (
+                <span
+                  className="text-[11px] sm:text-xs text-muted-foreground font-mono tabular-nums shrink-0"
+                  aria-live="polite"
+                >
+                  {currentIndex + 1}
+                  <span className="opacity-50">/{tracks.length}</span>
+                </span>
+              )}
               {!user && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      enterGuestMode();
-                      setShowAuthPrompt(false);
-                    }}
-                    className="gap-1.5"
-                  >
-                    <LogIn className="w-4 h-4" />
-                    <span className="hidden sm:inline">Continue as guest</span>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => navigate('/auth')}
-                    className="gap-1.5"
-                  >
-                    <LogIn className="w-4 h-4" />
-                    <span className="hidden sm:inline">Sign in</span>
-                  </Button>
-                </div>
+                <Button
+                  size="sm"
+                  onClick={() => navigate('/auth')}
+                  className="gap-1.5 shrink-0"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span className="hidden sm:inline">Sign in</span>
+                </Button>
               )}
               <ProfileCircle />
             </div>
           </div>
         </ResponsiveContainer>
+
+        {/* Position through the feed - a thin, unobtrusive progress rail */}
+        {tracks.length > 1 && (
+          <div className="h-0.5 w-full bg-muted/40">
+            <motion.div
+              className="h-full bg-gradient-to-r from-primary to-accent"
+              animate={{ width: `${((currentIndex + 1) / tracks.length) * 100}%` }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+            />
+          </div>
+        )}
       </header>
 
-      {/* Guest demo CTA */}
-      {showAuthPrompt && !user && (
-        <div className="pt-16 px-4">
-          <div className="mx-auto max-w-3xl rounded-xl border border-border/60 bg-background/70 px-4 py-3 text-sm text-muted-foreground shadow-lg backdrop-blur">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-medium text-foreground">You’re exploring in guest mode.</p>
-                <p className="text-xs text-muted-foreground">Sign in to like, comment, follow, and save tracks. Playback and browsing stay open.</p>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => navigate('/auth')}>Sign in</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowAuthPrompt(false)}>Maybe later</Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Navigation arrows (desktop) */}
-      <div className="hidden md:flex fixed left-4 top-1/2 -translate-y-1/2 z-30 flex-col gap-2">
+      {/* Navigation arrows - desktop only; on touch the feed is swiped */}
+      <div className="hidden lg:flex fixed left-4 xl:left-6 top-1/2 -translate-y-1/2 z-30 flex-col gap-2">
         <Button
           variant="outline"
           size="icon"
-          className="glass"
+          className="glass rounded-full"
           onClick={goToPrevious}
           disabled={currentIndex === 0}
+          aria-label="Previous track"
         >
           <ChevronUp className="w-5 h-5" />
         </Button>
         <Button
           variant="outline"
           size="icon"
-          className="glass"
+          className="glass rounded-full"
           onClick={goToNext}
           disabled={currentIndex === tracks.length - 1}
+          aria-label="Next track"
         >
           <ChevronDown className="w-5 h-5" />
         </Button>
@@ -306,32 +294,40 @@ export default function FeedPage() {
       {/* Feed content */}
       <main className="flex-1 pt-16 pb-24">
         <ResponsiveContainer maxWidth="full" className="py-6">
-          {!user && (
-            <div className="mx-auto mb-4 max-w-lg lg:max-w-2xl rounded-lg border border-border/60 bg-background/70 px-4 py-3 shadow-md backdrop-blur">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-muted-foreground">
-                  Continue as guest to browse using the latest Last.fm scrobbles. You can switch to your account anytime.
+          {/* One guest prompt, not three - dismissible, and it never pushes the feed */}
+          {showAuthPrompt && !user && (
+            <div className="mx-auto mb-4 w-full max-w-lg lg:max-w-2xl rounded-xl border border-border/60 bg-background/70 px-4 py-3 shadow-md backdrop-blur">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">Exploring as a guest</p>
+                  <p className="text-xs text-muted-foreground">
+                    Browsing and playback stay open. Sign in to like, comment, follow and save.
+                  </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" onClick={() => navigate('/auth')}>
+                    Sign in
+                  </Button>
                   <Button
                     size="sm"
-                    variant="secondary"
+                    variant="outline"
                     onClick={() => {
                       enterGuestMode();
                       setShowAuthPrompt(false);
                     }}
                   >
-                    Continue as guest
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => navigate('/auth')}>
-                    Sign in
+                    Not now
                   </Button>
                 </div>
               </div>
             </div>
           )}
-          {/* Simple center-focused layout for all users */}
-          <div className="h-[calc(100vh-12rem)] max-w-lg mx-auto lg:max-w-2xl">
+          {/*
+            Center-focused stage. Uses dvh so the card is not cut off by mobile
+            browser chrome, with a min-height floor so short landscape viewports
+            scroll instead of squashing the card.
+          */}
+          <div className="mx-auto w-full max-w-lg lg:max-w-2xl min-h-[32rem] h-[calc(100dvh-13rem)]">
             <AnimatePresence mode="wait">
               {currentTrack && (
                 <motion.div
