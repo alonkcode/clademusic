@@ -19,7 +19,11 @@ outdir=supabase/sql-editor
 
 [ -f "$bundle" ] || { echo "Missing $bundle - run scripts/build-schema-bundle.sh first"; exit 1; }
 
-rm -rf "$outdir"; mkdir -p "$outdir"
+# Remove only the generated slices. 00-reset, 07-seed and 08-hotfix are NOT
+# slices of the bundle (they are hand-written or produced by other scripts), so
+# an unconditional rm -rf here would silently delete them.
+mkdir -p "$outdir"
+rm -f "$outdir"/0[1-6]-*.sql "$outdir"/99-verify.sql
 
 # Split points: the bundle section header naming each source file. A part ends
 # just before the named file's header. Chosen so each part is a coherent stage

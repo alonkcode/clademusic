@@ -66,13 +66,38 @@ SELECT tgname, tgenabled FROM pg_trigger
 WHERE tgname = 'on_auth_user_created' AND NOT tgisinternal;"
 
 echo "--- signup trigger smoke test ---"
+# Signing up as `postgres` proves almost nothing: a superuser bypasses RLS, so
+# any trigger that writes to an RLS-protected table appears to work and then
+# fails on a real signup. GoTrue runs as supabase_auth_admin, which does NOT
+# bypass RLS, so create that role and insert as it.
+docker exec "$CONTAINER" psql -U postgres -d clade -q -c "
+DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='supabase_auth_admin') THEN
+    CREATE ROLE supabase_auth_admin LOGIN PASSWORD 'x' NOINHERIT;
+  END IF;
+END \$\$;
+GRANT USAGE ON SCHEMA auth, public TO supabase_auth_admin;
+GRANT ALL ON ALL TABLES IN SCHEMA auth   TO supabase_auth_admin;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO supabase_auth_admin;"
+
+if docker exec -e PGPASSWORD=x "$CONTAINER" \
+     psql -U supabase_auth_admin -h 127.0.0.1 -d clade -q -v ON_ERROR_STOP=1 -c \
+     "INSERT INTO auth.users (email, raw_user_meta_data)
+      VALUES ('smoke@example.com', '{\"display_name\":\"Smoke Test\"}'::jsonb);" 2>/tmp/signup_err
+then
+  echo "signup OK (as supabase_auth_admin, RLS enforced)"
+else
+  echo "SIGNUP FAILED - this is the 'Database error saving new user' path:"
+  cat /tmp/signup_err
+  exit 1
+fi
+
 docker exec "$CONTAINER" psql -U postgres -d clade -c "
-INSERT INTO auth.users (email, raw_user_meta_data)
-VALUES ('smoke@example.com', '{\"display_name\":\"Smoke Test\"}'::jsonb);
 SELECT
-  (SELECT count(*) FROM public.profiles)     AS profiles,
-  (SELECT count(*) FROM public.user_roles)   AS roles,
-  (SELECT count(*) FROM public.user_credits) AS credits;"
+  (SELECT count(*) FROM public.profiles)        AS profiles,
+  (SELECT count(*) FROM public.user_roles)      AS roles,
+  (SELECT count(*) FROM public.user_credits)    AS credits,
+  (SELECT count(*) FROM public.playlists)       AS auto_playlists;"
 
 echo
 echo "Container '$CONTAINER' left running. Remove with: docker rm -f $CONTAINER"
