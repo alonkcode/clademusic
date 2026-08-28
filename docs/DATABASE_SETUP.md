@@ -85,6 +85,19 @@ only shows the last result set). What to look for:
 
 ## Seed
 
+Easiest: paste **`supabase/sql-editor/07-seed.sql`** into the SQL Editor. It
+needs no keys (SQL Editor statements run as the table owner, so RLS is not in
+the way), inserts 47 tracks with chord progressions plus their provider links
+and feed rows, and is safe to re-run — it upserts on `(external_id, provider)`.
+
+Regenerate it from the TypeScript seed data with:
+
+```bash
+node scripts/build-seed-sql.mjs
+```
+
+Alternatively, via PostgREST:
+
 ```bash
 export VITE_SUPABASE_URL=https://<ref>.supabase.co
 export SUPABASE_SERVICE_KEY=<service-role-key>

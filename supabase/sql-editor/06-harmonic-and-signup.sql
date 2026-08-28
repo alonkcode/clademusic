@@ -1,10 +1,13 @@
--- GENERATED - do not edit. Regenerate: bash scripts/build-sql-editor-parts.sh
--- PART 05-harmonic-and-telemetry: test runs, billing core, harmonic analysis, telemetry
--- Run parts in numeric order. Paste whole file into the SQL Editor.
+-- GENERATED - slice of supabase/schema_bundle.sql. Do not edit.
+-- PART 6/6: harmonic-and-signup
+-- Run parts 01..06 IN ORDER in the Supabase SQL Editor.
 
 BEGIN;
 
--- ---------- 202601240001_test_runs.sql ----------
+-- ============================================================
+-- 202601240001_test_runs.sql
+
+-- ============================================================
 -- Create test_runs table for logging CI and automated test suite results
 create table if not exists public.test_runs (
   id uuid primary key default gen_random_uuid(),
@@ -35,7 +38,7 @@ begin
 end;
 $$ language plpgsql;
 
-create trigger set_test_runs_updated_at
+create or replace trigger set_test_runs_updated_at
 before update on public.test_runs
 for each row execute procedure public.set_test_runs_updated_at();
 
@@ -78,7 +81,11 @@ returns table (
 $$;
 
 
--- ---------- 20260124_billing_core.sql ----------
+
+-- ============================================================
+-- 20260124_billing_core.sql
+
+-- ============================================================
 -- Billing & Subscriptions core schema (Stripe)
 -- Creates subscriptions, credits, billing_events
 
@@ -162,7 +169,11 @@ COMMENT ON TABLE public.credits IS 'Credit balance per user, resets on renewal';
 COMMENT ON TABLE public.billing_events IS 'Raw billing/provider events for audit/idempotency';
 
 
--- ---------- 20260125_harmonic_analysis_core.sql ----------
+
+-- ============================================================
+-- 20260125_harmonic_analysis_core.sql
+
+-- ============================================================
 -- Harmonic analysis core tables and indexes
 -- Created 2026-01-25
 
@@ -189,8 +200,8 @@ create table if not exists public.harmonic_fingerprints (
   is_provisional boolean not null default true,
   detected_key text,
   detected_mode text,
-  reuse_until timestamptz generated always as (analysis_timestamp + interval '90 days') stored,
-  reanalyze_after timestamptz generated always as (analysis_timestamp + interval '365 days') stored,
+  reuse_until timestamptz not null default (now() + interval '90 days'),
+  reanalyze_after timestamptz not null default (now() + interval '365 days'),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -245,17 +256,58 @@ end;
 $$ language plpgsql;
 
 drop trigger if exists trg_hf_updated_at on public.harmonic_fingerprints;
-create trigger trg_hf_updated_at
+create or replace trigger trg_hf_updated_at
 before update on public.harmonic_fingerprints
 for each row execute procedure public.set_updated_at();
 
 drop trigger if exists trg_aj_updated_at on public.analysis_jobs;
-create trigger trg_aj_updated_at
+create or replace trigger trg_aj_updated_at
 before update on public.analysis_jobs
 for each row execute procedure public.set_updated_at();
 
 
--- ---------- 20260204130000_playback_telemetry.sql ----------
+
+-- ============================================================
+-- bundle-fixes/10-harmonic-retention.sql
+
+-- ============================================================
+-- Replacement for the two generated columns on harmonic_fingerprints.
+--
+-- The migration declared:
+--   reuse_until     timestamptz GENERATED ALWAYS AS (analysis_timestamp + interval '90 days')  STORED
+--   reanalyze_after timestamptz GENERATED ALWAYS AS (analysis_timestamp + interval '365 days') STORED
+--
+-- Postgres rejects both with:
+--   ERROR: 42P17: generation expression is not immutable
+--
+-- `timestamptz + interval` is STABLE, not IMMUTABLE: adding an interval has to
+-- resolve against the session TimeZone setting (it is what makes DST arithmetic
+-- correct), and a STORED generated column may only use immutable expressions.
+--
+-- The build script rewrites those two lines into plain columns with defaults;
+-- this trigger keeps them correct when analysis_timestamp is set or changed,
+-- which is the behaviour the generated columns were meant to provide.
+
+CREATE OR REPLACE FUNCTION public.set_harmonic_retention()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.reuse_until     := COALESCE(NEW.analysis_timestamp, now()) + interval '90 days';
+  NEW.reanalyze_after := COALESCE(NEW.analysis_timestamp, now()) + interval '365 days';
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_hf_retention ON public.harmonic_fingerprints;
+CREATE TRIGGER trg_hf_retention
+  BEFORE INSERT OR UPDATE OF analysis_timestamp ON public.harmonic_fingerprints
+  FOR EACH ROW EXECUTE FUNCTION public.set_harmonic_retention();
+
+
+
+-- ============================================================
+-- 20260204130000_playback_telemetry.sql
+
+-- ============================================================
 -- Playback telemetry (controller-layer analytics)
 -- Created 2026-02-04
 --
@@ -309,6 +361,109 @@ create policy "Users can insert playback events"
   with check (auth.uid() = user_id or user_id is null);
 
 comment on table public.playback_events is 'Controller-layer playback analytics (intents, sessions, qualified plays). Not a royalty settlement source.';
+
+
+
+
+-- ============================================================
+-- 20260828120000_harden_signup_trigger.sql
+
+-- ============================================================
+-- Harden the signup trigger.
+--
+-- Problem: public.handle_new_user() runs AFTER INSERT ON auth.users and does
+-- three unguarded INSERTs. Because the trigger runs inside the same transaction
+-- as the auth.users insert, ANY failure in it (a duplicate row, a missing
+-- table, an RLS/permission surprise) rolls back the whole statement. GoTrue
+-- then reports the opaque "Database error saving new user" and registration is
+-- dead in the water with nothing useful in the client.
+--
+-- Fix, in two parts:
+--   1. Make every insert idempotent (ON CONFLICT DO NOTHING), so a retried or
+--      partially-applied signup cannot collide with itself.
+--   2. Catch any remaining exception and log a warning instead of propagating.
+--      Creating the account is the critical path; provisioning the profile rows
+--      is recoverable and must never be able to block it.
+--
+-- COALESCE on display_name also guards the case where email is NULL (phone or
+-- OAuth signups), which would otherwise yield a NULL display name.
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  BEGIN
+    INSERT INTO public.profiles (id, email, display_name)
+    VALUES (
+      NEW.id,
+      NEW.email,
+      COALESCE(
+        NULLIF(NEW.raw_user_meta_data->>'display_name', ''),
+        NULLIF(split_part(COALESCE(NEW.email, ''), '@', 1), ''),
+        'listener'
+      )
+    )
+    ON CONFLICT (id) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'handle_new_user: could not create profile for %: %', NEW.id, SQLERRM;
+  END;
+
+  BEGIN
+    INSERT INTO public.user_roles (user_id, role)
+    VALUES (NEW.id, 'user')
+    ON CONFLICT (user_id, role) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'handle_new_user: could not assign role for %: %', NEW.id, SQLERRM;
+  END;
+
+  BEGIN
+    INSERT INTO public.user_credits (user_id)
+    VALUES (NEW.id)
+    ON CONFLICT (user_id) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'handle_new_user: could not create credits for %: %', NEW.id, SQLERRM;
+  END;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Recreate the trigger idempotently so this migration is safe to re-run.
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Backfill anything the old, fragile trigger dropped on the floor.
+INSERT INTO public.profiles (id, email, display_name)
+SELECT
+  u.id,
+  u.email,
+  COALESCE(
+    NULLIF(u.raw_user_meta_data->>'display_name', ''),
+    NULLIF(split_part(COALESCE(u.email, ''), '@', 1), ''),
+    'listener'
+  )
+FROM auth.users u
+LEFT JOIN public.profiles p ON p.id = u.id
+WHERE p.id IS NULL
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.user_roles (user_id, role)
+SELECT u.id, 'user'
+FROM auth.users u
+LEFT JOIN public.user_roles r ON r.user_id = u.id
+WHERE r.user_id IS NULL
+ON CONFLICT (user_id, role) DO NOTHING;
+
+INSERT INTO public.user_credits (user_id)
+SELECT u.id
+FROM auth.users u
+LEFT JOIN public.user_credits c ON c.user_id = u.id
+WHERE c.user_id IS NULL
+ON CONFLICT (user_id) DO NOTHING;
 
 
 

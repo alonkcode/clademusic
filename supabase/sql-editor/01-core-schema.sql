@@ -1,10 +1,23 @@
--- GENERATED - do not edit. Regenerate: bash scripts/build-sql-editor-parts.sh
--- PART 01-core-schema: profiles, roles, credits, tracks, base RLS
--- Run parts in numeric order. Paste whole file into the SQL Editor.
+-- GENERATED - slice of supabase/schema_bundle.sql. Do not edit.
+-- PART 1/6: core-schema
+-- Run parts 01..06 IN ORDER in the Supabase SQL Editor.
 
 BEGIN;
+-- GENERATED FILE - do not edit by hand.
+-- Source: supabase/migrations/*.sql (dependency order, not filename order)
+-- Regenerate: bash scripts/build-schema-bundle.sh
+-- Verify:     bash scripts/test-schema-bundle.sh
+--
+-- Apply to a FRESH project via the Supabase SQL Editor.
+-- Wrapped in a transaction: it either fully applies or fully rolls back.
 
--- ---------- 20260114211348_2a4485e7-9d33-4c9d-9ea8-0420e1ad4044.sql ----------
+
+
+
+-- ============================================================
+-- 20260114211348_2a4485e7-9d33-4c9d-9ea8-0420e1ad4044.sql
+
+-- ============================================================
 -- Create app roles enum
 CREATE TYPE public.app_role AS ENUM ('user', 'admin', 'moderator');
 
@@ -212,7 +225,7 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER on_auth_user_created
+CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
@@ -227,15 +240,19 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER update_profiles_updated_at
+CREATE OR REPLACE TRIGGER update_profiles_updated_at
   BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
-CREATE TRIGGER update_tracks_updated_at
+CREATE OR REPLACE TRIGGER update_tracks_updated_at
   BEFORE UPDATE ON public.tracks
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
--- ---------- 20260114211408_1be47900-6c38-4adb-b34e-5dfe41a998e4.sql ----------
+
+-- ============================================================
+-- 20260114211408_1be47900-6c38-4adb-b34e-5dfe41a998e4.sql
+
+-- ============================================================
 -- Fix function search path for update_updated_at
 CREATE OR REPLACE FUNCTION public.update_updated_at()
 RETURNS TRIGGER
@@ -249,7 +266,11 @@ BEGIN
 END;
 $$;
 
--- ---------- 20260115085704_58686868-f4a3-4d8f-9b0b-766b1d0430fc.sql ----------
+
+-- ============================================================
+-- 20260115085704_58686868-f4a3-4d8f-9b0b-766b1d0430fc.sql
+
+-- ============================================================
 -- Extend tracks table with provider link columns and ISRC
 ALTER TABLE public.tracks 
 ADD COLUMN IF NOT EXISTS isrc text,
@@ -350,7 +371,11 @@ FOR UPDATE
 USING (auth.uid() = id)
 WITH CHECK (auth.uid() = id);
 
--- ---------- 20260115092130_unified_music_schema.sql ----------
+
+-- ============================================================
+-- 20260115092130_unified_music_schema.sql
+
+-- ============================================================
 -- Unified Music Search Schema Migration
 -- This migration adds tables and updates existing schema for the unified music search functionality
 
@@ -507,7 +532,7 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER on_play_event_update_popularity
+CREATE OR REPLACE TRIGGER on_play_event_update_popularity
   AFTER INSERT ON public.play_events
   FOR EACH ROW EXECUTE FUNCTION public.update_track_popularity();
 
@@ -523,6 +548,7 @@ CHECK (provider IN ('spotify', 'apple_music', 'deezer', 'soundcloud', 'youtube',
 CREATE INDEX IF NOT EXISTS idx_tracks_isrc_artists ON public.tracks(isrc, artists) WHERE isrc IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tracks_title_artist ON public.tracks USING gin(to_tsvector('english', title || ' ' || COALESCE(artist, '')));
 CREATE INDEX IF NOT EXISTS idx_tracks_popularity ON public.tracks(popularity_score DESC);
+
 
 
 COMMIT;
