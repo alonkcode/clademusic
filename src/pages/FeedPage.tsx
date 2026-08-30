@@ -225,7 +225,13 @@ export default function FeedPage() {
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-40 glass-strong safe-top border-b border-border/50">
         <ResponsiveContainer maxWidth="full">
-          <div className="flex items-center justify-between gap-3 py-2.5 sm:py-3 min-w-0">
+          {/*
+            pl-14/16 clears BottomNav's floating hamburger button, which is
+            fixed at top-left (p-3/p-4 + a 40px button) independently of this
+            header. Without this offset the brand name renders directly under
+            that button and is effectively invisible.
+          */}
+          <div className="flex items-center justify-between gap-3 py-2.5 sm:py-3 pl-14 sm:pl-16 min-w-0">
             <h1 className="text-base sm:text-lg lg:text-xl font-bold gradient-text tracking-tight shrink-0">
               CladeMusic
             </h1>
