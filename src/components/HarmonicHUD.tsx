@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, Sliders, Radio } from 'lucide-react';
+import { Play, Pause, Sliders, Radio, AudioLines, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSectionSync } from '@/hooks/useSectionSync';
 import { useHarmonicLoop } from '@/hooks/useHarmonicLoop';
+import { useLiveChordDetection } from '@/hooks/useLiveChordDetection';
 import { chordDisplayName, parseRomanChord, pitchClassName, PITCH_CLASSES } from '@/lib/harmony/theory';
 import { ROMAN_NUMERALS } from '@/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -55,6 +56,7 @@ export function HarmonicHUD({
   className,
 }: HarmonicHUDProps) {
   const [controlsOpen, setControlsOpen] = useState(false);
+  const live = useLiveChordDetection();
 
   const sync = useSectionSync({
     trackId,
@@ -129,33 +131,59 @@ export function HarmonicHUD({
         </div>
       )}
 
-      {/* Dominant center readout */}
+      {/* Dominant center readout. When live audio detection is capturing, its
+          result overrides the analyzed display - the whole point is to show
+          what's genuinely being heard right now. */}
       <div className="flex flex-col items-center justify-center py-4 sm:py-5 px-8 sm:px-10">
         <AnimatePresence mode="wait">
-          <motion.div
-            key={`${current?.source}-${sync.activeSectionIndex}`}
-            initial={{ opacity: 0, scale: 0.85, y: 6 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 24 }}
-            className="text-center"
-          >
-            <span
-              className="block font-extrabold leading-none tracking-tight"
-              style={{
-                fontSize: 'clamp(2.25rem, 11vw, 3.5rem)',
-                color: current ? `hsl(var(${CHORD_VAR[current.base] ?? '--chord-i'}))` : undefined,
-              }}
+          {live.status === 'capturing' ? (
+            <motion.div
+              key={`live-${live.chord?.root}-${live.chord?.quality}`}
+              initial={{ opacity: 0, scale: 0.85, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+              className="text-center"
             >
-              {current ? chordDisplayName(current, tonic) : '—'}
-            </span>
-            <span className="block text-[11px] sm:text-xs text-muted-foreground font-mono mt-0.5">
-              {current ? ROMAN_NUMERALS[current.source as keyof typeof ROMAN_NUMERALS]?.label ?? current.source : ''}
-              {sync.activeSection && (
-                <span className="opacity-70"> · {sync.activeSection.label || sync.activeSection.type}</span>
-              )}
-            </span>
-          </motion.div>
+              <span
+                className="block font-extrabold leading-none tracking-tight"
+                style={{ fontSize: 'clamp(2.25rem, 11vw, 3.5rem)' }}
+              >
+                {live.chord
+                  ? `${pitchClassName(live.chord.root)}${live.chord.quality === 'minor' ? 'm' : ''}`
+                  : '…'}
+              </span>
+              <span className="flex items-center justify-center gap-1 text-[11px] sm:text-xs text-primary font-medium mt-0.5">
+                <AudioLines className="w-3 h-3 animate-pulse" />
+                live estimate from audio
+              </span>
+            </motion.div>
+          ) : (
+            <motion.div
+              key={`${current?.source}-${sync.activeSectionIndex}`}
+              initial={{ opacity: 0, scale: 0.85, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+              className="text-center"
+            >
+              <span
+                className="block font-extrabold leading-none tracking-tight"
+                style={{
+                  fontSize: 'clamp(2.25rem, 11vw, 3.5rem)',
+                  color: current ? `hsl(var(${CHORD_VAR[current.base] ?? '--chord-i'}))` : undefined,
+                }}
+              >
+                {current ? chordDisplayName(current, tonic) : '—'}
+              </span>
+              <span className="block text-[11px] sm:text-xs text-muted-foreground font-mono mt-0.5">
+                {current ? ROMAN_NUMERALS[current.source as keyof typeof ROMAN_NUMERALS]?.label ?? current.source : ''}
+                {sync.activeSection && (
+                  <span className="opacity-70"> · {sync.activeSection.label || sync.activeSection.type}</span>
+                )}
+              </span>
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* Full progression, small, current one highlighted */}
@@ -181,29 +209,68 @@ export function HarmonicHUD({
       </div>
 
       {/* Small edge controls, bottom */}
-      <div className="flex items-center justify-between px-2.5 sm:px-3 pb-2 sm:pb-2.5">
-        {sync.isLiveSynced ? (
-          <span className="text-[10px] text-muted-foreground">synced to playback</span>
-        ) : (
-          <button
-            type="button"
-            onClick={loop.toggle}
-            aria-label={loop.isPlaying ? 'Stop preview' : 'Preview this section'}
-            className={cn(
-              'inline-flex items-center justify-center rounded-full transition-colors',
-              'w-8 h-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-              loop.isPlaying ? 'bg-primary text-primary-foreground' : 'bg-primary/15 text-primary hover:bg-primary/25'
-            )}
-          >
-            {loop.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-[1px]" />}
-          </button>
-        )}
+      <div className="flex items-center justify-between gap-1 px-2.5 sm:px-3 pb-2 sm:pb-2.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {sync.isLiveSynced ? (
+            <span className="text-[10px] text-muted-foreground truncate">synced to playback</span>
+          ) : (
+            <button
+              type="button"
+              onClick={loop.toggle}
+              disabled={live.status === 'capturing'}
+              aria-label={loop.isPlaying ? 'Stop preview' : 'Preview this section'}
+              title={live.status === 'capturing' ? 'Stop live detection first' : undefined}
+              className={cn(
+                'inline-flex items-center justify-center rounded-full transition-colors shrink-0',
+                'w-8 h-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                'disabled:opacity-30 disabled:cursor-not-allowed',
+                loop.isPlaying ? 'bg-primary text-primary-foreground' : 'bg-primary/15 text-primary hover:bg-primary/25'
+              )}
+            >
+              {loop.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-[1px]" />}
+            </button>
+          )}
+
+          {/* Live audio detection - genuine DSP over whatever the browser lets
+              the user share, most often this same tab. Desktop Chrome/Edge
+              only; hidden rather than shown-disabled everywhere else, since a
+              permanently-dead button reads as broken, not as unsupported. */}
+          {live.supported && (
+            <button
+              type="button"
+              onClick={live.status === 'capturing' ? live.stop : live.start}
+              aria-label={live.status === 'capturing' ? 'Stop live audio detection' : 'Detect chords from audio'}
+              title="Detect chords from whatever audio you share (experimental)"
+              className={cn(
+                'inline-flex items-center justify-center rounded-full transition-colors shrink-0',
+                'w-8 h-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                live.status === 'capturing'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted/60 text-muted-foreground hover:bg-muted'
+              )}
+            >
+              {live.status === 'requesting' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : live.status === 'capturing' ? (
+                <X className="w-3.5 h-3.5" />
+              ) : (
+                <AudioLines className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+
+          {live.errorMessage && (
+            <span className="text-[10px] text-destructive truncate" role="alert">
+              {live.errorMessage}
+            </span>
+          )}
+        </div>
 
         <button
           type="button"
           onClick={() => setControlsOpen(true)}
           aria-label="Key and tempo controls"
-          className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary min-h-[32px]"
+          className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary min-h-[32px] shrink-0"
         >
           <Sliders className="w-3 h-3" />
           {pitchClassName(tonic)} {detectedMode === 'minor' ? 'min' : 'maj'}
