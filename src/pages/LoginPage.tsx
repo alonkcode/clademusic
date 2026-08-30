@@ -434,28 +434,6 @@ export default function LoginPage() {
                 )}
                 Continue with Google
               </Button>
-
-              {/*
-                Other providers (Apple, Spotify, ...): commented out rather
-                than shown, disabled or not, until each is actually wired up.
-                Bring one back by uncommenting it here once its sign-in flow
-                works end-to-end - same pattern as Google above.
-
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  {['Apple', 'Spotify'].map((provider) => (
-                    <Button
-                      key={provider}
-                      type="button"
-                      variant="outline"
-                      disabled
-                      title="Coming soon"
-                      className="w-full justify-center opacity-50"
-                    >
-                      {provider} (soon)
-                    </Button>
-                  ))}
-                </div>
-              */}
             </form>
           )}
 
