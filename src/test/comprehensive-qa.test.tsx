@@ -147,30 +147,36 @@ describe('Mobile Player QA', () => {
   describe('EmbeddedPlayerDrawer', () => {
     it('should render player when open', () => {
       render(<EmbeddedPlayerDrawer />, { wrapper });
-      
-      expect(screen.getAllByLabelText(/full screen/i).length).toBeGreaterThan(0);
+
+      // Opens docked/compact by default (no video overlay), so play/pause -
+      // present in every state - is the reliable thing to check for, rather
+      // than the fullscreen control, which only renders once video is shown.
+      expect(screen.getAllByLabelText(/^(play|pause)$/i).length).toBeGreaterThan(0);
     });
 
-    it('should show minimize button on mobile', () => {
+    it('should show a hide button on mobile', () => {
       render(<EmbeddedPlayerDrawer />, { wrapper });
-      
-      const minimizeButton = screen.queryByLabelText(/minimize to mini player/i);
-      expect(minimizeButton).toBeInTheDocument();
+
+      const hideButton = screen.queryByLabelText(/hide player/i);
+      expect(hideButton).toBeInTheDocument();
     });
 
-    it('should not overlap with TikTok buttons on mobile', () => {
+    it('docks compactly rather than overlapping the feed header/content', () => {
       const { container } = render(<EmbeddedPlayerDrawer />, { wrapper });
       const player = container.querySelector('[data-player="universal"]');
-      // Keep clear of the top bar on mobile.
-      expect(player).toHaveClass('top-16');
-      expect(player).toHaveClass('left-1/2');
+      // Opens as the small docked bar (top-0/left-0 anchor plus a bottom-right
+      // pixel offset applied via transform), not the old top-16 centered video
+      // overlay that sat directly over the feed.
+      expect(player).toHaveClass('top-0');
+      expect(player).toHaveClass('left-0');
+      expect(player).not.toHaveClass('top-16');
     });
 
     it('should allow dragging when minimized', () => {
       render(<EmbeddedPlayerDrawer />, { wrapper });
-      
-      const minimizeButton = screen.getByLabelText(/minimize to mini player/i);
-      fireEvent.click(minimizeButton);
+
+      const hideButton = screen.getByLabelText(/hide player/i);
+      fireEvent.click(hideButton);
 
       expect(mockPlayerContext.collapseToMini).toHaveBeenCalled();
     });
@@ -196,9 +202,10 @@ describe('Mobile Player QA', () => {
 
     it('should be compact on mobile', () => {
       const { container } = render(<EmbeddedPlayerDrawer />, { wrapper });
-      
-      // Check for mobile-specific classes
-      expect(container.querySelector('.w-\\[92vw\\]')).toBeInTheDocument();
+
+      // Opens as the compact docked bar by default - the 92vw width applies
+      // only to the expanded video view, which is no longer the default.
+      expect(container.querySelector('.w-\\[min\\(460px\\,90vw\\)\\]')).toBeInTheDocument();
     });
   });
 
@@ -472,8 +479,8 @@ describe('Accessibility QA', () => {
   it('should have proper ARIA labels', () => {
     render(<EmbeddedPlayerDrawer />, { wrapper });
     
-    expect(screen.getAllByLabelText(/full screen/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText(/minimize to mini player/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText(/^(play|pause)$/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText(/hide player/i).length).toBeGreaterThan(0);
   });
 
   it('should support keyboard navigation', () => {

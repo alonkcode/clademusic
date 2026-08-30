@@ -268,7 +268,13 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     // place bottom-right with margin
     return { x: window.innerWidth / 2 - miniMargin - 130, y: -(window.innerHeight / 2 - miniMargin - 90) };
   }, [miniMargin]);
-  const [isCompact, setIsCompact] = useState(false);
+  // Defaults to the compact, bottom-docked bar rather than the big video
+  // view. compactPosition already resolves to bottom-right (see
+  // getDefaultCompactPosition below); starting expanded instead put a
+  // 720px-wide video overlay top-center on every track open, directly over
+  // the feed - the "getting in the way" bug. Expanding to video stays an
+  // explicit, deliberate action (the "Show video" button).
+  const [isCompact, setIsCompact] = useState(true);
   const getDefaultCompactPosition = useCallback(() => {
     if (typeof window === 'undefined') return { x: 0, y: 0 };
     const margin = 12;
@@ -314,7 +320,10 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   );
 
   const restoreToDocked = useCallback(() => {
-    setIsCompact(false);
+    // Restore to the small docked bar, not the big video view - "hide" and
+    // "redisplay" should be symmetric. Video stays reachable via its own
+    // explicit "Show video" action once redisplayed.
+    setIsCompact(true);
     setMainPosition({ x: 0, y: 0 });
     restoreFromMini();
   }, [restoreFromMini]);
@@ -793,11 +802,14 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             ? 'top-0 left-1/2 -translate-x-1/2 w-[min(720px,calc(100vw-32px))]'
             : isCompact
               ? 'top-0 left-0 translate-x-0 w-[min(460px,90vw)]'
-              : 'top-16 left-1/2 -translate-x-1/2 w-[92vw] max-w-[720px]'
+              // Docked near the bottom rather than top-center: expanding to
+              // watch the video stays available, but even then the player no
+              // longer sits directly over the feed header/content.
+              : 'bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 w-[92vw] max-w-[720px] max-h-[calc(100dvh-6rem)] overflow-y-auto'
         }`}
         style={{
           scale: isMini ? 0.9 : isCompact ? 0.7 : playerScale,
-          transformOrigin: isMini ? 'center' : isCompact ? 'top left' : 'top center',
+          transformOrigin: isMini ? 'center' : isCompact ? 'top left' : 'bottom center',
           x: isMini ? -2000 : isCompact ? compactPosition.x : mainPosition.x,
           y: isMini ? -2000 : isCompact ? compactPosition.y : mainPosition.y,
           visibility: isMini ? 'hidden' : 'visible',
@@ -889,27 +901,34 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   <ChevronDown className="h-3 w-3 md:h-4 md:w-4" />
                 </button>
               )}
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                className="inline-flex h-9 w-9 md:h-9 md:w-9 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
-                aria-label={isCinema ? 'Exit full screen' : 'Enter full screen'}
-                title={isCinema ? 'Exit full screen' : 'Enter full screen'}
-              >
-                <Maximize2 className="h-3 w-3 md:h-4 md:w-4" />
-              </button>
+              {/* Nothing to fullscreen while the video panel itself is hidden
+                  in compact mode - decluttering the docked bar's icon row. */}
+              {!isCompact && (
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="inline-flex h-9 w-9 md:h-9 md:w-9 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                  aria-label={isCinema ? 'Exit full screen' : 'Enter full screen'}
+                  title={isCinema ? 'Exit full screen' : 'Enter full screen'}
+                >
+                  <Maximize2 className="h-3 w-3 md:h-4 md:w-4" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
-                  // Collapse to mini but keep playback alive.
-                  setIsCompact(false);
+                  // Hide to the small mini pill, but keep playback alive.
+                  // Leaves the docked bar as the state underneath, so if
+                  // anything renders mid-transition it's the small bar, not
+                  // the big video view.
+                  setIsCompact(true);
                   const targetPos = clampMiniPosition(getDefaultMiniPosition());
                   setMiniPosition(targetPos);
                   collapseToMini();
                 }}
                 className="inline-flex h-9 w-9 md:h-9 md:w-9 touch-manipulation items-center justify-center rounded-full border border-border/70 bg-muted/60 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
-                aria-label="Minimize to mini player"
-                title="Minimize to mini player"
+                aria-label="Hide player"
+                title="Hide player"
               >
                 <X className="h-3 w-3 md:h-4 md:w-4" />
               </button>
@@ -1226,7 +1245,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 type="button"
                 onClick={restoreToDocked}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-                aria-label="Restore full player"
+                aria-label="Show player"
               >
                 <ChevronUp className="h-4 w-4" />
               </button>
