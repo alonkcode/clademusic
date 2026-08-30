@@ -18,6 +18,7 @@ import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
 import { ResponsiveContainer, ResponsiveGrid } from '@/components/layout/ResponsiveLayout';
 import { QuickStreamButtons } from '@/components/QuickStreamButtons';
 import { ProfileCircle } from '@/components/shared';
+import { parseProgressionQuery, progressionContainsSequence } from '@/lib/harmony/progressionSearch';
 import { 
   getSearchHistory, 
   addToSearchHistory, 
@@ -165,19 +166,18 @@ export default function SearchPage() {
           t.genre_description?.toLowerCase().includes(lowerQuery)
       );
     } else {
-      // Chord progression search
-      const chords = query
-        .toUpperCase()
-        .split(/[-–—,\s]+/)
-        .map((c) => c.trim())
-        .filter(Boolean);
-      
+      // Chord progression search. Dashes are optional ("vi I IV V" works the
+      // same as "vi-IV-I-V"), and this matches a partial, in-order run of the
+      // progression, not just "contains these chords somewhere in any order" -
+      // "V I" and "I V" mean different things and shouldn't match the same
+      // tracks. Case is preserved rather than folded: "vi" and "VI" are
+      // different chords (minor vs major), so normalizing case away would
+      // make the search unable to tell them apart.
+      const chords = parseProgressionQuery(query);
+
       filtered = seedTracks.filter((t) => {
-        if (!t.progression_roman) return false;
-        const progression = t.progression_roman.map((c) => c.toUpperCase());
-        return chords.length === 0 || chords.every((chord) => 
-          progression.includes(chord) || progression.includes(chord.toLowerCase())
-        );
+        if (!t.progression_roman || t.progression_roman.length === 0) return false;
+        return progressionContainsSequence(t.progression_roman, chords);
       });
     }
 
@@ -311,7 +311,7 @@ export default function SearchPage() {
               placeholder={
                 searchMode === 'song'
                   ? 'Search songs or artists...'
-                  : 'e.g., vi-IV-I-V or I-V-vi-IV'
+                  : 'e.g., vi I IV V or a partial run like V vi'
               }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -563,7 +563,7 @@ export default function SearchPage() {
                       Searched {seedTracks.length} tracks with chord progressions
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Try searching for artist names like "weeknd" or chord progressions like "vi-IV-I-V"
+                      Try searching for artist names like "weeknd" or chord progressions like "vi I IV V" (dashes optional, partial runs match too)
                     </p>
                   </>
                 )}
