@@ -1008,13 +1008,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 onPointerDownCapture={(e) => e.stopPropagation()}
                 onMouseDownCapture={(e) => e.stopPropagation()}
                 onTouchStartCapture={(e) => e.stopPropagation()}
+                // One commit point, on release - not one per drag tick. Every
+                // intermediate `input` event during a drag used to call
+                // commitSeek too, and onPointerUp/onMouseUp/onTouchEnd/onClick
+                // all fired a second (or third, or fourth) commit for the same
+                // physical release, so a single drag issued a burst of
+                // overlapping seeks to the embedded player - each one
+                // interrupting the last, which is what made this feel
+                // laggy/uncontrollable rather than a clean single seek.
                 onChange={(e) => {
                   if (!canSeekInEmbed) return;
                   const nextSec = Number(e.target.value);
                   if (!Number.isFinite(nextSec)) return;
-                  setScrubSec(nextSec);
-                  // Commit immediately so single taps and drag updates seek right away
-                  commitSeek(nextSec);
+                  setScrubSec(nextSec); // visual feedback only while dragging
                 }}
                 onPointerDown={(e) => {
                   if (!canSeekInEmbed) return;
@@ -1032,22 +1038,10 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   commitSeek(nextSec);
                   setIsScrubbing(false);
                 }}
-                onMouseUp={(e) => {
+                onKeyUp={(e) => {
+                  // Arrow-key/Home/End seeking generates no pointer events, so
+                  // this is the commit path for keyboard users.
                   if (!canSeekInEmbed) return;
-                  const target = e.currentTarget as HTMLInputElement;
-                  const nextSec = Number(target.value);
-                  if (!Number.isFinite(nextSec)) return;
-                  commitSeek(nextSec);
-                  setIsScrubbing(false);
-                }}
-                onTouchEnd={(e) => {
-                  const target = e.currentTarget as HTMLInputElement;
-                  const nextSec = Number(target.value);
-                  if (!Number.isFinite(nextSec)) return;
-                  commitSeek(nextSec);
-                  setIsScrubbing(false);
-                }}
-                onClick={(e) => {
                   const target = e.currentTarget as HTMLInputElement;
                   const nextSec = Number(target.value);
                   if (!Number.isFinite(nextSec)) return;
