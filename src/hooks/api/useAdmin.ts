@@ -9,7 +9,10 @@ export function useIsAdmin() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return false;
 
-      const { data, error } = await supabase.rpc('is_admin', { user_id: user.id });
+      // is_admin() was never a real function - only has_role(_user_id, _role)
+      // exists in the schema (used by RLS policies throughout), which is
+      // exactly this check. Calling a nonexistent RPC 404'd on every load.
+      const { data, error } = await supabase.rpc('has_role', { _user_id: user.id, _role: 'admin' });
       if (error) {
         console.error('Error checking admin status:', error);
         return false;
