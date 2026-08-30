@@ -73,7 +73,10 @@ describe('LoginPage', () => {
     );
 
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'user@example.com' } });
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'password123' } });
+    // Exact match: /password/i alone now also matches the show/hide toggle
+    // button's aria-label ("Show password"/"Hide password"), added for
+    // accessibility alongside the actual password field.
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'password123' } });
 
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 

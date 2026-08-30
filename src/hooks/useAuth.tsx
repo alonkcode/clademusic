@@ -21,6 +21,8 @@ export interface SignUpResult {
 interface AuthContextType extends AuthState {
   signUp: (email: string, password: string, displayName?: string) => Promise<SignUpResult>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signInWithGoogle: () => Promise<{ error: Error | null }>;
+  sendPasswordReset: (email: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   enterGuestMode: () => void;
 }
@@ -145,6 +147,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   };
 
+  const signInWithGoogle = async () => {
+    const base = import.meta.env.BASE_URL || '/';
+    const redirectTo = `${window.location.origin}${base.endsWith('/') ? base : `${base}/`}`;
+
+    // Exiting guest mode on sign-in intent, same as signIn/signUp above.
+    localStorage.removeItem('clade-guest-mode');
+    setGuestMode(false);
+
+    // Full-page redirect to Google, then back to redirectTo with a session -
+    // there is no local error to return here; supabase-js navigates away
+    // immediately on success. A rejected promise means the redirect itself
+    // never started (e.g. the Google provider isn't enabled in Supabase).
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo },
+    });
+    return { error: error as Error | null };
+  };
+
+  const sendPasswordReset = async (email: string) => {
+    const base = import.meta.env.BASE_URL || '/';
+    const redirectTo = `${window.location.origin}${base.endsWith('/') ? base : `${base}/`}reset-password`;
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    return { error: error as Error | null };
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -166,7 +195,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const value = useMemo(
-    () => ({ user, session, loading, accessToken, guestMode, signUp, signIn, signOut, enterGuestMode }),
+    () => ({
+      user,
+      session,
+      loading,
+      accessToken,
+      guestMode,
+      signUp,
+      signIn,
+      signInWithGoogle,
+      sendPasswordReset,
+      signOut,
+      enterGuestMode,
+    }),
     [user, session, loading, accessToken, guestMode]
   );
 

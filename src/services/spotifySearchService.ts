@@ -9,6 +9,7 @@ import { Track } from '@/types';
 import { getValidAccessToken } from './spotifyAuthService';
 import type { SpotifyApiTrack } from './spotifyTrackMapper';
 import { spotifyApiTrackToTrack } from './spotifyTrackMapper';
+import { supabase } from '@/integrations/supabase/client';
 
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 
@@ -119,5 +120,40 @@ export async function getSpotifyTrack(
   } catch (error) {
     console.error('Error fetching Spotify track:', error);
     return null;
+  }
+}
+
+/**
+ * Search Spotify's catalog for anyone - no personal Spotify connection
+ * required. Unlike `searchSpotify` above, this does not use the caller's own
+ * OAuth token; it calls the search-spotify Edge Function, which authenticates
+ * to Spotify at the app level (Client Credentials flow). This is what
+ * SearchPage uses for the general search box, so results are not gated behind
+ * "connect your Spotify account first."
+ */
+export async function searchSpotifyPublic(
+  query: string,
+  limit = 20,
+  offset = 0
+): Promise<{ tracks: Track[]; total: number }> {
+  if (!query.trim()) return { tracks: [], total: 0 };
+
+  try {
+    const { data, error } = await supabase.functions.invoke('search-spotify', {
+      body: { query, limit, offset },
+    });
+
+    if (error || !data?.tracks) {
+      if (error) console.error('Public Spotify search failed:', error);
+      return { tracks: [], total: 0 };
+    }
+
+    return {
+      total: data.total ?? 0,
+      tracks: (data.tracks as SpotifyApiTrack[]).map((track) => spotifyApiTrackToTrack(track)),
+    };
+  } catch (error) {
+    console.error('Error calling search-spotify function:', error);
+    return { tracks: [], total: 0 };
   }
 }

@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { navigateToTrack } from '@/lib/navigation';
 import { openProviderLink, getProviderLinks } from '@/lib/providers';
 import { useAuth } from '@/hooks/useAuth';
-import { searchSpotify } from '@/services/spotifySearchService';
+import { searchSpotify, searchSpotifyPublic } from '@/services/spotifySearchService';
 import { searchYouTubeVideos } from '@/services/youtubeSearchService';
 import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
 import { ResponsiveContainer, ResponsiveGrid } from '@/components/layout/ResponsiveLayout';
@@ -54,9 +54,18 @@ export default function SearchPage() {
     console.log('📦 First track:', seedTracks[0]);
   }, []);
 
-  // Debounced Spotify search
+  // Debounced Spotify search.
+  //
+  // Catalog search does not require the user's own Spotify account - it needs
+  // Spotify's Client Credentials flow, which search-spotify performs
+  // server-side. Previously this whole branch was gated behind `user &&
+  // isSpotifyConnected`, so guests and any signed-in user who had not gone
+  // through Spotify's OAuth connect flow got zero Spotify results, with no
+  // indication why. Now: use the user's own token when they've connected
+  // Spotify (matches their exact catalog/market access), and the public
+  // search otherwise - Spotify results appear either way.
   useEffect(() => {
-    if (searchMode !== 'song' || !query.trim() || !user || !isSpotifyConnected) {
+    if (searchMode !== 'song' || !query.trim()) {
       setSpotifyResults([]);
       setSpotifyTotal(0);
       setSpotifyOffset(0);
@@ -67,7 +76,10 @@ export default function SearchPage() {
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const { tracks, total } = await searchSpotify(user.id, query, 50, 0);
+        const { tracks, total } =
+          user && isSpotifyConnected
+            ? await searchSpotify(user.id, query, 50, 0)
+            : await searchSpotifyPublic(query, 50, 0);
         setSpotifyResults(tracks);
         setSpotifyTotal(total);
         setSpotifyOffset(tracks.length);
@@ -85,10 +97,12 @@ export default function SearchPage() {
   }, [query, searchMode, user, isSpotifyConnected]);
 
   const loadMoreSpotify = React.useCallback(async () => {
-    if (!user) return;
     setIsSearching(true);
     try {
-      const { tracks, total } = await searchSpotify(user.id, query, 50, spotifyOffset);
+      const { tracks, total } =
+        user && isSpotifyConnected
+          ? await searchSpotify(user.id, query, 50, spotifyOffset)
+          : await searchSpotifyPublic(query, 50, spotifyOffset);
       setSpotifyResults((prev) => [...prev, ...tracks]);
       setSpotifyTotal(total);
       setSpotifyOffset((prev) => prev + tracks.length);
@@ -97,12 +111,15 @@ export default function SearchPage() {
     } finally {
       setIsSearching(false);
     }
-  }, [user, query, spotifyOffset]);
+  }, [user, isSpotifyConnected, query, spotifyOffset]);
 
-  // YouTube search fallback when Spotify is not connected
+  // YouTube search - runs alongside Spotify (not only as a fallback), so a
+  // track only on YouTube still turns up. Spotify is rendered first in the
+  // results list below, which is the app's provider preference: Spotify
+  // first, YouTube as well/instead when Spotify doesn't have it.
   useEffect(() => {
     let cancelled = false;
-    if (searchMode !== 'song' || !query.trim() || isSpotifyConnected) {
+    if (searchMode !== 'song' || !query.trim()) {
       setYoutubeResults([]);
       return;
     }
