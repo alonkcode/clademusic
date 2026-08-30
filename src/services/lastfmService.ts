@@ -107,7 +107,7 @@ export interface LastFmStats {
 /**
  * Get the Last.fm API key from environment
  */
-function getApiKey(): string {
+export function getApiKey(): string {
   const apiKey = import.meta.env.VITE_LASTFM_API_KEY;
   if (!apiKey) {
     throw new Error('Last.fm API key not configured. Add VITE_LASTFM_API_KEY to your .env file.');
@@ -314,6 +314,13 @@ export async function connectLastFm(userId: string, username: string): Promise<v
   if (!normalized) {
     throw new Error('Please enter your Last.fm username');
   }
+
+  // Checked here, ahead of the actual lookup, so a missing/misconfigured API
+  // key surfaces as its own error rather than being swallowed by
+  // lastfmRequest's catch-all and reported to the user as "username not
+  // found" - which is wrong (and misleading) when the account is real but
+  // the deploy simply never got the key.
+  getApiKey();
 
   // Verify the username exists on Last.fm
   const userInfo = await getLastFmUserInfo(normalized);
