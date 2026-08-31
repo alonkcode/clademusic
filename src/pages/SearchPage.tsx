@@ -19,12 +19,14 @@ import { ResponsiveContainer, ResponsiveGrid } from '@/components/layout/Respons
 import { QuickStreamButtons } from '@/components/QuickStreamButtons';
 import { ProfileCircle } from '@/components/shared';
 import { parseProgressionQuery, progressionContainsSequence } from '@/lib/harmony/progressionSearch';
-import { 
-  getSearchHistory, 
-  addToSearchHistory, 
-  removeFromHistory, 
-  type SearchHistoryItem 
+import {
+  getSearchHistory,
+  addToSearchHistory,
+  removeFromHistory,
+  clearSearchHistory,
+  type SearchHistoryItem
 } from '@/lib/searchHistory';
+import { formatDistanceToNowStrict } from 'date-fns';
 
 export default function SearchPage() {
   const navigate = useNavigate();
@@ -149,6 +151,24 @@ export default function SearchPage() {
     };
   }, [query, searchMode, isSpotifyConnected]);
 
+  // Record the search itself into history once the listener pauses typing -
+  // not only when they go on to click a result. Recording solely on
+  // handlePlayOnProvider meant most searches (anyone who just looked at
+  // results, or didn't find what they wanted) left no trace, so "recent
+  // searches" showed almost nothing. A longer debounce than the fetch
+  // effects (500ms vs 300ms) avoids recording every intermediate keystroke.
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return;
+
+    const timer = setTimeout(() => {
+      addToSearchHistory({ query: trimmed, type: searchMode });
+      setSearchHistory(getSearchHistory());
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [query, searchMode]);
+
   // Instant local search with memoization for zero-latency feel
   const results = useMemo(() => {
     let filtered: Track[] = [];
@@ -256,6 +276,11 @@ export default function SearchPage() {
     e.stopPropagation();
     removeFromHistory(id);
     setSearchHistory(getSearchHistory());
+  };
+
+  const handleClearHistory = () => {
+    clearSearchHistory();
+    setSearchHistory([]);
   };
 
   const handleHistoryClick = (item: SearchHistoryItem) => {
@@ -446,10 +471,18 @@ export default function SearchPage() {
         {/* Recent Searches - Show when no active search */}
         {!query && searchHistory.length > 0 && (
           <section>
-            <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4" />
-              Recent Searches
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                Recent Searches
+              </h2>
+              <button
+                onClick={handleClearHistory}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Clear all
+              </button>
+            </div>
             <div className="space-y-2">
               {searchHistory.slice(0, 10).map((item, index) => (
                 <motion.div
@@ -468,19 +501,27 @@ export default function SearchPage() {
                         <TrendingUp className="w-4 h-4 text-muted-foreground" />
                       )}
                     </div>
-                    
+
                     <div className="flex-1 min-w-0">
+                      {/* The exact search always leads - what was resolved
+                          from it, if anything, is context underneath it,
+                          not a replacement for it. */}
+                      <div className="font-medium truncate">{item.query}</div>
                       {item.track ? (
-                        <>
-                          <div className="font-medium truncate">{item.track.title}</div>
-                          <div className="text-sm text-muted-foreground truncate">
-                            {item.track.artist}
-                          </div>
-                        </>
+                        <div className="text-sm text-muted-foreground truncate">
+                          &rarr; {item.track.title}
+                          {item.track.artist ? ` · ${item.track.artist}` : ''}
+                        </div>
                       ) : (
-                        <div className="font-medium">{item.query}</div>
+                        <div className="text-xs text-muted-foreground capitalize">
+                          {item.type === 'chord' ? 'Chord search' : 'Song search'}
+                        </div>
                       )}
                     </div>
+
+                    <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
+                      {formatDistanceToNowStrict(item.timestamp, { addSuffix: true })}
+                    </span>
 
                     <Button
                       variant="ghost"
