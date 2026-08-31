@@ -1,63 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePlayer } from '../PlayerContext';
-
-type SpotifyIframeApi = {
-  createController: (
-    element: HTMLElement,
-    options: { uri: string; theme?: number; width?: string; height?: string },
-    callback: (controller: SpotifyIframeController) => void
-  ) => void;
-};
-
-type SpotifyIframeController = {
-  play: () => void;
-  pause: () => void;
-  togglePlay?: () => void;
-  seek?: (seconds: number) => void;
-  loadUri?: (uri: string) => void;
-  addListener: (event: string, cb: (data: any) => void) => void;
-  removeListener?: (event: string, cb?: (data: any) => void) => void;
-  setVolume?: (volume: number) => void;
-  destroy?: () => void;
-};
-
-declare global {
-  interface Window {
-    onSpotifyIframeApiReady?: (api: SpotifyIframeApi) => void;
-    SpotifyIframeApi?: SpotifyIframeApi;
-  }
-}
+import { loadSpotifyIframeApi as loadIframeApi, type SpotifyIframeController } from '@/services/spotifyIframeApi';
 
 interface SpotifyEmbedPreviewProps {
   providerTrackId: string | null;
   autoplay?: boolean;
 }
-
-const IFRAME_API_URL = 'https://open.spotify.com/embed/iframe-api/v1';
-let iframeApiPromise: Promise<SpotifyIframeApi> | null = null;
-
-const loadIframeApi = () => {
-  if (window.SpotifyIframeApi) return Promise.resolve(window.SpotifyIframeApi);
-  if (iframeApiPromise) return iframeApiPromise;
-  iframeApiPromise = new Promise<SpotifyIframeApi>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Spotify IFrame API load timeout')), 10000);
-    window.onSpotifyIframeApiReady = (api) => {
-      clearTimeout(timeout);
-      window.SpotifyIframeApi = api;
-      resolve(api);
-    };
-
-    const existing = document.querySelector(`script[src="${IFRAME_API_URL}"]`);
-    if (existing) return;
-
-    const script = document.createElement('script');
-    script.src = IFRAME_API_URL;
-    script.async = true;
-    script.onerror = () => reject(new Error('Failed to load Spotify IFrame API'));
-    document.body.appendChild(script);
-  });
-  return iframeApiPromise;
-};
 
 export function SpotifyEmbedPreview({ providerTrackId, autoplay }: SpotifyEmbedPreviewProps) {
   const isTestEnv =
@@ -66,6 +14,7 @@ export function SpotifyEmbedPreview({ providerTrackId, autoplay }: SpotifyEmbedP
   const {
     provider,
     autoplaySpotify,
+    playRequestId,
     seekToSec,
     clearSeek,
     volume,
@@ -206,7 +155,7 @@ export function SpotifyEmbedPreview({ providerTrackId, autoplay }: SpotifyEmbedP
     return () => {
       cancelled = true;
     };
-  }, [provider, providerTrackId, autoplay, autoplaySpotify, registerProviderControls, isTestEnv]);
+  }, [provider, providerTrackId, autoplay, autoplaySpotify, playRequestId, registerProviderControls, isTestEnv]);
 
   useEffect(() => {
     if (provider === 'spotify') return;

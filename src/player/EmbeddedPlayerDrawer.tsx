@@ -89,13 +89,14 @@ function useAnimatedSeekbar(
   const lastAuthorityMsRef = useRef<number>(positionMs);
   const durationRef = useRef<number>(durationMs);
 
-  // Sync to authoritative position when it changes meaningfully
+  // Re-anchor on the provider's position whenever the bar has drifted away
+  // from it. Comparing the new reading against the PREVIOUS READING instead of
+  // against what is drawn meant a stalled provider - a YouTube ad, a buffering
+  // stall - reported the same position every tick, the comparison saw no
+  // change, and the local animation ran away from the real playhead with
+  // nothing to pull it back.
   useEffect(() => {
-    const delta = Math.abs(positionMs - lastAuthorityMsRef.current);
-    // Accept authority if delta is significant (>150ms) or if it jumped backward
-    if (delta > 150 || positionMs < lastAuthorityMsRef.current - 50) {
-      setDisplayMs(positionMs);
-    }
+    setDisplayMs((prev) => (Math.abs(positionMs - prev) > 250 ? positionMs : prev));
     lastAuthorityMsRef.current = positionMs;
     lastFrameTimeRef.current = performance.now();
   }, [positionMs]);
@@ -338,10 +339,14 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const positionSec = Math.max(0, animatedPositionMs / 1000);
   const effectivePositionSec = scrubSec ?? positionSec;
   const durationSec = Math.max(0, durationMsSafe / 1000);
-  const seekMaxSecRaw = durationSec > 0 ? durationSec : Math.max(1, positionSec);
-  const seekMaxSec = Number.isFinite(seekMaxSecRaw) && seekMaxSecRaw > 0 ? seekMaxSecRaw : 1;
+  // Until the provider reports a duration there is no scale to draw on. The
+  // old fallback (max = the current position) made value equal max, which
+  // parked the thumb at the far right of an empty bar the moment playback
+  // started anywhere but 0:00.
+  const hasDuration = Number.isFinite(durationSec) && durationSec > 0;
+  const seekMaxSec = hasDuration ? durationSec : 1;
   const seekStepSec = Math.max(0.01, seekMaxSec / 1200); // finer granularity: ~1200 steps across track
-  const seekValueSecRaw = Math.min(effectivePositionSec, seekMaxSec);
+  const seekValueSecRaw = hasDuration ? Math.min(effectivePositionSec, seekMaxSec) : 0;
   const seekValueSec = Number.isFinite(seekValueSecRaw) ? seekValueSecRaw : 0;
   
   const safeVolume = Number.isFinite(volume) ? volume : 0;
@@ -473,6 +478,41 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     }
   }, [isCompact, videoScale, playerScale]);
 
+  const clampCompactPosition = useCallback(
+    (pos: { x: number; y: number }) => {
+      if (typeof window === 'undefined') return pos;
+      const rect = playerWrapperRef.current?.getBoundingClientRect();
+      const width = rect?.width ?? 420;
+      const height = rect?.height ?? 180;
+      const margin = 12;
+      const maxX = Math.max(margin, window.innerWidth - width - margin);
+      const maxY = Math.max(margin, window.innerHeight - height - margin);
+      return {
+        x: Math.min(Math.max(pos.x, margin), maxX),
+        y: Math.min(Math.max(pos.y, margin), maxY),
+      };
+    },
+    []
+  );
+
+  const clampMiniPosition = useCallback(
+    (pos: { x: number; y: number }) => {
+      if (typeof window === 'undefined') return pos;
+      const rect = miniContainerRef.current?.getBoundingClientRect();
+      const width = rect?.width ?? 260;
+      const height = rect?.height ?? 120;
+      const minX = -(window.innerWidth - width - miniMargin);
+      const maxX = window.innerWidth - miniMargin;
+      const minY = -(window.innerHeight - height - miniMargin);
+      const maxY = window.innerHeight - miniMargin;
+      return {
+        x: Math.min(Math.max(pos.x, minX), maxX),
+        y: Math.min(Math.max(pos.y, minY), maxY),
+      };
+    },
+    [miniMargin]
+  );
+
   // Hydrate positions from cookie
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -484,13 +524,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
         compactPosition: { x: number; y: number };
         miniPosition: { x: number; y: number };
       }>;
-      if (parsed.mainPosition) setMainPosition(parsed.mainPosition);
-      if (parsed.compactPosition) setCompactPosition(parsed.compactPosition);
-      if (parsed.miniPosition) setMiniPosition(parsed.miniPosition);
+      if (parsed.mainPosition) {
+        const p = parsed.mainPosition;
+        // Main/video position is anchored bottom-center, not top-left, so it
+        // cannot be viewport-clamped the same simple way; a value this far out
+        // can only be corrupt or from a very different screen, so drop it.
+        setMainPosition(Math.abs(p.x) > 2000 || Math.abs(p.y) > 2000 ? { x: 0, y: 0 } : p);
+      }
+      if (parsed.compactPosition) setCompactPosition(clampCompactPosition(parsed.compactPosition));
+      if (parsed.miniPosition) setMiniPosition(clampMiniPosition(parsed.miniPosition));
     } catch (err) {
       console.warn('Failed to hydrate player positions', err);
     }
-  }, [readCookie]);
+  }, [readCookie, clampCompactPosition, clampMiniPosition]);
 
   // Persist positions to cookie
   useEffect(() => {
@@ -533,36 +579,18 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     });
   }, [computeDragBounds]);
 
-  const clampMiniPosition = useCallback(
-    (pos: { x: number; y: number }) => {
-      if (typeof window === 'undefined') return pos;
-      const rect = miniContainerRef.current?.getBoundingClientRect();
-      const width = rect?.width ?? 260;
-      const height = rect?.height ?? 120;
-      const minX = -(window.innerWidth - width - miniMargin);
-      const maxX = window.innerWidth - miniMargin;
-      const minY = -(window.innerHeight - height - miniMargin);
-      const maxY = window.innerHeight - miniMargin;
-      return {
-        x: Math.min(Math.max(pos.x, minX), maxX),
-        y: Math.min(Math.max(pos.y, minY), maxY),
-      };
-    },
-    [miniMargin]
-  );
-
   // Recenter positions when viewport changes
   useEffect(() => {
     const onResize = () => {
       setDragBoundsIfChanged();
-      setCompactPosition((prev) => clampPositionToBounds(prev));
+      setCompactPosition((prev) => clampCompactPosition(prev));
       if (!isCompact && !isMini) {
         setMainPosition((prev) => clampPositionToBounds(prev));
       }
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [clampPositionToBounds, isCompact, isMini, setDragBoundsIfChanged]);
+  }, [clampCompactPosition, clampPositionToBounds, isCompact, isMini, setDragBoundsIfChanged]);
 
   useEffect(() => {
     if (!isCinema) return;
@@ -618,11 +646,11 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
       return;
     }
     if (isCompact) {
-      setCompactPosition((prev) => clampPositionToBounds(prev));
+      setCompactPosition((prev) => clampCompactPosition(prev));
       return;
     }
     setMainPosition((prev) => clampPositionToBounds(prev));
-  }, [clampMiniPosition, clampPositionToBounds, isCompact, isMini]);
+  }, [clampCompactPosition, clampMiniPosition, clampPositionToBounds, isCompact, isMini]);
 
   const handlePrev = useCallback(() => {
     if (isIdle) return;
@@ -788,7 +816,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             setMiniPosition(clampMiniPosition(next));
           } else if (isCompact) {
             const next = { x: compactPosition.x + info.offset.x, y: compactPosition.y + info.offset.y };
-            setCompactPosition(next);
+            setCompactPosition(clampCompactPosition(next));
             requestAnimationFrame(snapCompactToCorner);
           } else {
             const next = { x: mainPosition.x + info.offset.x, y: mainPosition.y + info.offset.y };
@@ -1047,7 +1075,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   if (!Number.isFinite(nextSec)) return;
                   commitSeek(nextSec);
                 }}
-                disabled={isIdle || !canSeekInEmbed}
+                disabled={isIdle || !canSeekInEmbed || !hasDuration}
                 className="relative z-10 w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer
                          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 
                          [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full 
@@ -1221,29 +1249,75 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           aria-live="polite"
           className="pointer-events-auto fixed bottom-4 right-4 z-[110] w-[260px] max-w-[85vw] rounded-xl border border-border/60 bg-neutral-900/90 shadow-2xl backdrop-blur-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
         >
-          <div className="flex items-center justify-between px-3 py-2 gap-2">
+          <div className="flex items-center justify-between px-3 pt-2 gap-2">
             <div className="flex flex-col min-w-0">
               {resolvedTitle && <span className="text-sm font-semibold text-white truncate" aria-label="Mini player track title">{resolvedTitle}</span>}
               {resolvedArtist && <span className="text-xs text-white/70 truncate" aria-label="Mini player artist">{resolvedArtist}</span>}
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={togglePlayPause}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-              >
-                {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={restoreToDocked}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-                aria-label="Show player"
-              >
-                <ChevronUp className="h-4 w-4" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={restoreToDocked}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              aria-label="Show player"
+              title="Show player"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* The mini pill is the fallback for "player is off-screen or in the
+              way" - it needs the same easy transport as the docked bar, not
+              just play/pause, or a listener who collapses to it loses control
+              of the track entirely. */}
+          <div className="flex items-center gap-1.5 px-3 pt-2 pb-2.5">
+            <button
+              type="button"
+              onClick={() => (effectiveCanPrev ? handlePrev() : null)}
+              disabled={!effectiveCanPrev}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Previous track"
+              title="Previous track"
+            >
+              <SkipBack className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={togglePlayPause}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-primary/60 bg-primary/25 text-white hover:bg-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+              title={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => (effectiveCanNext ? handleNext() : null)}
+              disabled={!effectiveCanNext}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Next track"
+              title="Next track"
+            >
+              <SkipForward className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={toggleMute}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              aria-label={isMuted ? 'Unmute' : 'Mute'}
+              title={isMuted ? 'Unmute' : 'Mute'}
+            >
+              {isMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={volumePercent}
+              onChange={(e) => setVolumeLevel(Number(e.target.value) / 100)}
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              className="flex-1 h-1 min-w-[40px] accent-primary cursor-pointer"
+              aria-label="Volume"
+            />
           </div>
         </motion.div>
       )}
