@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { clearSpotifyCredentialCache } from '@/services/spotifyAuthService';
 
 export interface AuthState {
   user: User | null;
@@ -47,14 +48,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const bootstrap = async () => {
       try {
+        // getSession() reads the persisted session locally, so the app can
+        // render as signed in immediately. getUser() is a network round trip;
+        // blocking the first paint on it is what made a signed-in user look
+        // signed out on every load, so it runs in the background instead.
         const { data: sessionData } = await supabase.auth.getSession();
         const nextSession = sessionData.session ?? null;
-        const { data: userRes } = await supabase.auth.getUser();
 
         if (!mounted) return;
         setSession(nextSession);
-        setUser(userRes.user ?? nextSession?.user ?? null);
+        setUser(nextSession?.user ?? null);
         setAccessToken(nextSession?.access_token ?? null);
+
+        if (nextSession) {
+          void supabase.auth.getUser().then(({ data: userRes }) => {
+            if (mounted && userRes.user) setUser(userRes.user);
+          });
+        }
 
         // If no authenticated session exists, preserve guest mode for demo access
         if (!nextSession) {
@@ -80,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(nextSession?.access_token ?? null);
 
       if (event === 'SIGNED_OUT') {
+        clearSpotifyCredentialCache();
         localStorage.removeItem('lastAuthTime');
         // Keep guest mode available after sign-out so users can continue exploring
         setGuestMode(true);
@@ -175,6 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    clearSpotifyCredentialCache(user?.id);
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);

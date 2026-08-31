@@ -6,6 +6,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { clearSpotifyCredentialCache } from '@/services/spotifyAuthService';
 
 // Storage keys for OAuth state (used across page reload during OAuth flow)
 const OAUTH_STATE_KEY = 'harmony_hub_oauth_state';
@@ -162,6 +163,8 @@ export function useDisconnectSpotify() {
         .eq('provider', 'spotify');
 
       if (error) throw error;
+
+      clearSpotifyCredentialCache(user.id);
 
       // Also try to remove from provider_accounts if it exists
     //   await supabase
