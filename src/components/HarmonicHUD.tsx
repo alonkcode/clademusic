@@ -107,17 +107,15 @@ export function HarmonicHUD({
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  disabled={sync.isLiveSynced}
                   onClick={() => sync.selectSection(i)}
                   className={cn(
-                    'shrink-0 whitespace-nowrap rounded-full border px-2.5 h-7 text-[11px] font-medium',
+                    'shrink-0 cursor-pointer whitespace-nowrap rounded-full border px-2.5 h-7 text-[11px] font-medium',
                     'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                    sync.isLiveSynced ? 'cursor-default' : 'cursor-pointer',
                     active
                       ? 'border-primary bg-primary text-primary-foreground'
                       : 'border-border/60 bg-background/60 text-muted-foreground hover:text-foreground hover:border-border'
                   )}
-                  title={sync.isLiveSynced ? 'Following playback' : `Show the chords for ${name}`}
+                  title={sync.isLiveSynced ? `Jump to ${name}` : `Show the chords for ${name}`}
                 >
                   {name}
                 </button>

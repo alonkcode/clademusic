@@ -47,24 +47,33 @@ export function CompactSongSections({
 
     const startSeconds = Math.floor(section.start_ms / 1000);
 
-    const isYoutubePlaying = youtubeOpen && youtubeTrackId?.includes(youtubeId || '');
-    const isSpotifyPlaying = spotifyOpen && spotifyTrackId === spotifyId;
+    const isYoutubePlaying = youtubeOpen && !!youtubeId && !!youtubeTrackId?.includes(youtubeId);
+    const isSpotifyPlaying = spotifyOpen && !!spotifyId && spotifyTrackId === spotifyId;
 
-    if (youtubeId) {
-      if (isYoutubePlaying) {
-        seekTo(startSeconds);
-      } else {
-        openPlayer({
-          canonicalTrackId: null,
-          provider: 'youtube',
-          providerTrackId: youtubeId,
-          autoplay: true,
-          startSec: startSeconds,
-        });
-      }
-    } else if (spotifyId && !isSpotifyPlaying) {
-      openPlayer({ canonicalTrackId: null, provider: 'spotify', providerTrackId: spotifyId, autoplay: true });
+    // Already playing this track: seek in place, whichever provider it is.
+    // Spotify used to fall through and do nothing here, so a section tap only
+    // ever worked on YouTube.
+    if (isYoutubePlaying || isSpotifyPlaying) {
+      seekTo(startSeconds);
+      return;
     }
+
+    // Not playing yet: start at the section rather than from the top, and stay
+    // on whichever provider is already open when this track exists there.
+    const provider =
+      (spotifyOpen && spotifyId) || (!youtubeId && spotifyId) ? 'spotify' : youtubeId ? 'youtube' : null;
+    const providerTrackId = provider === 'spotify' ? spotifyId : youtubeId;
+    if (!provider || !providerTrackId) return;
+
+    openPlayer({
+      // The real track id, not null: the harmonic readout below only follows
+      // playback when it can recognise the playing track as this one.
+      canonicalTrackId,
+      provider,
+      providerTrackId,
+      autoplay: true,
+      startSec: startSeconds,
+    });
   };
 
   if (!sections || sections.length === 0) return null;
