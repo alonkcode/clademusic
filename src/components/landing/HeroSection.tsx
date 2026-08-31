@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { Music, Sparkles, Waves, Play, Eye } from 'lucide-react';
+import { CladeMark } from '@/components/CladeMark';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
@@ -129,18 +130,7 @@ export function HeroSection() {
           className="mb-8"
         >
           <div className="inline-flex items-center space-x-4">
-            <motion.div
-              animate={{
-                rotate: [0, 5, -5, 0],
-              }}
-              transition={{
-                duration: 2,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              }}
-            >
-              <Waves className="w-16 h-16 text-[#00F5FF]" />
-            </motion.div>
+            <CladeMark className="w-20 h-20 md:w-24 md:h-24 text-white" filaments />
             <h1 className="text-7xl font-extrabold bg-gradient-to-r from-[#00F5FF] via-[#FF00FF] to-[#FFD700] bg-clip-text text-transparent">
               Clade
             </h1>

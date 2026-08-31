@@ -1,5 +1,6 @@
 import { motion, useScroll, useTransform } from 'framer-motion';
-import { Waves, LogIn, Menu } from 'lucide-react';
+import { LogIn, Menu } from 'lucide-react';
+import { CladeMark } from '@/components/CladeMark';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
@@ -56,32 +57,23 @@ export function LandingNav() {
           backgroundColor,
           backdropFilter: backdropBlur,
         }}
-        className="fixed top-0 left-0 right-0 z-50 border-b border-gray-900/50"
+        className="fixed top-0 left-0 right-0 z-50"
         initial={{ y: -100 }}
         animate={{ y: 0 }}
         transition={{ duration: 0.3 }}
       >
         <div className="container mx-auto px-6">
           <div className="flex items-center justify-between h-20">
-            {/* Logo */}
+            {/* Brand. The app-wide hamburger is fixed in this corner, so the
+                lockup starts clear of it rather than sitting underneath. */}
             <motion.button
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="flex items-center space-x-3 group"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.99 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="flex items-center space-x-3 ml-12 md:ml-16"
             >
-              <motion.div
-                animate={{
-                  rotate: [0, 5, -5, 0],
-                }}
-                transition={{
-                  duration: 2,
-                  repeat: Infinity,
-                  ease: 'easeInOut',
-                }}
-              >
-                <Waves className="w-8 h-8 text-[#00F5FF] group-hover:text-[#FF00FF] transition-colors" />
-              </motion.div>
+              <CladeMark className="w-9 h-9 text-white" />
               <span className="text-2xl font-bold bg-gradient-to-r from-[#00F5FF] via-[#FF00FF] to-[#FFD700] bg-clip-text text-transparent">
                 Clade
               </span>
@@ -93,8 +85,9 @@ export function LandingNav() {
                 <motion.button
                   key={item.label}
                   onClick={() => scrollToSection(item.href)}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.99 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
                   className="text-gray-300 hover:text-white transition-colors font-medium"
                 >
                   {item.label}
@@ -173,8 +166,8 @@ export function LandingNav() {
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.5 }}
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.97 }}
           className="fixed bottom-8 right-8 z-50 w-12 h-12 rounded-full bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] flex items-center justify-center shadow-lg shadow-[#00F5FF]/50"
         >
           <svg

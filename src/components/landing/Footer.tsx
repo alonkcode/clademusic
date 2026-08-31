@@ -64,7 +64,7 @@ export function Footer() {
                   href={social.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  whileHover={{ scale: 1.2, rotate: 360 }}
+                  whileHover={{ scale: 1.08 }}
                   transition={{ duration: 0.3 }}
                   className="w-10 h-10 rounded-full bg-[#1A1A2E] border border-gray-800 flex items-center justify-center hover:border-gray-700 transition-colors"
                   style={{
@@ -119,7 +119,7 @@ export function Footer() {
                 className="flex-1 px-4 py-3 bg-[#1A1A2E] border border-gray-800 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00F5FF] transition-all"
               />
               <motion.button
-                whileHover={{ scale: 1.05 }}
+                whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.95 }}
                 className="px-6 py-3 bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] text-white font-semibold rounded-lg hover:shadow-lg hover:shadow-[#00F5FF]/50 transition-all"
               >

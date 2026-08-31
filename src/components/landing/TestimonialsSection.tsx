@@ -64,7 +64,7 @@ export function TestimonialsSection() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.6, delay: index * 0.1 }}
-              whileHover={{ y: -10, scale: 1.02 }}
+              whileHover={{ y: -4, scale: 1.01 }}
             >
               <Card className="relative p-8 bg-gradient-to-br from-[#1A1A2E] to-[#0F0F1A] border border-gray-800 hover:border-gray-700 transition-all duration-300 h-full">
                 {/* Quote icon */}
@@ -103,7 +103,7 @@ export function TestimonialsSection() {
                     style={{
                       background: `linear-gradient(135deg, ${testimonial.color}40, ${testimonial.color}20)`,
                     }}
-                    whileHover={{ rotate: 360 }}
+                    whileHover={{ scale: 1.05 }}
                     transition={{ duration: 0.6 }}
                   >
                     {testimonial.avatar}

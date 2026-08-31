@@ -146,7 +146,7 @@ export function InteractiveDemo() {
                 {selectedTrackData.progression.map((chord, index) => (
                   <motion.button
                     key={index}
-                    whileHover={{ scale: 1.1 }}
+                    whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.95 }}
                     onMouseEnter={() => setHoveredChord(index)}
                     onMouseLeave={() => setHoveredChord(null)}

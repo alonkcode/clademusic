@@ -48,7 +48,7 @@ export function FeaturesGrid() {
   ];
 
   return (
-    <section className="relative py-24 bg-[#0A0A0F]">
+    <section className="relative py-24 bg-gradient-to-b from-[#1A1A2E] to-[#0A0A0F]">
       {/* Background effects */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute top-1/4 right-1/4 w-96 h-96 bg-[#FF00FF] rounded-full blur-3xl opacity-10 animate-pulse" />
@@ -81,7 +81,7 @@ export function FeaturesGrid() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.6, delay: index * 0.1 }}
-              whileHover={{ y: -10 }}
+              whileHover={{ y: -4 }}
               className="group relative"
             >
               <div className="relative p-8 rounded-2xl bg-gradient-to-br from-[#1A1A2E] to-[#0F0F1A] border border-gray-800 hover:border-gray-700 transition-all duration-300 h-full">
@@ -96,8 +96,8 @@ export function FeaturesGrid() {
                 {/* Icon */}
                 <motion.div
                   className="relative mb-6"
-                  whileHover={{ rotate: 360, scale: 1.1 }}
-                  transition={{ duration: 0.6 }}
+                  whileHover={{ scale: 1.04 }}
+                  transition={{ duration: 0.25, ease: 'easeOut' }}
                 >
                   <div
                     className="w-16 h-16 rounded-xl bg-gradient-to-br flex items-center justify-center"

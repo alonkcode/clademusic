@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { CladeMark } from '@/components/CladeMark';
 
 // "Connections" is deliberately absent: it linked to /connections, but the
 // only registered route is /connections/:trackId - ConnectionsPage has no
@@ -34,7 +35,10 @@ export function BottomNav() {
         </SheetTrigger>
         <SheetContent forceMount side="left" className="w-72 p-0"> 
           <SheetHeader className="px-4 py-3 border-b flex items-center justify-between">
-            <SheetTitle>Navigate</SheetTitle>
+            <SheetTitle className="flex items-center gap-2">
+              <CladeMark className="h-6 w-6" />
+              Navigate
+            </SheetTitle>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" aria-label="Close navigation">
                 <X className="w-5 h-5" />
