@@ -31,6 +31,7 @@ import { LiveCommentFeed } from '@/components/LiveCommentFeed';
 import { SampleConnections } from '@/components/SampleConnections';
 import { NearbyListenersPanel } from '@/components/NearbyListenersPanel';
 import { cn } from '@/lib/utils';
+import { formatDurationFull } from '@/lib/timeFormat';
 import type { Artist, Track, Album } from '@/types';
 
 // Mock artist data
@@ -244,7 +245,7 @@ export default function ArtistPage() {
                         <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
                       </div>
                       <span className="text-sm text-muted-foreground">
-                        {track.duration_ms ? formatDuration(track.duration_ms) : '--:--'}
+                        {track.duration_ms ? formatDurationFull(track.duration_ms) : '--:--'}
                       </span>
                     </motion.div>
                   ))}

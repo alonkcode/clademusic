@@ -1,0 +1,55 @@
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import Index from "@/pages/Index";
+
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({
+    user: null,
+    session: null,
+    accessToken: null,
+    loading: false,
+    guestMode: false,
+  }),
+}));
+
+vi.mock("framer-motion", () => {
+  const Motion = new Proxy(
+    {},
+    {
+      get: () =>
+        function MotionComponent({ children, ...props }: { children?: React.ReactNode }) {
+          const {
+            whileHover,
+            whileTap,
+            whileInView,
+            initial,
+            animate,
+            exit,
+            transition,
+            layout,
+            ...rest
+          } = props as Record<string, unknown>;
+          return <div {...rest}>{children}</div>;
+        },
+    }
+  );
+  return {
+    motion: Motion,
+    useScroll: () => ({ scrollY: { onChange: () => {}, get: () => 0 } }),
+    useTransform: () => "none",
+  };
+});
+
+describe("Home route", () => {
+  it("renders the landing page content", () => {
+    render(
+      <MemoryRouter
+        initialEntries={["/"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Index />
+      </MemoryRouter>
+    );
+    expect(screen.getAllByText("Clade").length).toBeGreaterThan(0);
+  });
+});

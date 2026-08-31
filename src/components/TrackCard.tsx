@@ -1,12 +1,12 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Bookmark, X, Sparkles, Waves, Play, Pause, Music, Youtube } from 'lucide-react';
+import { Heart, Bookmark, X, Sparkles, Waves, Play, Pause, Music, Youtube, MessageSquare } from 'lucide-react';
 import { HarmonyCard } from './HarmonyCard';
 import { CommentsSheet } from './CommentsSheet';
+import { TrackComments } from './TrackComments';
 import { NearbyListenersSheet } from './NearbyListenersSheet';
 import { ShareSheet } from './ShareSheet';
 import { AudioPreview } from './AudioPreview';
 import { QuickStreamButtons } from './QuickStreamButtons';
-import { YouTubeEmbed } from './YouTubeEmbed';
 import { SongSections } from './SongSections';
 import { CompactSongSections } from './CompactSongSections';
 import { TrackMenu } from './TrackMenu';
@@ -18,6 +18,9 @@ import { cn } from '@/lib/utils';
 import { useRecordListeningActivity } from '@/hooks/api/useNearbyListeners';
 import { useRecordPlay } from '@/hooks/api/useFollowing';
 import { useAuth } from '@/hooks/useAuth';
+import { SectionSelectionProvider } from '@/hooks/useSectionSelection';
+import { usePlayer } from '@/player/PlayerContext';
+import { useTrackComments } from '@/hooks/api/useComments';
 
 interface TrackCardProps {
   track: Track;
@@ -36,13 +39,16 @@ export function TrackCard({
   onPipModeActivate,
   isPipActive = false,
 }: TrackCardProps) {
-  const { user } = useAuth();
+  const { user, guestMode } = useAuth();
   const [isPlaying, setIsPlaying] = useState(false);
-  const [showYouTubeEmbed, setShowYouTubeEmbed] = useState(false);
+  const [showComments, setShowComments] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const playStartTimeRef = useRef<number | null>(null);
   const recordActivity = useRecordListeningActivity();
   const recordPlay = useRecordPlay();
+  const { openPlayer } = usePlayer();
+  const { data: comments } = useTrackComments(track.id);
+  const commentCount = comments?.length || 0;
 
   // Convert SongSection to TrackSection format
   const convertSections = useCallback((sections: SongSection[]): TrackSection[] => {
@@ -193,10 +199,14 @@ export function TrackCard({
   };
 
   return (
+    // One selected stanza for the whole card: the section chips and the
+    // harmonic readout below them read and write the same index.
+    <SectionSelectionProvider trackId={track.id}>
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: isActive ? 1 : 0.5 }}
       className="relative w-full h-full flex flex-col"
+      data-track-card={track.id}
     >
       {/* Hidden audio element for preview playback */}
       {track.preview_url && (
@@ -208,23 +218,9 @@ export function TrackCard({
         />
       )}
 
-      {/* Background with cover art or YouTube embed */}
+      {/* Background with cover art. IMPORTANT: All playback surfaces must live in the universal player only. */}
       <div className="absolute inset-0 z-0">
-        {showYouTubeEmbed && track.youtube_id && !isPipActive ? (
-          // YouTube embed as background when Watch button is active
-          <div className="w-full h-full relative">
-            <iframe
-              src={`https://www.youtube.com/embed/${track.youtube_id}?autoplay=1&mute=0&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&fs=1&iv_load_policy=3`}
-              title={`${track.title} - ${track.artist}`}
-              className="w-full h-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-              allowFullScreen
-              referrerPolicy="strict-origin-when-cross-origin"
-            />
-            {/* Gradient overlay - only covers bottom portion, doesn't block video controls */}
-            <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-background/90 via-background/50 to-transparent pointer-events-none" />
-          </div>
-        ) : track.cover_url ? (
+        {track.cover_url ? (
           <>
             <img
               src={track.cover_url}
@@ -303,6 +299,7 @@ export function TrackCard({
             spotifyId={track.spotify_id}
             trackTitle={track.title}
             trackArtist={track.artist || ''}
+            canonicalTrackId={track.id}
           />
         </motion.div>
 
@@ -330,21 +327,26 @@ export function TrackCard({
             </Button>
           )}
 
-          {/* YouTube embed button - inline play without leaving the app */}
+          {/* YouTube watch intent -> universal player only */}
           {track.youtube_id && (
             <Button
-              variant={showYouTubeEmbed ? 'default' : 'outline'}
+              variant="outline"
               size="lg"
-              onClick={() => setShowYouTubeEmbed(!showYouTubeEmbed)}
-              className={cn(
-                'gap-2',
-                showYouTubeEmbed
-                  ? 'bg-red-600 hover:bg-red-700 text-white'
-                  : 'glass border-white/20 hover:bg-white/10'
-              )}
+              onClick={() =>
+                openPlayer({
+                  canonicalTrackId: track.id,
+                  provider: 'youtube',
+                  providerTrackId: track.youtube_id,
+                  autoplay: true,
+                  context: 'feed-card-watch',
+                  title: track.title,
+                  artist: track.artist,
+                })
+              }
+              className="gap-2 glass border-white/20 hover:bg-white/10"
             >
               <Youtube className="w-5 h-5" />
-              {showYouTubeEmbed ? 'Hide' : 'Watch'}
+              Watch
             </Button>
           )}
 
@@ -357,6 +359,7 @@ export function TrackCard({
               urlSpotifyApp: track.url_spotify_app || undefined,
               urlYoutube: track.url_youtube || undefined,
             }}
+            canonicalTrackId={track.id}
             trackTitle={track.title}
             trackArtist={track.artist}
             size="md"
@@ -376,6 +379,9 @@ export function TrackCard({
               detectedMode={track.detected_mode}
               cadenceType={track.cadence_type}
               confidenceScore={track.confidence_score}
+              bpm={track.tempo}
+              trackId={track.id}
+              sections={track.sections}
               matchReason="Same vi–IV–I–V loop with similar energy"
             />
           </motion.div>
@@ -441,8 +447,15 @@ export function TrackCard({
           transition={{ delay: 0.25 }}
           className="flex items-center justify-center gap-4"
         >
-          {/* Comments */}
-          <CommentsSheet trackId={track.id} trackTitle={track.title} />
+          {/* Comments - Now inline with count */}
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setShowComments(!showComments)}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 hover:bg-muted transition-all text-muted-foreground hover:text-foreground"
+          >
+            <MessageSquare className="w-5 h-5" />
+            <span className="text-sm font-medium">{commentCount}</span>
+          </motion.button>
 
           {/* Nearby Listeners */}
           <NearbyListenersSheet 
@@ -454,8 +467,26 @@ export function TrackCard({
           {/* Share */}
           <ShareSheet track={track} onShare={handleShare} />
         </motion.div>
+
+        {/* Expandable Comments Section */}
+        <AnimatePresence>
+          {showComments && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-6 pt-6 border-t border-border/50">
+                <TrackComments trackId={track.id} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
+    </SectionSelectionProvider>
   );
 }
 

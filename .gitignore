@@ -1,10 +1,9 @@
 # Logs
 logs
 *.log
-npm-debug.log*
+bun-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
@@ -39,3 +38,12 @@ dist-ssr
 cypress/videos
 cypress/screenshots
 cypress/downloads
+
+# Local QA / audits / test artifacts
+artifacts/
+reports/
+test-results/
+playwright-report/
+
+# Supabase CLI scratch
+supabase/.temp/

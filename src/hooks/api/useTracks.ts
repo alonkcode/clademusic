@@ -16,6 +16,7 @@ import {
   TrackQuery,
 } from '@/services/trackService';
 import { getSpotifyTrack } from '@/services/spotifySearchService';
+import { getYouTubeVideo } from '@/services/youtubeSearchService';
 import { useAuth } from '@/hooks/useAuth';
 import { QUERY_KEYS } from '@/lib/constants';
 
@@ -48,6 +49,13 @@ export function useTrack(id: string | undefined, enabled = true) {
       if (isSpotifyId && user) {
         const spotifyId = id.replace('spotify:', '');
         return await getSpotifyTrack(user.id, spotifyId);
+      }
+
+      // If it's a YouTube ID, fetch video metadata via YouTube API
+      const isYouTubeId = id?.startsWith('youtube:');
+      if (isYouTubeId) {
+        const videoId = id!.replace('youtube:', '');
+        return await getYouTubeVideo(videoId);
       }
       
       // Otherwise, fetch from local database/seed data

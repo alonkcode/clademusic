@@ -1,27 +1,18 @@
-/**
- * Admin Hooks
- * 
- * React hooks for checking admin permissions and managing admin features
- */
-
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
 
-/**
- * Check if current user has admin role
- */
+// Check if current user is admin
 export function useIsAdmin() {
-  const { user } = useAuth();
-
   return useQuery({
-    queryKey: ['is-admin', user?.id],
+    queryKey: ['isAdmin'],
     queryFn: async () => {
-      if (!user?.id) return false;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return false;
 
-      const { data, error } = await supabase
-        .rpc('is_admin', { user_id: user.id });
-
+      // is_admin() was never a real function - only has_role(_user_id, _role)
+      // exists in the schema (used by RLS policies throughout), which is
+      // exactly this check. Calling a nonexistent RPC 404'd on every load.
+      const { data, error } = await supabase.rpc('has_role', { _user_id: user.id, _role: 'admin' });
       if (error) {
         console.error('Error checking admin status:', error);
         return false;
@@ -29,121 +20,101 @@ export function useIsAdmin() {
 
       return data === true;
     },
-    enabled: !!user?.id,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
 
-/**
- * Get all users (admin only)
- */
-export function useAdminUsers(params: {
-  search?: string;
-  limit?: number;
-  offset?: number;
-} = {}) {
-  const { user } = useAuth();
-  const { data: isAdmin } = useIsAdmin();
-
+// Get all users with pagination and search
+export function useAdminUsers(search?: string, limit = 20, offset = 0) {
   return useQuery({
-    queryKey: ['admin-users', params],
+    queryKey: ['adminUsers', search, limit, offset],
     queryFn: async () => {
       let query = supabase
         .from('profiles')
-        .select('*, user_roles(*)', { count: 'exact' })
+        .select(`
+          *,
+          user_roles(role)
+        `, { count: 'exact' })
+        .range(offset, offset + limit - 1)
         .order('created_at', { ascending: false });
 
-      if (params.search) {
-        query = query.or(`username.ilike.%${params.search}%,email.ilike.%${params.search}%`);
-      }
-
-      if (params.limit) {
-        query = query.limit(params.limit);
-      }
-
-      if (params.offset) {
-        query = query.range(params.offset, params.offset + (params.limit || 50) - 1);
+      if (search) {
+        query = query.or(`username.ilike.%${search}%,email.ilike.%${search}%`);
       }
 
       const { data, error, count } = await query;
-
       if (error) throw error;
 
-      return { users: data || [], total: count || 0 };
+      return { users: data, total: count || 0 };
     },
-    enabled: !!user && isAdmin === true,
-    staleTime: 60 * 1000, // 1 minute
+    staleTime: 1 * 60 * 1000, // 1 minute
   });
 }
 
-/**
- * Get system statistics (admin only)
- */
+// Get admin stats
 export function useAdminStats() {
-  const { user } = useAuth();
-  const { data: isAdmin } = useIsAdmin();
-
   return useQuery({
-    queryKey: ['admin-stats'],
+    queryKey: ['adminStats'],
     queryFn: async () => {
-      // Get counts in parallel
-      const [
-        usersResult,
-        tracksResult,
-        playsResult,
-        interactionsResult,
-      ] = await Promise.all([
-        supabase.from('profiles').select('*', { count: 'exact', head: true }),
-        supabase.from('tracks').select('*', { count: 'exact', head: true }),
-        supabase.from('play_history').select('*', { count: 'exact', head: true }),
-        supabase.from('user_interactions').select('*', { count: 'exact', head: true }),
-      ]);
+      // Get total users
+      const { count: totalUsers } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true });
 
       // Get active users (last 7 days)
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      
-      const { count: activeUsersCount } = await supabase
+
+      const { count: activeUsers } = await supabase
         .from('play_history')
         .select('user_id', { count: 'exact', head: true })
         .gte('played_at', sevenDaysAgo.toISOString());
 
+      // Get total tracks
+      const { count: totalTracks } = await supabase
+        .from('tracks')
+        .select('*', { count: 'exact', head: true });
+
+      // Get total plays
+      const { count: totalPlays } = await supabase
+        .from('play_history')
+        .select('*', { count: 'exact', head: true });
+
+      // Get total interactions
+      const { count: totalInteractions } = await supabase
+        .from('user_interactions')
+        .select('*', { count: 'exact', head: true });
+
       return {
-        totalUsers: usersResult.count || 0,
-        totalTracks: tracksResult.count || 0,
-        totalPlays: playsResult.count || 0,
-        totalInteractions: interactionsResult.count || 0,
-        activeUsers: activeUsersCount || 0,
+        totalUsers: totalUsers || 0,
+        activeUsers: activeUsers || 0,
+        totalTracks: totalTracks || 0,
+        totalPlays: totalPlays || 0,
+        totalInteractions: totalInteractions || 0,
       };
     },
-    enabled: !!user && isAdmin === true,
     staleTime: 2 * 60 * 1000, // 2 minutes
   });
 }
 
-/**
- * Get flagged content for moderation (admin only)
- */
-export function useFlaggedContent() {
-  const { user } = useAuth();
-  const { data: isAdmin } = useIsAdmin();
-
+// Get flagged content
+export function useFlaggedContent(status = 'unresolved') {
   return useQuery({
-    queryKey: ['flagged-content'],
+    queryKey: ['flaggedContent', status],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('user_interactions')
-        .select('*, tracks(*), profiles(*)')
+        .select(`
+          *,
+          user:user_id(username, email),
+          track:track_id(title, artist)
+        `)
         .eq('interaction_type', 'flag')
-        .is('resolved_at', null)
-        .order('created_at', { ascending: false })
-        .limit(100);
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      return data || [];
+      return data;
     },
-    enabled: !!user && isAdmin === true,
     staleTime: 30 * 1000, // 30 seconds
   });
 }

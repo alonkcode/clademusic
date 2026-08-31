@@ -1,54 +1,104 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useMemo, useState, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TrackCard } from '@/components/TrackCard';
 import { FeedSkeleton } from '@/components/FeedSkeleton';
-import { FeedSidebar } from '@/components/FeedSidebar';
+const ScrollingComments = lazy(() =>
+  import('@/components/ScrollingComments').then((module) => ({ default: module.ScrollingComments }))
+);
 import { BottomNav } from '@/components/BottomNav';
-import { YouTubeEmbed } from '@/components/YouTubeEmbed';
+import { GuestBanner } from '@/components/GuestBanner';
 import { ResponsiveContainer, DesktopColumns } from '@/components/layout/ResponsiveLayout';
 import { useFeedTracks } from '@/hooks/api/useTracks';
-import { useSpotifyRecentlyPlayed } from '@/hooks/api/useSpotifyUser';
 import { useAuth } from '@/hooks/useAuth';
+import { useLastFmRecentTracks } from '@/hooks/api/useLastFm';
+import { useSpotifyRecommendations } from '@/hooks/api/useSpotifyUser';
 import { InteractionType, Track } from '@/types';
-import { ChevronUp, ChevronDown, LogIn, AlertCircle, Music } from 'lucide-react';
+import { ChevronUp, ChevronDown, LogIn, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { usePlayer } from '@/player/PlayerContext';
+import { ProfileCircle } from '@/components/shared';
 
 export default function FeedPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, guestMode, enterGuestMode } = useAuth();
+  const { data: lastfmRecentRaw = [] } = useLastFmRecentTracks(200);
   const navigate = useNavigate();
   
   // Fetch from multiple sources
   const { data: trackResult, isLoading: tracksLoading, error: tracksError } = useFeedTracks(50);
-  const { data: spotifyData, isLoading: spotifyLoading } = useSpotifyRecentlyPlayed(20);
-  
-  // Merge Spotify recently played with feed tracks, preferring Spotify when available
-  const feedTracks = trackResult?.tracks ?? [];
-  const spotifyTracks = spotifyData?.tracks ?? [];
-  
-  // Combine: Spotify recently played first, then fill with other tracks (deduped)
-  const tracks: Track[] = (() => {
-    if (spotifyTracks.length > 0) {
-      const spotifyIds = new Set(spotifyTracks.map(t => t.spotify_id));
-      const otherTracks = feedTracks.filter(t => !spotifyIds.has(t.spotify_id));
-      return [...spotifyTracks, ...otherTracks];
+  const { data: recommendations = [], isLoading: recommendationsLoading } = useSpotifyRecommendations([], [], 50);
+
+  // Always show both recent feed tracks and personalized recommendations (if available and signed-in).
+  const baseFeed = trackResult?.tracks ?? [];
+  const personalizedRecs = user ? recommendations : [];
+  // Map the last 200 scrobbles to Track shape and dedupe by title+artist (newest wins).
+  const lastfmRecent: Track[] = useMemo(() => {
+    const getImageUrl = (images?: Array<{ '#text': string; size: string }>): string | undefined => {
+      if (!images || images.length === 0) return undefined;
+      const sizePriority = ['extralarge', 'large', 'medium', 'small'];
+      for (const size of sizePriority) {
+        const img = images.find((i) => i.size === size);
+        if (img?.['#text']) return img['#text'];
+      }
+      return images[0]?.['#text'] || undefined;
+    };
+
+    const seen = new Set<string>();
+    const out: Track[] = [];
+
+    for (let i = 0; i < lastfmRecentRaw.length; i++) {
+      const t = lastfmRecentRaw[i] as any;
+      const title = String(t?.name || '').trim();
+      const artist = String(t?.artist?.name || t?.artist?.['#text'] || '').trim();
+      if (!title || !artist) continue;
+
+      const key = `${title.toLowerCase()}|${artist.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const playedAtMs = t?.date?.uts ? Number(t.date.uts) * 1000 : undefined;
+      out.push({
+        id: `lastfm:${artist}-${title}-${playedAtMs ?? i}`,
+        title,
+        artist,
+        album: t?.album?.['#text'] || undefined,
+        cover_url: getImageUrl(t?.image),
+      });
     }
-    return feedTracks;
-  })();
-  
-  const dataSource = spotifyTracks.length > 0 ? 'spotify' : trackResult?.source;
+
+    return out;
+  }, [lastfmRecentRaw]);
+
+  // Merge in priority order: scrobbles (newest), base feed, personalized recs; dedupe by provider id or title+artist
+  const tracks: Track[] = useMemo(() => {
+    const seen = new Set<string>();
+    const all = [...lastfmRecent, ...baseFeed, ...personalizedRecs];
+    return all.filter((t) => {
+      const title = (t.title || (t as any).name || '').toLowerCase().trim();
+      const artist = (t.artist || t.artists?.[0] || '').toLowerCase().trim();
+      const key = (t.spotify_id || t.youtube_id || `${title}|${artist}`) || t.id;
+      if (!key) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [lastfmRecent, baseFeed, personalizedRecs]);
   
   const [currentIndex, setCurrentIndex] = useState(0);
   const [interactions, setInteractions] = useState<Map<string, Set<InteractionType>>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  // PiP state - managed at feed level so it persists across track changes
-  const [pipVideo, setPipVideo] = useState<{ videoId: string; title: string } | null>(null);
+  const [showAuthPrompt, setShowAuthPrompt] = useState(!user);
+  const { openPlayer } = usePlayer();
 
+  useEffect(() => {
+    if (user || guestMode) {
+      setShowAuthPrompt(false);
+    }
+  }, [user, guestMode]);
+  
   const handleInteraction = (type: InteractionType) => {
     if (!user) {
-      navigate('/auth');
+      setShowAuthPrompt(true);
       return;
     }
 
@@ -146,12 +196,7 @@ export default function FeedPage() {
     };
   }, [goToNext, goToPrevious]);
 
-  // Handle entering PiP mode from TrackCard
-  const handlePipModeActivate = (videoId: string, title: string) => {
-    setPipVideo({ videoId, title });
-  };
-
-  if (authLoading || tracksLoading) {
+  if (authLoading || tracksLoading || recommendationsLoading) {
     return (
       <div className="min-h-screen bg-background">
         <FeedSkeleton />
@@ -176,57 +221,77 @@ export default function FeedPage() {
   const currentTrack = tracks[currentIndex];
 
   return (
-    <div className="min-h-screen bg-background flex flex-col touch-pan-y" ref={containerRef}>
+    <div className="min-h-screen bg-background flex flex-col touch-pan-y" ref={containerRef} data-feed>
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-strong safe-top">
-        <ResponsiveContainer maxWidth="2xl">
-          <div className="flex items-center justify-between py-3">
-            <h1 className="text-lg lg:text-xl font-bold gradient-text">HarmonyFeed</h1>
-            <div className="flex items-center gap-3 lg:gap-4">
-              <span className="text-xs lg:text-sm text-muted-foreground flex items-center gap-1">
-              {currentIndex + 1} / {tracks.length}
-              {dataSource === 'spotify' && (
-                <span className="ml-1 text-[#1DB954] flex items-center gap-0.5" title="Your Spotify history">
-                  <Music className="w-3 h-3" />
+      <header className="fixed top-0 left-0 right-0 z-40 glass-strong safe-top border-b border-border/50">
+        <ResponsiveContainer maxWidth="full">
+          {/*
+            pl-14/16 clears BottomNav's floating hamburger button, which is
+            fixed at top-left (p-3/p-4 + a 40px button) independently of this
+            header. Without this offset the brand name renders directly under
+            that button and is effectively invisible.
+          */}
+          <div className="flex items-center justify-between gap-3 py-2.5 sm:py-3 pl-14 sm:pl-16 min-w-0">
+            <h1 className="text-base sm:text-lg lg:text-xl font-bold gradient-text tracking-tight shrink-0">
+              CladeMusic
+            </h1>
+
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              {tracks.length > 0 && (
+                <span
+                  className="text-[11px] sm:text-xs text-muted-foreground font-mono tabular-nums shrink-0"
+                  aria-live="polite"
+                >
+                  {currentIndex + 1}
+                  <span className="opacity-50">/{tracks.length}</span>
                 </span>
               )}
-              {dataSource === 'seed' && (
-                <span className="ml-1 text-amber-500" title="Using demo data">•</span>
+              {!user && (
+                <Button
+                  size="sm"
+                  onClick={() => navigate('/auth')}
+                  className="gap-1.5 shrink-0"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span className="hidden sm:inline">Sign in</span>
+                </Button>
               )}
-            </span>
-            {!user && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate('/auth')}
-                className="gap-1.5"
-              >
-                <LogIn className="w-4 h-4" />
-                <span className="hidden sm:inline">Sign in</span>
-              </Button>
-            )}
+              <ProfileCircle />
+            </div>
           </div>
-        </div>
         </ResponsiveContainer>
+
+        {/* Position through the feed - a thin, unobtrusive progress rail */}
+        {tracks.length > 1 && (
+          <div className="h-0.5 w-full bg-muted/40">
+            <motion.div
+              className="h-full bg-gradient-to-r from-primary to-accent"
+              animate={{ width: `${((currentIndex + 1) / tracks.length) * 100}%` }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+            />
+          </div>
+        )}
       </header>
 
-      {/* Navigation arrows (desktop) */}
-      <div className="hidden md:flex fixed left-4 top-1/2 -translate-y-1/2 z-30 flex-col gap-2">
+      {/* Navigation arrows - desktop only; on touch the feed is swiped */}
+      <div className="hidden lg:flex fixed left-4 xl:left-6 top-1/2 -translate-y-1/2 z-30 flex-col gap-2">
         <Button
           variant="outline"
           size="icon"
-          className="glass"
+          className="glass rounded-full"
           onClick={goToPrevious}
           disabled={currentIndex === 0}
+          aria-label="Previous track"
         >
           <ChevronUp className="w-5 h-5" />
         </Button>
         <Button
           variant="outline"
           size="icon"
-          className="glass"
+          className="glass rounded-full"
           onClick={goToNext}
           disabled={currentIndex === tracks.length - 1}
+          aria-label="Next track"
         >
           <ChevronDown className="w-5 h-5" />
         </Button>
@@ -234,59 +299,85 @@ export default function FeedPage() {
 
       {/* Feed content */}
       <main className="flex-1 pt-16 pb-24">
-        <ResponsiveContainer maxWidth="2xl" className="py-6">
-          <DesktopColumns
-            left={
-              <FeedSidebar
-                currentTrack={currentTrack}
-                trackIndex={currentIndex}
-                totalTracks={tracks.length}
-              />
-            }
-            center={
-              <div className="h-[calc(100vh-12rem)] max-w-lg mx-auto lg:max-w-2xl">
-                <AnimatePresence mode="wait">
-                  {currentTrack && (
-                    <motion.div
-                      key={currentTrack.id}
-                      initial={{ opacity: 0, y: 50 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -50 }}
-                      transition={{ duration: 0.3 }}
-                      className="h-full"
-                    >
-                      <TrackCard
-                        track={currentTrack}
-                        isActive={true}
-                        onInteraction={handleInteraction}
-                        interactions={interactions.get(currentTrack.id) || new Set()}
-                        onPipModeActivate={handlePipModeActivate}
-                        isPipActive={pipVideo?.videoId === currentTrack.youtube_id}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+        <ResponsiveContainer maxWidth="full" className="py-6">
+          {/* One guest prompt, not three - dismissible, and it never pushes the feed */}
+          {showAuthPrompt && !user && (
+            <div className="mx-auto mb-4 w-full max-w-lg lg:max-w-2xl rounded-xl border border-border/60 bg-background/70 px-4 py-3 shadow-md backdrop-blur">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">Exploring as a guest</p>
+                  <p className="text-xs text-muted-foreground">
+                    Browsing and playback stay open. Sign in to like, comment, follow and save.
+                  </p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" onClick={() => navigate('/auth')}>
+                    Sign in
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      enterGuestMode();
+                      setShowAuthPrompt(false);
+                    }}
+                  >
+                    Not now
+                  </Button>
+                </div>
               </div>
-            }
-            centerWidth="wide"
-          />
+            </div>
+          )}
+          {/*
+            Center-focused stage. Uses dvh so the card is not cut off by mobile
+            browser chrome, with a min-height floor so short landscape viewports
+            scroll instead of squashing the card.
+          */}
+          <div className="mx-auto w-full max-w-lg lg:max-w-2xl min-h-[32rem] h-[calc(100dvh-13rem)]">
+            <AnimatePresence mode="wait">
+              {currentTrack && (
+                <motion.div
+                  key={currentTrack.id}
+                  initial={{ opacity: 0, y: 50 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -50 }}
+                  transition={{ duration: 0.3 }}
+                  className="h-full"
+                >
+                  <TrackCard
+                    track={currentTrack}
+                    isActive={true}
+                    onInteraction={handleInteraction}
+                    interactions={interactions.get(currentTrack.id) || new Set()}
+                     onPipModeActivate={(videoId, title) => {
+                       if (!videoId) return;
+                       openPlayer({
+                         canonicalTrackId: currentTrack.id,
+                         provider: 'youtube',
+                         providerTrackId: videoId,
+                         autoplay: true,
+                         context: 'feed',
+                         title,
+                         artist: currentTrack.artist,
+                       });
+                     }}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </ResponsiveContainer>
       </main>
 
-      {/* Picture-in-Picture mini player - persists across track changes */}
-      <AnimatePresence>
-        {pipVideo && (
-          <YouTubeEmbed
-            key={`pip-${pipVideo.videoId}`}
-            videoId={pipVideo.videoId}
-            title={pipVideo.title}
-            onClose={() => setPipVideo(null)}
-            onPipModeChange={(isPip) => {
-              if (!isPip) setPipVideo(null);
-            }}
-          />
-        )}
-      </AnimatePresence>
+      {/* Scrolling comments overlay for current track */}
+      {tracks[currentIndex] && (
+        <Suspense fallback={null}>
+          <ScrollingComments roomId="global" maxVisible={3} scrollSpeed={4000} />
+        </Suspense>
+      )}
+
+      {/* Guest banner */}
+      <GuestBanner />
 
       {/* Bottom navigation */}
       <BottomNav />

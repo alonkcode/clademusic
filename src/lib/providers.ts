@@ -23,6 +23,19 @@ export interface TrackProviderInfo {
   amazonMusicId?: string;
 }
 
+/**
+ * The app's single, shared playback-provider preference: Spotify when a track
+ * has it, YouTube otherwise. Used wherever something needs to auto-pick a
+ * provider without asking the user (a default highlighted icon, a one-tap
+ * "Play" action) so that choice is consistent everywhere rather than left to
+ * whichever component happens to render first.
+ */
+export function pickPreferredProvider(track: TrackProviderInfo): MusicProvider | null {
+  if (track.spotifyId || track.urlSpotifyWeb) return 'spotify';
+  if (track.youtubeId || track.urlYoutube) return 'youtube';
+  return null;
+}
+
 // Generate Spotify URLs from track ID
 export function generateSpotifyLinks(spotifyId: string): { web: string; app: string } {
   return {
@@ -74,8 +87,8 @@ export function getProviderLinks(track: TrackProviderInfo): ProviderLink[] {
 
 // Open provider link - opens web player directly
 export function openProviderLink(link: ProviderLink, preferApp = false): void {
-  // Always open web link in new tab - this opens Spotify web player immediately
-  window.open(link.webUrl, '_blank', 'noopener,noreferrer');
+  const targetUrl = preferApp && link.appUrl ? link.appUrl : link.webUrl;
+  window.open(targetUrl, '_blank', 'noopener,noreferrer');
 }
 
 // Provider display info

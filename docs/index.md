@@ -8,6 +8,10 @@ title: Welcome to Clade
 
 Clade is a TikTok-style music discovery platform that analyzes songs by **harmonic structure**, not genre. Find tracks using chord progressions, cadence patterns, and relative theory.
 
+## 🔖 Current Version
+
+- Web: **1.0.1** (2026-02-04) — see [CHANGELOG.md](../CHANGELOG.md)
+
 ## 📚 Documentation
 
 ### Getting Started
@@ -18,12 +22,14 @@ Clade is a TikTok-style music discovery platform that analyzes songs by **harmon
 
 ### Development
 - [Development Guide](development.md) — Local development workflow
+- [Database Setup](DATABASE_SETUP.md) — Provisioning Supabase from empty, seeding, verification
 - [Testing](testing.md) — Vitest and Cypress testing
 - [Building for Production](build.md) — Production builds
-- [Deployment](deployment.md) — GitHub Pages and hosting
+- [Deployment](deployment.md) — GitHub Pages, Vercel, and base paths
 
 ### Architecture
 - [Harmonic Analysis Architecture](HARMONIC_ANALYSIS_ARCHITECTURE.md) — **Core system design** (relative theory, hybrid pipeline, similarity engine)
+- [Harmonic Loop](HARMONIC_LOOP.md) — Web Audio playback of progressions in any key
 - [Architecture Summary](ARCHITECTURE_SUMMARY.md) — Quick reference for technical decisions
 
 ### Contributing
@@ -34,6 +40,9 @@ Clade is a TikTok-style music discovery platform that analyzes songs by **harmon
 ### Reference
 - [Changelog](../CHANGELOG.md) — Version history and recent changes
 - [Tasks](../TASKS.md) — Current progress and roadmap
+- [Release Process](RELEASE_PROCESS.md) — How versions/releases work
+- [Code Review Checklist](CODE_REVIEW.md) — What to verify for every PR
+- [Known Issues](KNOWN_ISSUES.md) — Operational notes + open bugs
 
 ---
 
@@ -50,4 +59,4 @@ Tracks matched by: Progression shape (50%), Cadence (20%), Loop length (15%), Mo
 
 ---
 
-If you have questions or need help, open an issue on [GitHub](https://github.com/repoisrael/clade) or reach out to the maintainer.
+If you have questions or need help, open an issue on [GitHub](https://github.com/kaospan/clademusic) or reach out to the maintainer.

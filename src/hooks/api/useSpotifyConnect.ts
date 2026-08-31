@@ -6,6 +6,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { clearSpotifyCredentialCache } from '@/services/spotifyAuthService';
 
 // Storage keys for OAuth state (used across page reload during OAuth flow)
 const OAUTH_STATE_KEY = 'harmony_hub_oauth_state';
@@ -32,14 +33,20 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
 }
 
 const SPOTIFY_AUTH_URL = 'https://accounts.spotify.com/authorize';
+// Web Playback requires the "streaming" scope and the ability to control playback
+// Add modify/app-remote scopes to avoid 401/403 on transfer/play.
 const SPOTIFY_SCOPES = [
   'user-read-email',
   'user-read-private',
+  'user-top-read',
+  'streaming',
+  'user-modify-playback-state',
   'user-read-playback-state',
   'user-read-currently-playing',
   'user-read-recently-played',
   'user-library-read',
   'playlist-read-private',
+  'app-remote-control',
 ].join(' ');
 
 /**
@@ -114,8 +121,9 @@ export function useConnectSpotify() {
       console.log('[Spotify Connect] State stored:', state.substring(0, 8) + '...');
 
       // Get the redirect URI - should match what's configured in Spotify Developer Dashboard
-      const redirectUri = import.meta.env.VITE_SPOTIFY_REDIRECT_URI || 
-        `${window.location.origin}/spotify-callback`;
+      const basePath = import.meta.env.BASE_URL || '/';
+      const redirectUri = import.meta.env.VITE_SPOTIFY_REDIRECT_URI 
+        || `${window.location.origin}${basePath.endsWith('/') ? basePath : basePath + '/'}spotify-callback`;
       console.log('[Spotify Connect] Redirect URI:', redirectUri);
 
       // Build authorization URL
@@ -155,6 +163,8 @@ export function useDisconnectSpotify() {
         .eq('provider', 'spotify');
 
       if (error) throw error;
+
+      clearSpotifyCredentialCache(user.id);
 
       // Also try to remove from provider_accounts if it exists
     //   await supabase

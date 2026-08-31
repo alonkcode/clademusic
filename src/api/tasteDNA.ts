@@ -37,7 +37,20 @@ export interface TasteDNAProfile {
  */
 export async function computeTasteDNA(userId: string): Promise<TasteDNAProfile | null> {
   try {
-    // Get user's play history and saved tracks
+    // Get user's play history and saved tracks.
+    //
+    // play_history.track_id keeps a real FK to tracks.id, so PostgREST can
+    // embed it directly. user_interactions.track_id cannot: it's TEXT, not
+    // UUID, because it also holds provider-only ids ("spotify:<id>") for
+    // tracks that were never inserted into `tracks` at all - a plain FK would
+    // reject exactly the rows that need to be storable. tracks!inner(*)
+    // depends on PostgREST finding a declared relationship, so it 400s
+    // ("could not find a relationship") without one.
+    //
+    // Fetched separately instead and joined here in memory - filtering
+    // user_interactions rows down to the ones with a matching UUID row in
+    // `tracks` this way is also just correct: a provider-only interaction has
+    // no track row to attach, and should be dropped rather than erroring.
     const [playHistoryResult, interactionsResult] = await Promise.all([
       supabase
         .from('play_history')
@@ -47,21 +60,34 @@ export async function computeTasteDNA(userId: string): Promise<TasteDNAProfile |
         .limit(200),
       supabase
         .from('user_interactions')
-        .select('track_id, tracks!inner(*)')
+        .select('track_id')
         .eq('user_id', userId)
         .in('interaction_type', ['like', 'save'])
         .order('created_at', { ascending: false })
         .limit(100)
     ]);
 
-    // Combine and deduplicate tracks
     const playedTracks = (playHistoryResult.data || [])
       .map(pe => (pe as any).tracks as Track)
       .filter(Boolean);
-    
-    const likedTracks = (interactionsResult.data || [])
-      .map(int => (int as any).tracks as Track)
-      .filter(Boolean);
+
+    // tracks.id is UUID; a provider-only id like "spotify:<id>" passed to
+    // .in('id', ...) would fail the whole query with a Postgres cast error
+    // ("invalid input syntax for type uuid"), not just skip that one row -
+    // filtered out up front rather than relying on the database to ignore it.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const likedTrackIds = (interactionsResult.data || [])
+      .map((row) => row.track_id)
+      .filter((id): id is string => !!id && UUID_RE.test(id));
+
+    let likedTracks: Track[] = [];
+    if (likedTrackIds.length > 0) {
+      const { data: likedTrackRows } = await supabase
+        .from('tracks')
+        .select('*')
+        .in('id', likedTrackIds);
+      likedTracks = (likedTrackRows || []) as unknown as Track[];
+    }
 
     // Merge and deduplicate
     const trackMap = new Map<string, Track>();

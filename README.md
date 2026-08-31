@@ -52,25 +52,24 @@ A TikTok-style music discovery platform that helps you find songs based on **har
 ## 🚀 Quick Start
 
 ### Prerequisites
-
+- Bun (required)
+- Git
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/repoisrael/clade.git
-cd clade
+git clone https://github.com/kaospan/clademusic.git
+cd clademusic
 
 # Install dependencies
 bun install
-# or: npm install
 
 # Start the development server
-bun dev
-# or: npm run dev
+bun run dev
 ```
 
-The app will be available at `http://localhost:5173`
+The app will be available at `http://localhost:8080/clademusic/`
 
 ### Environment Variables
 
@@ -83,7 +82,10 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 # Spotify OAuth (optional)
 VITE_SPOTIFY_CLIENT_ID=your_spotify_client_id
-VITE_SPOTIFY_REDIRECT_URI=http://localhost:5173/api/spotify-callback
+VITE_SPOTIFY_REDIRECT_URI=http://localhost:8080/clademusic/spotify-callback
+
+# Production (GitHub Pages)
+# VITE_SPOTIFY_REDIRECT_URI=https://kaospan.github.io/clademusic/spotify-callback
 ```
 
 ## 🏗️ Project Structure
@@ -113,8 +115,8 @@ src/
 │   ├── harmony.ts       # Harmonic analysis types
 │   └── index.ts         # Core Track, User types
 └── contexts/            # React Context providers
-    ├── QueueContext.tsx         # Playback queue management
-    └── FloatingPlayersContext.tsx  # Player z-index control
+  ├── QueueContext.tsx         # Playback queue management
+  └── YouTubePlayerContext.tsx # Player iframe helpers
 ```
 
 ## 🛠️ Tech Stack
@@ -135,11 +137,12 @@ src/
 
 | Route | Description |
 |-------|-------------|
-| `/` | **Feed** — TikTok-style track discovery with desktop sidebar, progress tracking, and keyboard shortcuts |
+| `/` | **Landing** — Intro + onboarding entry point |
+| `/feed` | **Feed** — TikTok-style track discovery with desktop sidebar, progress tracking, and keyboard shortcuts |
 | `/search` | **Search** — Find songs by name/artist or chord progression patterns (e.g., "I-V-vi-IV") |
 | `/following` | **Following** — Activity feed from people you follow with play events |
 | `/profile` | **Profile** — Your taste DNA, connected services, complete play history with clickable tracks |
-| `/connections` | **Connections** — Track relationships (samples, covers, remixes) with network visualization |
+| `/connections/:trackId` | **Connections** — Track relationships (samples, covers, remixes) with network visualization |
 | `/compare` | **Compare** — Side-by-side harmonic analysis comparison tool |
 | `/track/:id` | **Track Detail** — Full metadata, credits, sections, similar tracks by harmony |
 
@@ -164,44 +167,44 @@ bun run preview
 
 ## 📦 Deployment
 
-The app is designed to be deployed on any static hosting platform:
-
-```bash
-# Build the app
-bun run build
-
-# The `dist/` folder contains the production build
-```
-
-
-- **Cloudflare Pages** — Edge-first hosting
 
 ### Deploying to GitHub Pages
 
-1. Make sure your `package.json` includes:
+This repo deploys automatically on push to `main` using GitHub Actions (`.github/workflows/deploy.yml`).
 
-  "homepage": "https://repoisrael.github.io/clade",
-  "scripts": {
-    "predeploy": "bun run build",
-    "deploy": "gh-pages -d dist"
-  }
-  ```
+**Recommended (GitHub Actions):**
+- GitHub: **Settings → Pages → Source → GitHub Actions**
+- Push to `main` (Deploy workflow publishes `dist/`)
+
+**Manual deploy (optional):** ensure your `package.json` includes:
+
+   ```json
+   "homepage": "https://kaospan.github.io/clademusic/",
+   "scripts": {
+     "predeploy": "bun run build && echo . > dist/.nojekyll",
+     "deploy": "bun run build && gh-pages -d dist"
+   }
+   ```
 
 2. Install the `gh-pages` package if you haven't already:
 
-  ```bash
-  bun add -D gh-pages
-  # or: npm install --save-dev gh-pages
-  ```
+   ```bash
+   bun add -D gh-pages
+   # or: bun install --save-dev gh-pages
+   ```
 
 3. Deploy:
 
-  ```bash
-  bun run deploy
-  # or: npm run deploy
-  ```
+   ```bash
+   bun run deploy
+   # or: bun run deploy
+   ```
 
-Your site will be live at https://repoisrael.github.io/clade
+4. Go to your GitHub repository settings → Pages, and set the source to the `gh-pages` branch (manual deploy only). Your site will be live at:
+
+   https://kaospan.github.io/clademusic/
+
+**Note:** The build output is in the `dist/` folder. The `.nojekyll` file disables Jekyll processing for static assets.
 
 ## 🤝 Contributing
 
@@ -217,5 +220,6 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 ---
 
 <p align="center">
-  Made with 🎵 by <a href="https://github.com/repoisrael">repoisrael</a>
+  Made with 🎵 by <a href="https://github.com/kaospan">kaospan</a>
 </p>
+

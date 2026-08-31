@@ -27,6 +27,7 @@ import type {
   RomanChord,
 } from '@/types/harmony';
 import { compareProgressions } from '@/types/harmony';
+import { supabase } from '@/integrations/supabase/client';
 
 // ============================================================================
 // CONFIGURATION
@@ -85,18 +86,84 @@ export async function findSimilarTracks(
 
 /**
  * Find tracks matching a specific progression pattern
+ * Supports progression rotation matching
  */
 export async function findByProgression(
   progression: RomanChord[],
-  options?: { max_results?: number; allow_transposition?: boolean }
+  options?: { max_results?: number; allow_rotation?: boolean }
 ): Promise<SimilarityResult[]> {
   const maxResults = options?.max_results || DEFAULT_MAX_RESULTS;
+  const allowRotation = options?.allow_rotation ?? true;
   
-  // TODO: Query database for tracks with matching progression
-  // If allow_transposition, also check rotated versions
-  // e.g., [I, V, vi, IV] matches [V, vi, IV, I] rotated
-  
-  return [];
+  try {
+    // Query database for candidate tracks
+    const { data: candidates, error } = await supabase
+      .from('harmonic_fingerprints')
+      .select('*')
+      .gte('confidence_score', 0.5) // Minimum confidence threshold
+      .order('confidence_score', { ascending: false })
+      .limit(maxResults * 3); // Over-fetch for filtering
+
+    if (error) {
+      console.error('[SimilarityEngine] Query error:', error);
+      return [];
+    }
+
+    if (!candidates || candidates.length === 0) {
+      return [];
+    }
+
+    // Score and filter matches
+    const results: SimilarityResult[] = [];
+
+    for (const candidate of candidates as HarmonicFingerprint[]) {
+      const candidateProg = candidate.roman_progression;
+
+      // Direct match
+      const directScore = compareProgressions(progression, candidateProg);
+      let bestScore = directScore;
+      let rotationOffset: number | undefined;
+      let matchedWithRotation = false;
+
+      // Check rotations if enabled
+      if (allowRotation && candidateProg.length === progression.length) {
+        for (let offset = 1; offset < candidateProg.length; offset++) {
+          const rotated = rotateProgression(candidateProg, offset);
+          const rotatedScore = compareProgressions(progression, rotated);
+          
+          if (rotatedScore > bestScore) {
+            bestScore = rotatedScore;
+            rotationOffset = offset;
+            matchedWithRotation = true;
+          }
+        }
+      }
+
+      // If score is high enough, add to results
+      if (bestScore >= 0.6) {
+        results.push({
+          track_id: candidate.track_id,
+          similarity_score: bestScore,
+          matching_features: {
+            shared_progression_shape: true,
+            cadence_match: candidate.cadence_type,
+            rotation_offset: matchedWithRotation ? rotationOffset : undefined,
+          },
+          explanation: matchedWithRotation
+            ? `Matches progression with ${rotationOffset}-chord rotation (${(bestScore * 100).toFixed(0)}% similarity)`
+            : `Direct progression match (${(bestScore * 100).toFixed(0)}% similarity)`,
+        });
+      }
+    }
+
+    // Sort by score and limit
+    return results
+      .sort((a, b) => b.similarity_score - a.similarity_score)
+      .slice(0, maxResults);
+  } catch (error) {
+    console.error('[SimilarityEngine] Error in findByProgression:', error);
+    return [];
+  }
 }
 
 /**
@@ -252,31 +319,89 @@ function generateExplanation(
 
 /**
  * Query candidate tracks efficiently
+ * Uses database indexes for fast filtering
  */
 async function queryCandidates(
   reference: HarmonicFingerprint,
   filters?: SimilarityFilters
 ): Promise<HarmonicFingerprint[]> {
-  // TODO: Optimize database query with indexes
-  // Suggested indexes:
-  // - cadence_type
-  // - loop_length_bars
-  // - tonal_center.mode
-  // - confidence_score
-  
-  // TODO: Use vector search for progression embeddings
-  // This would allow semantic similarity beyond exact matches
-  
-  // TEMPORARY: Return empty until database schema ready
-  return [];
+  try {
+    let query = supabase
+      .from('harmonic_fingerprints')
+      .select('*')
+      .neq('track_id', reference.track_id) // Exclude reference track
+      .gte('confidence_score', 0.5); // Minimum confidence
+
+    // Apply filters
+    if (filters?.min_confidence) {
+      query = query.gte('confidence_score', filters.min_confidence);
+    }
+
+    if (filters?.cadence_types && filters.cadence_types.length > 0) {
+      query = query.in('cadence_type', filters.cadence_types);
+    }
+
+    if (filters?.modes && filters.modes.length > 0) {
+      // Filter by mode (stored in tonal_center.mode)
+      // Note: This requires a JSONB query
+      const modeConditions = filters.modes.map(mode => `tonal_center->mode.eq.${mode}`);
+      // Simplified: just fetch all and filter client-side for now
+    }
+
+    if (filters?.loop_lengths && filters.loop_lengths.length > 0) {
+      query = query.in('loop_length_bars', filters.loop_lengths);
+    }
+
+    // Order by confidence and limit
+    query = query
+      .order('confidence_score', { ascending: false })
+      .limit(100); // Get top candidates
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('[SimilarityEngine] Query error:', error);
+      return [];
+    }
+
+    // Additional client-side filtering for mode (since JSONB queries are complex)
+    let candidates = data as HarmonicFingerprint[] || [];
+
+    if (filters?.modes && filters.modes.length > 0) {
+      candidates = candidates.filter(c => 
+        filters.modes!.includes(c.tonal_center.mode)
+      );
+    }
+
+    return candidates;
+  } catch (error) {
+    console.error('[SimilarityEngine] Error querying candidates:', error);
+    return [];
+  }
 }
 
 /**
  * Get harmonic fingerprint from database
  */
 async function getFingerprint(trackId: string): Promise<HarmonicFingerprint | null> {
-  // TODO: Query from harmonic_fingerprints table
-  return null;
+  try {
+    const { data, error } = await supabase
+      .from('harmonic_fingerprints')
+      .select('*')
+      .eq('track_id', trackId)
+      .order('analysis_timestamp', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('[SimilarityEngine] Fingerprint lookup error:', error);
+      return null;
+    }
+
+    return (data?.[0] as HarmonicFingerprint | undefined) ?? null;
+  } catch (error) {
+    console.error('[SimilarityEngine] Error getting fingerprint:', error);
+    return null;
+  }
 }
 
 // ============================================================================
@@ -314,23 +439,75 @@ function rotateProgression(progression: RomanChord[], n: number): RomanChord[] {
 
 /**
  * Find progression variations (inversions, substitutions)
+ * Includes rotations and common chord substitutions
  */
 export function findProgressionVariations(
   progression: RomanChord[]
 ): RomanChord[][] {
   const variations: RomanChord[][] = [];
 
+  // Add original
+  variations.push(progression);
+
   // Add rotations
-  for (let i = 0; i < progression.length; i++) {
+  for (let i = 1; i < progression.length; i++) {
     variations.push(rotateProgression(progression, i));
   }
 
-  // TODO: Add common substitutions
-  // e.g., vi can substitute for IV
-  // ii can substitute for IV
-  // etc.
+  // Add common substitutions
+  const commonSubstitutions: Record<string, string[]> = {
+    'IV': ['ii'], // Subdominant substitution
+    'ii': ['IV'],
+    'vi': ['IV'], // Relative minor substitution
+    'iii': ['I'], // Mediant substitution
+    'I': ['iii', 'vi'], // Tonic substitutions
+    'V': ['vii°'], // Dominant substitution
+    'vii°': ['V'],
+  };
+
+  // Generate substitution variations (limit to prevent explosion)
+  for (let i = 0; i < Math.min(progression.length, 3); i++) {
+    const chord = progression[i];
+    const subs = commonSubstitutions[chord.numeral];
+    
+    if (subs) {
+      for (const subNumeral of subs) {
+        const variation = [...progression];
+        variation[i] = {
+          ...chord,
+          numeral: subNumeral,
+        };
+        variations.push(variation);
+      }
+    }
+  }
 
   return variations;
+}
+
+/**
+ * Normalize progression for comparison
+ * Converts to canonical form (removes extensions, simplifies qualities)
+ */
+export function normalizeProgression(progression: RomanChord[]): RomanChord[] {
+  return progression.map(chord => ({
+    numeral: chord.numeral,
+    quality: simplifyQuality(chord.quality),
+  }));
+}
+
+/**
+ * Simplify chord quality to basic types
+ */
+function simplifyQuality(quality: string): RomanChord['quality'] {
+  // Map complex qualities to basic types
+  if (quality.includes('maj') || quality === 'major') return 'major';
+  if (quality.includes('min') || quality === 'minor') return 'minor';
+  if (quality.includes('dim') || quality === 'diminished') return 'diminished';
+  if (quality.includes('aug') || quality === 'augmented') return 'augmented';
+  if (quality.includes('dom') || quality.includes('7')) return 'dominant';
+  
+  return quality as RomanChord['quality'];
 }
 
 // ============================================================================
@@ -342,4 +519,5 @@ export {
   calculateSimilarity,
   matchesWithRotation,
   rotateProgression,
+  normalizeProgression,
 };

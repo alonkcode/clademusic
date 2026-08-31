@@ -2,6 +2,7 @@ import * as React from "react";
 import * as RechartsPrimitive from "recharts";
 
 import { cn } from "@/lib/utils";
+import { ChartErrorBoundary } from "@/components/ui/ChartErrorBoundary";
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
@@ -38,20 +39,50 @@ const ChartContainer = React.forwardRef<
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId();
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const hostRef = React.useRef<HTMLDivElement | null>(null);
+  const [hasSize, setHasSize] = React.useState(false);
+
+  React.useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      setHasSize(rect.width > 0 && rect.height > 0);
+    };
+
+    measure();
+    const resizeObserver = new ResizeObserver(() => measure());
+    resizeObserver.observe(el);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   return (
     <ChartContext.Provider value={{ config }}>
       <div
+        ref={(node) => {
+          hostRef.current = node;
+          if (typeof ref === "function") ref(node);
+          else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = node;
+        }}
         data-chart={chartId}
-        ref={ref}
         className={cn(
           "flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-none [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-none [&_.recharts-surface]:outline-none",
           className,
         )}
+        style={{ minHeight: 260 }}
         {...props}
       >
         <ChartStyle id={chartId} config={config} />
-        <RechartsPrimitive.ResponsiveContainer>{children}</RechartsPrimitive.ResponsiveContainer>
+        <div className="w-full h-full">
+          {hasSize ? (
+            <ChartErrorBoundary>
+              <RechartsPrimitive.ResponsiveContainer width="100%" height="100%">
+                {children}
+              </RechartsPrimitive.ResponsiveContainer>
+            </ChartErrorBoundary>
+          ) : null}
+        </div>
       </div>
     </ChartContext.Provider>
   );

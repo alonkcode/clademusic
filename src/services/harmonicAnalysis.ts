@@ -26,6 +26,12 @@ import type {
 } from '@/types/harmony';
 import type { Track } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
+import { analyzeAudioTrack } from './audioAnalysis';
+
+type AnalysisJobRequest = AnalysisRequest & {
+  audio_hash?: string;
+  isrc?: string;
+};
 
 // ============================================================================
 // CONFIGURATION
@@ -47,6 +53,21 @@ const ANALYSIS_CONFIG = {
   // Analysis versions
   CURRENT_MODEL_VERSION: '1.0.0',
 } as const;
+export { ANALYSIS_CONFIG };
+
+const TTL_MS = ANALYSIS_CONFIG.CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
+const REANALYZE_MS = ANALYSIS_CONFIG.REANALYSIS_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+
+const withinWindow = (timestamp: string, windowMs: number) => {
+  const age = Date.now() - new Date(timestamp).getTime();
+  return age >= 0 && age <= windowMs;
+};
+
+const computeReuseWindows = (baseDate = Date.now()) => {
+  const reuseUntil = new Date(baseDate + TTL_MS).toISOString();
+  const reanalyzeAfter = new Date(baseDate + REANALYZE_MS).toISOString();
+  return { reuse_until: reuseUntil, reanalyze_after: reanalyzeAfter };
+};
 
 // ============================================================================
 // MAIN ANALYSIS API
@@ -58,12 +79,14 @@ const ANALYSIS_CONFIG = {
  */
 export async function getHarmonicAnalysis(
   trackId: string,
-  options: { forceReanalysis?: boolean } = {}
+  options: { forceReanalysis?: boolean; audioHash?: string; isrc?: string } = {}
 ): Promise<AnalysisResult | null> {
   try {
+    const { forceReanalysis, audioHash, isrc } = options;
+
     // Step 1: Check cache
-    if (!options.forceReanalysis) {
-      const cached = await checkHarmonyCache(trackId);
+    if (!forceReanalysis) {
+      const cached = await checkHarmonyCache({ trackId, audioHash, isrc });
       if (cached) {
         return {
           fingerprint: cached,
@@ -75,7 +98,7 @@ export async function getHarmonicAnalysis(
     }
 
     // Step 2: Check if analysis job already running
-    const existingJob = await getActiveJob(trackId);
+    const existingJob = await getActiveJob({ trackId, audioHash, isrc });
     if (existingJob) {
       return await waitForJob(existingJob.id);
     }
@@ -84,6 +107,8 @@ export async function getHarmonicAnalysis(
     const job = await queueAnalysis({
       track_id: trackId,
       priority: 'normal',
+      audio_hash: audioHash,
+      isrc,
     });
 
     // Step 4: Return provisional data immediately (don't block UI)
@@ -107,28 +132,79 @@ export async function getHarmonicAnalysis(
 
 /**
  * Queue analysis job (runs in background)
+ * Implements idempotency check before inserting
  */
-export async function queueAnalysis(request: AnalysisRequest): Promise<AnalysisJob> {
+export async function queueAnalysis(request: AnalysisJobRequest): Promise<AnalysisJob> {
+  // Double-check for existing active job (race condition prevention)
+  const existingJob = await getActiveJob({
+    trackId: request.track_id,
+    audioHash: request.audio_hash,
+    isrc: request.isrc,
+  });
+
+  if (existingJob) {
+    console.log('[AnalysisJob] Reusing existing job:', existingJob.id);
+    return existingJob;
+  }
+
   const jobId = crypto.randomUUID();
+  const now = new Date().toISOString();
   
   const job: AnalysisJob = {
     id: jobId,
     track_id: request.track_id,
     status: 'queued',
     progress: 0.0,
-    started_at: new Date().toISOString(),
+    started_at: now,
   };
 
-  // TODO: Store job in database
-  // await supabase.from('analysis_jobs').insert(job);
+  const jobPayload = {
+    ...job,
+    analysis_version: ANALYSIS_CONFIG.CURRENT_MODEL_VERSION,
+    audio_hash: request.audio_hash ?? null,
+    isrc: request.isrc ?? null,
+  };
 
-  // TODO: Trigger Edge Function for async processing
-  // await supabase.functions.invoke('analyze-harmony', { body: request });
+  const { error } = await supabase.from('analysis_jobs').insert(jobPayload);
+  if (error) {
+    console.error('[AnalysisJob] Queue insert error:', error.message);
+    throw new Error(`Failed to queue analysis: ${error.message}`);
+  }
 
-  // For now, simulate async analysis
-  setTimeout(() => {
-    runAnalysisJob(job).catch(console.error);
-  }, 100);
+  console.log('[AnalysisJob] Queued new job:', {
+    job_id: jobId,
+    track_id: request.track_id,
+    has_audio_hash: !!request.audio_hash,
+    has_isrc: !!request.isrc,
+  });
+
+  // Trigger Edge Function for async processing
+  supabase.functions
+    .invoke('harmonic-analysis', {
+      body: {
+        track_id: request.track_id,
+        audio_hash: request.audio_hash,
+        isrc: request.isrc,
+        priority: request.priority ?? 'normal',
+        job_id: jobId,
+      },
+    })
+    .then(({ data, error }) => {
+      if (error) {
+        console.error('[AnalysisJob] Edge Function error:', error);
+      } else {
+        console.log('[AnalysisJob] Edge Function result:', data);
+      }
+    })
+    .catch(err => {
+      console.error('[AnalysisJob] Edge Function invocation failed:', err);
+      // Fallback to local processing if Edge Function unavailable
+      setTimeout(() => {
+        runAnalysisJob(job, request).catch(err => {
+          console.error('[AnalysisJob] Async execution error:', err);
+        });
+      }, 100);
+    });
 
   return job;
 }
@@ -137,14 +213,19 @@ export async function queueAnalysis(request: AnalysisRequest): Promise<AnalysisJ
  * Get job status
  */
 export async function getJobStatus(jobId: string): Promise<AnalysisJob | null> {
-  // TODO: Query from database
-  // const { data } = await supabase
-  //   .from('analysis_jobs')
-  //   .select('*')
-  //   .eq('id', jobId)
-  //   .single();
-  
-  return null;
+  const { data, error } = await supabase
+    .from('analysis_jobs')
+    .select('*')
+    .eq('id', jobId)
+    .limit(1);
+
+  if (error) {
+    console.error('[AnalysisJob] Status lookup error:', error.message);
+    return null;
+  }
+
+  const row = data?.[0];
+  return (row as AnalysisJob | undefined) ?? null;
 }
 
 // ============================================================================
@@ -153,46 +234,133 @@ export async function getJobStatus(jobId: string): Promise<AnalysisJob | null> {
 
 /**
  * Check harmony cache (database lookup)
+ * Implements idempotency: audio_hash > isrc > track_id priority
+ * Uses database-generated reuse_until and reanalyze_after columns
  */
-async function checkHarmonyCache(trackId: string): Promise<HarmonicFingerprint | null> {
-  try {
-    // TODO: Query from harmonic_fingerprints table
-    // const { data, error } = await supabase
-    //   .from('harmonic_fingerprints')
-    //   .select('*')
-    //   .eq('track_id', trackId)
-    //   .single();
+async function checkHarmonyCache(params: {
+  trackId: string;
+  audioHash?: string;
+  isrc?: string;
+}): Promise<HarmonicFingerprint | null> {
+  const { trackId, audioHash, isrc } = params;
+  const now = new Date();
 
-    // if (error || !data) return null;
+  // Priority order for deduplication:
+  // 1. audio_hash (exact audio match, most reliable)
+  // 2. isrc (recording identifier, reliable for same master)
+  // 3. track_id (fallback, least reliable for duplicates)
+  
+  const lookup = async (column: 'audio_hash' | 'isrc' | 'track_id', value: string) => {
+    const { data, error } = await supabase
+      .from('harmonic_fingerprints')
+      .select('*')
+      .eq(column, value)
+      .gte('reuse_until', now.toISOString()) // Still within reuse window
+      .order('analysis_timestamp', { ascending: false })
+      .limit(1);
 
-    // Check if cache is stale
-    // const cacheAge = Date.now() - new Date(data.analysis_timestamp).getTime();
-    // const maxAge = ANALYSIS_CONFIG.CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
-    // if (cacheAge > maxAge) return null;
+    if (error) {
+      console.error('[HarmonyCache] Lookup error:', error.message);
+      return null;
+    }
 
-    // return data as HarmonicFingerprint;
-    
-    // TEMPORARY: Return null until database schema is ready
-    return null;
-  } catch (error) {
-    console.error('[HarmonyCache] Lookup error:', error);
-    return null;
+    return (data?.[0] as HarmonicFingerprint | undefined) ?? null;
+  };
+
+  // Check in priority order
+  const candidates: (HarmonicFingerprint | null)[] = [];
+  
+  if (audioHash) {
+    const result = await lookup('audio_hash', audioHash);
+    if (result) candidates.push(result);
   }
+  
+  if (isrc && candidates.length === 0) {
+    const result = await lookup('isrc', isrc);
+    if (result) candidates.push(result);
+  }
+  
+  if (candidates.length === 0) {
+    const result = await lookup('track_id', trackId);
+    if (result) candidates.push(result);
+  }
+
+  // Return first valid candidate
+  for (const cached of candidates) {
+    if (!cached) continue;
+
+    // Check if still within reanalysis window (generated column handles TTL)
+    const reanalyzeAfter = cached.reanalyze_after 
+      ? new Date(cached.reanalyze_after) 
+      : null;
+
+    if (reanalyzeAfter && now > reanalyzeAfter) {
+      console.log('[HarmonyCache] Fingerprint eligible for reanalysis:', cached.track_id);
+      continue; // Treat as cache miss to trigger fresh analysis
+    }
+
+    // Valid cached result
+    console.log('[HarmonyCache] Cache hit:', {
+      track_id: cached.track_id,
+      method: audioHash ? 'audio_hash' : isrc ? 'isrc' : 'track_id',
+      confidence: cached.confidence_score,
+      age_days: Math.floor((now.getTime() - new Date(cached.analysis_timestamp).getTime()) / (24 * 60 * 60 * 1000))
+    });
+
+    return cached;
+  }
+
+  console.log('[HarmonyCache] Cache miss for track:', trackId);
+  return null;
 }
 
 /**
  * Store analysis result in cache
+ * Implements idempotent upserts with proper conflict resolution
  */
-async function storeInCache(fingerprint: HarmonicFingerprint): Promise<void> {
+async function storeInCache(
+  fingerprint: HarmonicFingerprint & Partial<{ audio_hash: string | null; isrc: string | null }>
+): Promise<void> {
   try {
-    // TODO: Upsert to harmonic_fingerprints table
-    // await supabase
-    //   .from('harmonic_fingerprints')
-    //   .upsert(fingerprint, { onConflict: 'track_id' });
+    // Determine conflict resolution strategy based on available identifiers
+    // Priority: audio_hash (most specific) > isrc > track_id (least specific)
+    let onConflict: string;
     
-    console.log('[HarmonyCache] Stored fingerprint:', fingerprint.track_id);
+    if (fingerprint.audio_hash) {
+      onConflict = 'audio_hash';
+    } else if (fingerprint.isrc) {
+      onConflict = 'isrc';
+    } else {
+      onConflict = 'track_id';
+    }
+
+    const payload = {
+      ...fingerprint,
+      is_provisional: false,
+      ...computeReuseWindows(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('harmonic_fingerprints')
+      .upsert(payload, { 
+        onConflict,
+        // Update all fields on conflict (newer analysis overwrites)
+      });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    console.log('[HarmonyCache] Stored fingerprint:', {
+      track_id: fingerprint.track_id,
+      conflict_key: onConflict,
+      confidence: fingerprint.confidence_score,
+      provisional: fingerprint.is_provisional,
+    });
   } catch (error) {
     console.error('[HarmonyCache] Storage error:', error);
+    throw error; // Re-throw to handle upstream
   }
 }
 
@@ -202,108 +370,89 @@ async function storeInCache(fingerprint: HarmonicFingerprint): Promise<void> {
 
 /**
  * Run actual audio analysis (ML model)
+ * Orchestrates the analysis pipeline and updates job status
  */
-async function runAnalysisJob(job: AnalysisJob): Promise<AnalysisResult> {
+async function runAnalysisJob(job: AnalysisJob, request?: AnalysisJobRequest): Promise<AnalysisResult> {
   const startTime = Date.now();
+  const touch = async (patch: Record<string, unknown>) => {
+    const { error } = await supabase
+      .from('analysis_jobs')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+
+    if (error) {
+      console.error('[AnalysisJob] Update error:', error.message);
+    }
+  };
   
   try {
     // Update status
     job.status = 'processing';
     job.progress = 0.1;
+    await touch({ status: job.status, progress: job.progress });
 
-    // TODO: Fetch audio file
-    job.progress = 0.3;
+    // Run ML analysis pipeline
+    console.log('[AnalysisJob] Starting ML pipeline for:', job.track_id);
+    
+    const fingerprint = await analyzeAudioTrack({
+      track_id: job.track_id,
+      audio_hash: request?.audio_hash,
+      isrc: request?.isrc,
+      // TODO: Pass actual audio_url when available
+      // audio_url: track.audio_preview_url,
+    });
 
-    // TODO: Extract chroma features
-    job.progress = 0.5;
-
-    // TODO: Detect key and mode
-    job.progress = 0.7;
-
-    // TODO: Identify chord progression
     job.progress = 0.9;
+    await touch({ progress: job.progress });
 
-    // TEMPORARY: Mock result for demonstration
-    const mockResult = createMockAnalysis(job.track_id);
+    // Add identifiers from request
+    const fingerprintToStore = {
+      ...fingerprint,
+      audio_hash: request?.audio_hash ?? null,
+      isrc: request?.isrc ?? null,
+    };
     
     // Store result
-    await storeInCache(mockResult.fingerprint);
+    await storeInCache(fingerprintToStore);
     
     job.status = 'completed';
     job.progress = 1.0;
     job.completed_at = new Date().toISOString();
-    job.result = mockResult.fingerprint;
+    job.result = fingerprintToStore;
+
+    await touch({
+      status: job.status,
+      progress: job.progress,
+      completed_at: job.completed_at,
+      result: fingerprintToStore,
+    });
+
+    console.log('[AnalysisJob] Completed analysis:', {
+      job_id: job.id,
+      track_id: job.track_id,
+      confidence: fingerprint.confidence_score,
+      progression_length: fingerprint.roman_progression.length,
+    });
 
     return {
-      ...mockResult,
+      fingerprint: fingerprintToStore,
+      confidence: extractConfidence(fingerprintToStore),
+      method: 'ml_audio',
       processing_time_ms: Date.now() - startTime,
     };
   } catch (error) {
     job.status = 'failed';
     job.error_message = error instanceof Error ? error.message : 'Unknown error';
+    await touch({ status: job.status, error_message: job.error_message });
+    
+    console.error('[AnalysisJob] Analysis failed:', {
+      job_id: job.id,
+      track_id: job.track_id,
+      error: job.error_message,
+    });
+    
     throw error;
   }
-}
-
-/**
- * Mock analysis (placeholder until ML model integrated)
- */
-function createMockAnalysis(trackId: string): AnalysisResult {
-  // Common progressions for testing
-  const commonProgressions: RomanChord[][] = [
-    [
-      { numeral: 'I', quality: 'major' },
-      { numeral: 'V', quality: 'major' },
-      { numeral: 'vi', quality: 'minor' },
-      { numeral: 'IV', quality: 'major' },
-    ],
-    [
-      { numeral: 'i', quality: 'minor' },
-      { numeral: 'VI', quality: 'major' },
-      { numeral: 'III', quality: 'major' },
-      { numeral: 'VII', quality: 'major' },
-    ],
-    [
-      { numeral: 'I', quality: 'major' },
-      { numeral: 'IV', quality: 'major' },
-      { numeral: 'V', quality: 'major' },
-    ],
-  ];
-
-  const progression = commonProgressions[Math.floor(Math.random() * commonProgressions.length)];
-  
-  const tonalCenter: RelativeTonalCenter = {
-    root_interval: 0,
-    mode: 'major',
-    stability_score: 0.85,
-  };
-
-  const fingerprint: HarmonicFingerprint = {
-    track_id: trackId,
-    tonal_center: tonalCenter,
-    roman_progression: progression,
-    loop_length_bars: 4,
-    cadence_type: 'authentic',
-    confidence_score: 0.65,
-    analysis_timestamp: new Date().toISOString(),
-    analysis_version: ANALYSIS_CONFIG.CURRENT_MODEL_VERSION,
-    is_provisional: true, // Mark as provisional until real analysis
-    detected_key: 'C',
-    detected_mode: 'major',
-  };
-
-  return {
-    fingerprint,
-    confidence: {
-      overall: 0.65,
-      key_detection: 0.7,
-      chord_detection: 0.6,
-      structure_detection: 0.65,
-      tempo_detection: 0.7,
-    },
-    method: 'ml_audio',
-    processing_time_ms: 0,
-  };
 }
 
 /**
@@ -324,6 +473,7 @@ function createProvisionalFingerprint(trackId: string): HarmonicFingerprint {
     analysis_timestamp: new Date().toISOString(),
     analysis_version: ANALYSIS_CONFIG.CURRENT_MODEL_VERSION,
     is_provisional: true,
+    ...computeReuseWindows(), // provisional reuse window prevents hammering
     detected_key: undefined,
     detected_mode: 'major',
   };
@@ -335,19 +485,55 @@ function createProvisionalFingerprint(trackId: string): HarmonicFingerprint {
 
 /**
  * Get active job for track (if any)
+ * Implements deduplication to prevent redundant analysis jobs
  */
-async function getActiveJob(trackId: string): Promise<AnalysisJob | null> {
-  // TODO: Query from database
-  // const { data } = await supabase
-  //   .from('analysis_jobs')
-  //   .select('*')
-  //   .eq('track_id', trackId)
-  //   .in('status', ['queued', 'processing'])
-  //   .order('started_at', { ascending: false })
-  //   .limit(1)
-  //   .single();
-  
-  return null;
+async function getActiveJob(params: {
+  trackId: string;
+  audioHash?: string;
+  isrc?: string;
+}): Promise<AnalysisJob | null> {
+  const { trackId, audioHash, isrc } = params;
+
+  const search = async (column: 'audio_hash' | 'isrc' | 'track_id', value: string) => {
+    const { data, error } = await supabase
+      .from('analysis_jobs')
+      .select('*')
+      .eq(column, value)
+      .in('status', ['queued', 'processing'])
+      .order('started_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('[AnalysisJob] Active lookup error:', error.message);
+      return null;
+    }
+
+    return (data?.[0] as AnalysisJob | undefined) ?? null;
+  };
+
+  // Check in priority order (same as cache lookup)
+  if (audioHash) {
+    const job = await search('audio_hash', audioHash);
+    if (job) {
+      console.log('[AnalysisJob] Found active job by audio_hash:', job.id);
+      return job;
+    }
+  }
+
+  if (isrc) {
+    const job = await search('isrc', isrc);
+    if (job) {
+      console.log('[AnalysisJob] Found active job by isrc:', job.id);
+      return job;
+    }
+  }
+
+  const job = await search('track_id', trackId);
+  if (job) {
+    console.log('[AnalysisJob] Found active job by track_id:', job.id);
+  }
+
+  return job ?? null;
 }
 
 /**
@@ -367,6 +553,15 @@ async function waitForJob(jobId: string): Promise<AnalysisResult | null> {
         fingerprint: job.result,
         confidence: extractConfidence(job.result),
         method: 'ml_audio',
+        processing_time_ms: 0,
+      };
+    }
+
+    if (job.status === 'cached' && job.result) {
+      return {
+        fingerprint: job.result,
+        confidence: extractConfidence(job.result),
+        method: 'cached',
         processing_time_ms: 0,
       };
     }

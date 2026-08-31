@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { ChordBadge } from '@/components/ChordBadge';
 import { SpotifyIcon } from '@/components/QuickStreamButtons';
@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
+import { navigateToTrack } from '@/lib/navigation';
 import {
   User,
   LogOut,
@@ -27,6 +28,8 @@ import {
   Disc3,
   X,
   Shield,
+  Palette,
+  Play,
 } from 'lucide-react';
 import { usePlayHistory, usePlayStats } from '@/hooks/api/usePlayEvents';
 import { useProfile, useUserProviders, useSetPreferredProvider } from '@/hooks/api/useProfile';
@@ -48,7 +51,6 @@ import {
   useDisconnectLastFm,
 } from '@/hooks/api/useLastFm';
 import { useTasteDNA } from '@/hooks/api/useTasteDNA';
-import { useIsAdmin } from '@/hooks/api/useAdmin';
 import { PROVIDER_INFO } from '@/lib/providers';
 import { MusicProvider } from '@/types';
 import { formatDistanceToNow } from 'date-fns';
@@ -60,7 +62,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from 'sonner';
+import { ThemeEditor } from '@/components/ThemeEditor';
+import { useUserTheme } from '@/hooks/api/useThemes';
+import { useIsAdmin } from '@/hooks/api/useAdmin';
 import type { TimeRange } from '@/services/spotifyUserService';
+import { normalizeLastFmUsername } from '@/services/lastfmService';
+import { QuickStreamButtons } from '@/components/QuickStreamButtons';
+import { usePlayer } from '@/player/PlayerContext';
+import { getPreferredProvider } from '@/lib/preferences';
 
 // Mood profile styling
 const moodColors: Record<string, string> = {
@@ -87,6 +96,7 @@ export default function ProfilePage() {
   const [lastFmInput, setLastFmInput] = useState('');
   const [lastFmDialogOpen, setLastFmDialogOpen] = useState(false);
   const [timeRange, setTimeRange] = useState<TimeRange>('medium_term');
+  const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   
   // Profile data
   const { data: profile } = useProfile();
@@ -119,10 +129,13 @@ export default function ProfilePage() {
   // Taste DNA - real user data
   const { data: tasteDNA, isLoading: isTasteDNALoading } = useTasteDNA();
   
-  // Admin check
+  // Theme and admin
+  const { data: userTheme } = useUserTheme(user?.id);
   const { data: isAdmin } = useIsAdmin();
+  const { openPlayer } = usePlayer();
 
   const spotifyConnected = isSpotifyConnected === true;
+  const defaultTab = topTracks.length > 0 ? 'tracks' : topArtists.length > 0 ? 'artists' : 'recent';
   const lastFmConnected = !!lastFmUsername;
   const likesCount = interactionStats?.likes ?? 0;
   const savesCount = interactionStats?.saves ?? 0;
@@ -151,12 +164,13 @@ export default function ProfilePage() {
   };
 
   const handleConnectLastFm = async () => {
-    if (!lastFmInput.trim()) {
+    const normalized = normalizeLastFmUsername(lastFmInput);
+    if (!normalized) {
       toast.error('Please enter your Last.fm username');
       return;
     }
     try {
-      await connectLastFm.mutateAsync(lastFmInput.trim());
+      await connectLastFm.mutateAsync(normalized);
       toast.success('Last.fm connected successfully!');
       setLastFmDialogOpen(false);
       setLastFmInput('');
@@ -185,6 +199,33 @@ export default function ProfilePage() {
     }
   };
 
+  const resolveProviderForTrack = useCallback((track: any): MusicProvider | null => {
+    if (track.spotifyId || track.spotify_id) return 'spotify';
+    if (track.youtubeId || track.youtube_id) return 'youtube';
+    const preferred = getPreferredProvider();
+    return preferred ?? null;
+  }, []);
+
+  const handlePlayTrack = useCallback((track: any) => {
+    const provider = resolveProviderForTrack(track);
+    if (!provider) return;
+    const providerTrackId = provider === 'spotify'
+      ? (track.spotifyId || track.spotify_id)
+      : (track.youtubeId || track.youtube_id);
+    if (!providerTrackId) return;
+
+    openPlayer({
+      canonicalTrackId: track.id || track.track_id || null,
+      provider,
+      providerTrackId,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      autoplay: true,
+      context: 'profile-recent',
+    });
+  }, [openPlayer, resolveProviderForTrack]);
+
   if (loading) {
     return <LoadingSpinner fullScreen />;
   }
@@ -208,13 +249,12 @@ export default function ProfilePage() {
       title="Profile"
       headerActions={
         <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setThemeEditorOpen(true)}>
+            <Palette className="w-4 h-4" />
+            Theme
+          </Button>
           {isAdmin && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate('/admin')}
-              className="text-xs gap-2"
-            >
+            <Button variant="ghost" size="sm" onClick={() => navigate('/admin')}>
               <Shield className="w-4 h-4" />
               Admin
             </Button>
@@ -225,7 +265,7 @@ export default function ProfilePage() {
         </div>
       }
     >
-      <ResponsiveContainer maxWidth="2xl" className="space-y-6">
+      <ResponsiveContainer maxWidth="full" className="space-y-6">
       {/* User info - Enhanced with Spotify profile */}
       <motion.div
         variants={fadeInUp}
@@ -668,10 +708,10 @@ export default function ProfilePage() {
                     </DialogHeader>
                     <div className="space-y-4 pt-4">
                       <p className="text-sm text-muted-foreground">
-                        Enter your Last.fm username to sync your listening history and scrobbles.
+                        Enter your Last.fm username (or paste your profile URL) to sync your listening history and scrobbles.
                       </p>
                       <Input
-                        placeholder="Your Last.fm username"
+                        placeholder="lottabase (or https://www.last.fm/user/lottabase)"
                         value={lastFmInput}
                         onChange={(e) => setLastFmInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleConnectLastFm()}
@@ -794,80 +834,23 @@ export default function ProfilePage() {
               </select>
             </div>
 
-            <Tabs defaultValue="tracks" className="w-full">
+            <Tabs defaultValue={defaultTab} value={defaultTab} className="w-full">
               <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="tracks">Top Tracks</TabsTrigger>
-                <TabsTrigger value="artists">Top Artists</TabsTrigger>
-                <TabsTrigger value="recent">Recent</TabsTrigger>
+                <TabsTrigger value="tracks" disabled={!topTracks.length}>Top Tracks</TabsTrigger>
+                <TabsTrigger value="artists" disabled={!topArtists.length}>Top Artists</TabsTrigger>
+                <TabsTrigger value="recent" disabled={!recentlyPlayed?.tracks?.length}>Recent</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="tracks" className="mt-4">
-                <ResponsiveGrid cols={{ sm: 1, md: 2, lg: 3 }} gap="sm">
-                {topTracks.map((track, i) => (
-                  <div key={track.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
-                    <span className="w-6 text-center text-muted-foreground text-sm">{i + 1}</span>
-                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted">
-                      {track.cover_url ? (
-                        <img src={track.cover_url} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Music className="w-4 h-4 text-muted-foreground" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{track.title}</p>
-                      <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
-                    </div>
-                  </div>
-                ))}
-                </ResponsiveGrid>
-                {topTracks.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-8">No top tracks yet. Connect Spotify to see your music!</p>
-                )}
-              </TabsContent>
-
-              <TabsContent value="artists" className="mt-4">
-                <ResponsiveGrid cols={{ sm: 1, md: 2, lg: 3 }} gap="sm">
-                {topArtists.map((artist, i) => (
-                  <div key={artist.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
-                    <span className="w-6 text-center text-muted-foreground text-sm">{i + 1}</span>
-                    <div className="w-10 h-10 rounded-full overflow-hidden bg-muted">
-                      {artist.images?.[0]?.url ? (
-                        <img src={artist.images[0].url} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <User className="w-4 h-4 text-muted-foreground" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{artist.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {artist.genres?.slice(0, 2).join(', ')}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-                </ResponsiveGrid>
-                {topArtists.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-8">No top artists yet. Start listening!</p>
-                )}
-              </TabsContent>
-
-              <TabsContent value="recent" className="mt-4">
-                {!spotifyConnected ? (
-                  <div className="text-center py-12">
-                    <Music className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-                    <p className="text-sm text-muted-foreground font-medium">Connect Spotify to see recent plays</p>
-                    <Button onClick={handleConnectSpotify} className="mt-4" size="sm">
-                      Connect Spotify
-                    </Button>
-                  </div>
-                ) : recentlyPlayed?.tracks && recentlyPlayed.tracks.length > 0 ? (
+              {topTracks.length > 0 && (
+                <TabsContent value="tracks" className="mt-4">
                   <ResponsiveGrid cols={{ sm: 1, md: 2, lg: 3 }} gap="sm">
-                  {recentlyPlayed.tracks.map((track) => (
-                    <div key={track.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
+                  {topTracks.map((track, i) => (
+                    <div
+                      key={track.id}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30"
+                      onClick={() => handlePlayTrack(track)}
+                    >
+                      <span className="w-6 text-center text-muted-foreground text-sm">{i + 1}</span>
                       <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted">
                         {track.cover_url ? (
                           <img src={track.cover_url} alt="" className="w-full h-full object-cover" />
@@ -884,16 +867,94 @@ export default function ProfilePage() {
                     </div>
                   ))}
                   </ResponsiveGrid>
-                ) : (
-                  <div className="text-center py-12">
-                    <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-                    <p className="text-sm text-muted-foreground font-medium">No recent plays yet</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Start listening on Spotify to see your recent tracks here
-                    </p>
-                  </div>
-                )}
-              </TabsContent>
+                </TabsContent>
+              )}
+
+              {topArtists.length > 0 && (
+                <TabsContent value="artists" className="mt-4">
+                  <ResponsiveGrid cols={{ sm: 1, md: 2, lg: 3 }} gap="sm">
+                  {topArtists.map((artist, i) => (
+                    <div key={artist.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
+                      <span className="w-6 text-center text-muted-foreground text-sm">{i + 1}</span>
+                      <div className="w-10 h-10 rounded-full overflow-hidden bg-muted">
+                        {artist.images?.[0]?.url ? (
+                          <img src={artist.images[0].url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <User className="w-4 h-4 text-muted-foreground" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{artist.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {artist.genres?.slice(0, 2).join(', ')}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                  </ResponsiveGrid>
+                </TabsContent>
+              )}
+
+              {recentlyPlayed?.tracks?.length ? (
+                <TabsContent value="recent" className="mt-4">
+                  <ResponsiveGrid cols={{ sm: 1, md: 2, lg: 3 }} gap="sm">
+                  {recentlyPlayed.tracks
+                    .filter((track) => track.spotifyId || track.spotify_id || track.youtubeId || track.youtube_id)
+                    .map((track) => (
+                      <div
+                        key={track.id}
+                        className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer group"
+                        onClick={() => handlePlayTrack(track)}
+                      >
+                        <div className="w-12 h-12 rounded-xl overflow-hidden bg-muted">
+                          {track.cover_url ? (
+                            <img src={track.cover_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Music className="w-5 h-5 text-muted-foreground" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{track.title}</p>
+                          <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
+                          {track.played_at && (
+                            <p className="text-[11px] text-muted-foreground/80">{formatRelativeTime(track.played_at)}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePlayTrack(track);
+                            }}
+                            className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90"
+                            aria-label="Play"
+                          >
+                            <Play className="w-4 h-4" />
+                          </button>
+                          <QuickStreamButtons
+                            track={{
+                              spotifyId: track.spotifyId || track.spotify_id,
+                              youtubeId: track.youtubeId || track.youtube_id,
+                            }}
+                            canonicalTrackId={track.id}
+                            trackTitle={track.title}
+                            trackArtist={track.artist}
+                            size="sm"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </ResponsiveGrid>
+                </TabsContent>
+              ) : (
+                <TabsContent value="recent" className="mt-4">
+                  <p className="text-sm text-muted-foreground text-center py-8">No recent plays. Start listening now!</p>
+                </TabsContent>
+              )}
             </Tabs>
           </motion.div>
         )}
@@ -984,6 +1045,51 @@ export default function ProfilePage() {
                 </div>
               </div>
             )}
+
+            {lastFmStats.recentTracks.length > 0 && (
+              <div className="p-4 glass rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-[#D51007]" />
+                  <h4 className="text-sm font-medium text-muted-foreground">Latest scrobbles</h4>
+                </div>
+                <div className="space-y-2">
+                  {lastFmStats.recentTracks.map((track, idx) => (
+                    <div
+                      key={`${track.name}-${track.artist}-${idx}`}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30"
+                    >
+                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted flex-shrink-0">
+                        {track.imageUrl ? (
+                          <img src={track.imageUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Music className="w-4 h-4 text-muted-foreground" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{track.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
+                        <p className="text-[11px] text-muted-foreground/80">
+                          {track.nowPlaying ? 'Now playing' : track.playedAt ? formatRelativeTime(track.playedAt) : 'Recently played'}
+                        </p>
+                      </div>
+                      <QuickStreamButtons
+                        track={{
+                          spotifyId: undefined,
+                          youtubeId: undefined,
+                        }}
+                        canonicalTrackId={null}
+                        trackTitle={track.name}
+                        trackArtist={track.artist}
+                        size="sm"
+                        className="flex-shrink-0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -1058,7 +1164,7 @@ export default function ProfilePage() {
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="p-3 glass rounded-xl flex gap-3 hover:bg-muted/30 transition-colors cursor-pointer"
-                    onClick={() => navigate(`/track/${encodeURIComponent(event.track_id)}`)}
+                    onClick={() => navigateToTrack(navigate, event.track_id)}
                   >
                     {/* Artwork */}
                     <div className="w-12 h-12 rounded-lg overflow-hidden bg-muted/50 flex-shrink-0">
@@ -1105,7 +1211,34 @@ export default function ProfilePage() {
             <span className="text-xs text-muted-foreground">{savesCount} songs</span>
           </button>
         </motion.div>
+
+        {isAdmin && (
+          <motion.div
+            variants={fadeInUp}
+            initial="initial"
+            animate="animate"
+            transition={{ delay: 0.3 }}
+            className="mt-6"
+          >
+            <Button
+              variant="outline"
+              className="w-full justify-center gap-2"
+              onClick={() => navigate('/admin')}
+            >
+              <Shield className="w-4 h-4" />
+              Admin Dashboard
+            </Button>
+          </motion.div>
+        )}
       </ResponsiveContainer>
+
+      {/* Theme Editor Modal */}
+      <ThemeEditor
+        open={themeEditorOpen}
+        onOpenChange={setThemeEditorOpen}
+        currentTheme={userTheme}
+        userId={user?.id || ''}
+      />
     </PageLayout>
   );
 }

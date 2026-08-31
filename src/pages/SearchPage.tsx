@@ -1,18 +1,24 @@
-import { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/BottomNav';
 import { ChordBadge } from '@/components/ChordBadge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { seedTracks, progressionArchetypes } from '@/data/seedTracks';
 import { Track } from '@/types';
-import { Search, Music, TrendingUp, ArrowRight, Play, ExternalLink, Loader2, Clock, X } from 'lucide-react';
+import { Search, Music, TrendingUp, ArrowRight, Play, ExternalLink, Loader2, Clock, X, Filter, Zap, Heart, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { navigateToTrack } from '@/lib/navigation';
 import { openProviderLink, getProviderLinks } from '@/lib/providers';
 import { useAuth } from '@/hooks/useAuth';
-import { searchSpotify } from '@/services/spotifySearchService';
+import { searchSpotify, searchSpotifyPublic } from '@/services/spotifySearchService';
+import { searchYouTubeVideos } from '@/services/youtubeSearchService';
 import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
 import { ResponsiveContainer, ResponsiveGrid } from '@/components/layout/ResponsiveLayout';
+import { QuickStreamButtons } from '@/components/QuickStreamButtons';
+import { ProfileCircle } from '@/components/shared';
+import { parseProgressionQuery, progressionContainsSequence } from '@/lib/harmony/progressionSearch';
 import { 
   getSearchHistory, 
   addToSearchHistory, 
@@ -27,24 +33,62 @@ export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'song' | 'chord'>('song');
   const [spotifyResults, setSpotifyResults] = useState<Track[]>([]);
+  const [spotifyTotal, setSpotifyTotal] = useState(0);
+  const [spotifyOffset, setSpotifyOffset] = useState(0);
+  const [youtubeResults, setYoutubeResults] = useState<Track[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [energyFilter, setEnergyFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
+  const [moodFilter, setMoodFilter] = useState<'all' | 'happy' | 'sad' | 'neutral'>('all');
+  const [showFilters, setShowFilters] = useState(false);
 
-  // Debounced Spotify search
+  // Load search history on mount
   useEffect(() => {
-    if (searchMode !== 'song' || !query.trim() || !user || !isSpotifyConnected) {
+    setSearchHistory(getSearchHistory());
+  }, []);
+
+  // Debug: Log seedTracks on mount
+  useEffect(() => {
+    console.log('🔍 SearchPage mounted');
+    console.log('📊 seedTracks count:', seedTracks.length);
+    console.log('📦 First track:', seedTracks[0]);
+  }, []);
+
+  // Debounced Spotify search.
+  //
+  // Catalog search does not require the user's own Spotify account - it needs
+  // Spotify's Client Credentials flow, which search-spotify performs
+  // server-side. Previously this whole branch was gated behind `user &&
+  // isSpotifyConnected`, so guests and any signed-in user who had not gone
+  // through Spotify's OAuth connect flow got zero Spotify results, with no
+  // indication why. Now: use the user's own token when they've connected
+  // Spotify (matches their exact catalog/market access), and the public
+  // search otherwise - Spotify results appear either way.
+  useEffect(() => {
+    if (searchMode !== 'song' || !query.trim()) {
       setSpotifyResults([]);
+      setSpotifyTotal(0);
+      setSpotifyOffset(0);
       return;
     }
 
+    setSpotifyOffset(0);
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const results = await searchSpotify(user.id, query, 20);
-        setSpotifyResults(results);
+        const { tracks, total } =
+          user && isSpotifyConnected
+            ? await searchSpotify(user.id, query, 50, 0)
+            : await searchSpotifyPublic(query, 50, 0);
+        setSpotifyResults(tracks);
+        setSpotifyTotal(total);
+        setSpotifyOffset(tracks.length);
       } catch (error) {
         console.error('Spotify search error:', error);
         setSpotifyResults([]);
+        setSpotifyTotal(0);
+        setSpotifyOffset(0);
       } finally {
         setIsSearching(false);
       }
@@ -53,36 +97,142 @@ export default function SearchPage() {
     return () => clearTimeout(timer);
   }, [query, searchMode, user, isSpotifyConnected]);
 
+  const loadMoreSpotify = React.useCallback(async () => {
+    setIsSearching(true);
+    try {
+      const { tracks, total } =
+        user && isSpotifyConnected
+          ? await searchSpotify(user.id, query, 50, spotifyOffset)
+          : await searchSpotifyPublic(query, 50, spotifyOffset);
+      setSpotifyResults((prev) => [...prev, ...tracks]);
+      setSpotifyTotal(total);
+      setSpotifyOffset((prev) => prev + tracks.length);
+    } catch (error) {
+      console.error('Spotify load-more error:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [user, isSpotifyConnected, query, spotifyOffset]);
+
+  // YouTube search - runs alongside Spotify (not only as a fallback), so a
+  // track only on YouTube still turns up. Spotify is rendered first in the
+  // results list below, which is the app's provider preference: Spotify
+  // first, YouTube as well/instead when Spotify doesn't have it.
+  useEffect(() => {
+    let cancelled = false;
+    if (searchMode !== 'song' || !query.trim()) {
+      setYoutubeResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const yt = await searchYouTubeVideos(query, '');
+        if (cancelled) return;
+        const mapped: Track[] = yt.map(v => ({
+          id: `youtube:${v.videoId}`,
+          title: v.title,
+          artist: v.channel,
+          youtube_id: v.videoId,
+          provider: 'youtube',
+        } as Track));
+        setYoutubeResults(mapped);
+      } catch (err) {
+        console.error('YouTube search error:', err);
+        setYoutubeResults([]);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, searchMode, isSpotifyConnected]);
+
   // Instant local search with memoization for zero-latency feel
   const results = useMemo(() => {
-    if (!query.trim()) return [];
+    let filtered: Track[] = [];
 
+    // Step 1: Text search filtering
     if (searchMode === 'song') {
-      // Search by song/artist
       const lowerQuery = query.toLowerCase();
-      return seedTracks.filter(
+      filtered = seedTracks.filter(
         (t) =>
-          t.title.toLowerCase().includes(lowerQuery) ||
+          !query.trim() || // Include all if no query
+          t.title?.toLowerCase().includes(lowerQuery) ||
           t.artist?.toLowerCase().includes(lowerQuery) ||
-          t.album?.toLowerCase().includes(lowerQuery)
+          t.album?.toLowerCase().includes(lowerQuery) ||
+          t.genre?.toLowerCase().includes(lowerQuery) ||
+          t.genre_description?.toLowerCase().includes(lowerQuery)
       );
     } else {
-      // Search by chord progression
-      const chords = query
-        .toUpperCase()
-        .split(/[-–—,\s]+/)
-        .map((c) => c.trim())
-        .filter(Boolean);
-      
-      return seedTracks.filter((t) => {
-        if (!t.progression_roman) return false;
-        const progression = t.progression_roman.map((c) => c.toUpperCase());
-        return chords.every((chord) => 
-          progression.includes(chord) || progression.includes(chord.toLowerCase())
+      // Chord progression search. Dashes are optional ("vi I IV V" works the
+      // same as "vi-IV-I-V"), and this matches a partial, in-order run of the
+      // progression, not just "contains these chords somewhere in any order" -
+      // "V I" and "I V" mean different things and shouldn't match the same
+      // tracks. Case is preserved rather than folded: "vi" and "VI" are
+      // different chords (minor vs major), so normalizing case away would
+      // make the search unable to tell them apart.
+      const chords = parseProgressionQuery(query);
+
+      filtered = seedTracks.filter((t) => {
+        if (!t.progression_roman || t.progression_roman.length === 0) return false;
+        return progressionContainsSequence(t.progression_roman, chords);
+      });
+    }
+
+    // Step 2: Genre filtering
+    if (selectedGenres.length > 0) {
+      filtered = filtered.filter((t) => {
+        const trackGenres = [t.genre, ...(t.genres || [])].filter(Boolean).map(g => g?.toLowerCase());
+        return selectedGenres.some(selectedGenre => 
+          trackGenres.some(tg => tg?.includes(selectedGenre.toLowerCase()))
         );
       });
     }
-  }, [query, searchMode]);
+
+    // Step 3: Energy filtering (high: >0.7, medium: 0.4-0.7, low: <0.4)
+    if (energyFilter !== 'all') {
+      filtered = filtered.filter((t) => {
+        if (typeof t.energy !== 'number') return false;
+        if (energyFilter === 'high') return t.energy > 0.7;
+        if (energyFilter === 'medium') return t.energy >= 0.4 && t.energy <= 0.7;
+        if (energyFilter === 'low') return t.energy < 0.4;
+        return true;
+      });
+    }
+
+    // Step 4: Mood filtering (happy: valence >0.6, sad: <0.4, neutral: 0.4-0.6)
+    if (moodFilter !== 'all') {
+      filtered = filtered.filter((t) => {
+        if (typeof t.valence !== 'number') return false;
+        if (moodFilter === 'happy') return t.valence > 0.6;
+        if (moodFilter === 'sad') return t.valence < 0.4;
+        if (moodFilter === 'neutral') return t.valence >= 0.4 && t.valence <= 0.6;
+        return true;
+      });
+    }
+
+    // Step 5: Sort by relevance
+    if (query.trim() && searchMode === 'song') {
+      const lowerQuery = query.toLowerCase();
+      return filtered.sort((a, b) => {
+        const aTitle = a.title?.toLowerCase() || '';
+        const bTitle = b.title?.toLowerCase() || '';
+        const aArtist = a.artist?.toLowerCase() || '';
+        const bArtist = b.artist?.toLowerCase() || '';
+        
+        if (aTitle.startsWith(lowerQuery) && !bTitle.startsWith(lowerQuery)) return -1;
+        if (!aTitle.startsWith(lowerQuery) && bTitle.startsWith(lowerQuery)) return 1;
+        if (aArtist.startsWith(lowerQuery) && !bArtist.startsWith(lowerQuery)) return -1;
+        if (!aArtist.startsWith(lowerQuery) && bArtist.startsWith(lowerQuery)) return 1;
+        
+        return 0;
+      });
+    }
+
+    return filtered;
+  }, [query, searchMode, selectedGenres, energyFilter, moodFilter]);
 
   const handlePlayOnProvider = (track: Track) => {
     // Add to search history
@@ -98,7 +248,7 @@ export default function SearchPage() {
     // Navigate to track detail page with proper ID encoding
     const trackId = track.id || track.spotify_id || track.external_id;
     if (trackId) {
-      navigate(`/track/${encodeURIComponent(trackId)}`);
+      navigateToTrack(navigate, trackId);
     }
   };
 
@@ -110,7 +260,7 @@ export default function SearchPage() {
 
   const handleHistoryClick = (item: SearchHistoryItem) => {
     if (item.track) {
-      navigate(`/track/${encodeURIComponent(item.track.id)}`);
+      navigateToTrack(navigate, item.track.id);
     } else {
       setQuery(item.query);
       setSearchMode(item.type);
@@ -121,9 +271,14 @@ export default function SearchPage() {
     <div className="min-h-screen bg-background pb-24">
       {/* Header */}
       <header className="sticky top-0 z-40 glass-strong safe-top">
-        <ResponsiveContainer maxWidth="2xl">
+        <ResponsiveContainer maxWidth="full">
           <div className="py-4 space-y-3">
-            <h1 className="text-xl lg:text-2xl font-bold">Search</h1>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h1 className="text-xl lg:text-2xl font-bold">Search</h1>
+              </div>
+              <ProfileCircle />
+            </div>
             
             {/* Search mode toggle */}
             <div className="flex gap-2">
@@ -156,7 +311,7 @@ export default function SearchPage() {
               placeholder={
                 searchMode === 'song'
                   ? 'Search songs or artists...'
-                  : 'e.g., vi-IV-I-V or I-V-vi-IV'
+                  : 'e.g., vi I IV V or a partial run like V vi'
               }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -164,13 +319,130 @@ export default function SearchPage() {
               autoFocus
             />
           </div>
+
+          {/* Filter toggle button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowFilters(!showFilters)}
+            className="w-full"
+          >
+            <Filter className="w-4 h-4 mr-2" />
+            Filters
+            {(selectedGenres.length > 0 || energyFilter !== 'all' || moodFilter !== 'all') && (
+              <Badge variant="secondary" className="ml-2">
+                {selectedGenres.length + (energyFilter !== 'all' ? 1 : 0) + (moodFilter !== 'all' ? 1 : 0)}
+              </Badge>
+            )}
+          </Button>
+
+          {/* Filters Panel */}
+          <AnimatePresence>
+            {showFilters && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-4 pt-2">
+                  {/* Genre filters */}
+                  <div>
+                    <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Music className="w-4 h-4" />
+                      Genre
+                      {selectedGenres.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedGenres([])}
+                          className="h-6 text-xs"
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {['pop', 'rock', 'hip hop', 'r&b', 'jazz', 'funk', 'soul', 'blues', 'country', 'disco', 'synthpop', 'reggae', 'punk'].map((genre) => (
+                        <Badge
+                          key={genre}
+                          variant={selectedGenres.includes(genre) ? 'default' : 'outline'}
+                          className="cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => {
+                            setSelectedGenres(prev =>
+                              prev.includes(genre)
+                                ? prev.filter(g => g !== genre)
+                                : [...prev, genre]
+                            );
+                          }}
+                        >
+                          {genre}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Energy filter */}
+                  <div>
+                    <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Zap className="w-4 h-4" />
+                      Energy
+                    </div>
+                    <div className="flex gap-2">
+                      {[
+                        { value: 'all', label: 'All' },
+                        { value: 'high', label: 'High Energy' },
+                        { value: 'medium', label: 'Medium' },
+                        { value: 'low', label: 'Chill' },
+                      ].map((option) => (
+                        <Badge
+                          key={option.value}
+                          variant={energyFilter === option.value ? 'default' : 'outline'}
+                          className="cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => setEnergyFilter(option.value as any)}
+                        >
+                          {option.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Mood filter */}
+                  <div>
+                    <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Heart className="w-4 h-4" />
+                      Mood
+                    </div>
+                    <div className="flex gap-2">
+                      {[
+                        { value: 'all', label: 'All', icon: Sparkles },
+                        { value: 'happy', label: 'Happy', icon: '😊' },
+                        { value: 'neutral', label: 'Neutral', icon: '😐' },
+                        { value: 'sad', label: 'Melancholic', icon: '😢' },
+                      ].map((option) => (
+                        <Badge
+                          key={option.value}
+                          variant={moodFilter === option.value ? 'default' : 'outline'}
+                          className="cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => setMoodFilter(option.value as any)}
+                        >
+                          {typeof option.icon === 'string' ? option.icon : ''} {option.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           </div>
         </ResponsiveContainer>
       </header>
 
       {/* Content */}
       <main className="py-4 space-y-6">
-        <ResponsiveContainer maxWidth="2xl">
+        <ResponsiveContainer maxWidth="full">
         {/* Recent Searches - Show when no active search */}
         {!query && searchHistory.length > 0 && (
           <section>
@@ -259,16 +531,130 @@ export default function SearchPage() {
           </section>
         )}
 
+        {/* No results message */}
+        {query && spotifyResults.length === 0 && results.length === 0 && !isSearching && (
+          <section>
+            <div className="glass rounded-2xl p-8 text-center space-y-4">
+              <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
+                <Search className="w-10 h-10 text-muted-foreground" />
+              </div>
+              <div>
+                <h3 className="text-xl font-semibold mb-2">No results for "{query}"</h3>
+                {(selectedGenres.length > 0 || energyFilter !== 'all' || moodFilter !== 'all') ? (
+                  <>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      No tracks match your search with the selected filters
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedGenres([]);
+                        setEnergyFilter('all');
+                        setMoodFilter('all');
+                      }}
+                    >
+                      Clear Filters
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground mb-1">
+                      Searched {seedTracks.length} tracks with chord progressions
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Try searching for artist names like "weeknd" or chord progressions like "vi I IV V" (dashes optional, partial runs match too)
+                    </p>
+                  </>
+                )}
+              </div>
+              {!isSpotifyConnected && (
+                <div className="glass-strong rounded-xl p-6 space-y-3 mt-6">
+                  <div className="flex items-center justify-center gap-2 text-[#1DB954]">
+                    <ExternalLink className="w-5 h-5" />
+                    <span className="font-semibold">Unlock unlimited search</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Connect Spotify to search millions of songs beyond the local database
+                  </p>
+                  <Button
+                    onClick={() => navigate('/profile')}
+                    className="w-full bg-[#1DB954] hover:bg-[#1ed760] text-white"
+                    size="lg"
+                  >
+                    Connect Spotify
+                  </Button>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* Search results */}
         {(spotifyResults.length > 0 || results.length > 0) && (
           <section>
-            <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-              Results ({spotifyResults.length + results.length})
-              {isSearching && <Loader2 className="w-3 h-3 animate-spin" />}
-              {spotifyResults.length > 0 && (
-                <span className="text-[#1DB954] text-xs">via Spotify</span>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2 flex-wrap">
+                Results ({spotifyResults.length + results.length})
+                {isSearching && <Loader2 className="w-3 h-3 animate-spin" />}
+                {spotifyResults.length > 0 && (
+                  <span className="text-[#1DB954] text-xs">via Spotify</span>
+                )}
+                {results.length > 0 && (
+                  <span className="text-xs text-purple-500">via Local DB</span>
+                )}
+              </h2>
+              {(selectedGenres.length > 0 || energyFilter !== 'all' || moodFilter !== 'all') && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedGenres([]);
+                    setEnergyFilter('all');
+                    setMoodFilter('all');
+                  }}
+                  className="h-7 text-xs"
+                >
+                  Clear Filters
+                </Button>
               )}
-            </h2>
+            </div>
+            
+            {/* Active filters display */}
+            {(selectedGenres.length > 0 || energyFilter !== 'all' || moodFilter !== 'all') && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {selectedGenres.map((genre) => (
+                  <Badge key={genre} variant="secondary" className="text-xs">
+                    {genre}
+                    <X
+                      className="w-3 h-3 ml-1 cursor-pointer"
+                      onClick={() => setSelectedGenres(prev => prev.filter(g => g !== genre))}
+                    />
+                  </Badge>
+                ))}
+                {energyFilter !== 'all' && (
+                  <Badge variant="secondary" className="text-xs">
+                    <Zap className="w-3 h-3 mr-1" />
+                    {energyFilter} energy
+                    <X
+                      className="w-3 h-3 ml-1 cursor-pointer"
+                      onClick={() => setEnergyFilter('all')}
+                    />
+                  </Badge>
+                )}
+                {moodFilter !== 'all' && (
+                  <Badge variant="secondary" className="text-xs">
+                    <Heart className="w-3 h-3 mr-1" />
+                    {moodFilter}
+                    <X
+                      className="w-3 h-3 ml-1 cursor-pointer"
+                      onClick={() => setMoodFilter('all')}
+                    />
+                  </Badge>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2">
               {/* Spotify results first */}
               {spotifyResults.map((track, index) => (
@@ -300,7 +686,70 @@ export default function SearchPage() {
                       )}
                     </div>
                     <div className="flex items-center">
-                      <Play className="w-4 h-4 text-muted-foreground" />
+                      <QuickStreamButtons
+                        track={{
+                          spotifyId: track.spotify_id ?? track.id,
+                          youtubeId: track.youtube_id,
+                          urlSpotifyWeb: track.external_url,
+                        }}
+                        canonicalTrackId={track.id}
+                        trackTitle={track.title}
+                        trackArtist={track.artist}
+                        size="md"
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+
+              {spotifyResults.length < spotifyTotal && (
+                <div className="flex justify-center py-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadMoreSpotify}
+                    disabled={isSearching}
+                  >
+                    {isSearching ? 'Loading…' : 'Load more Spotify results'}
+                  </Button>
+                </div>
+              )}
+              {/* YouTube search results (fallback when Spotify not connected) */}
+              {youtubeResults.map((track, index) => (
+                <motion.div
+                  key={track.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.03 }}
+                  className="p-4 glass rounded-xl cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => handlePlayOnProvider(track)}
+                >
+                  <div className="flex gap-4">
+                    {track.cover_url && (
+                      <img
+                        src={track.cover_url}
+                        alt=""
+                        className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium truncate">{track.title}</h3>
+                      <p className="text-sm text-muted-foreground truncate">
+                        {track.artist}
+                      </p>
+                    </div>
+                    <div className="flex items-center">
+                      <QuickStreamButtons
+                        track={{
+                          youtubeId: track.youtube_id,
+                          spotifyId: track.spotify_id,
+                          urlYoutube: track.url_youtube,
+                        }}
+                        canonicalTrackId={track.id}
+                        trackTitle={track.title}
+                        trackArtist={track.artist}
+                        size="md"
+                      />
                     </div>
                   </div>
                 </motion.div>
@@ -342,26 +791,19 @@ export default function SearchPage() {
                       )}
                     </div>
                     <div className="flex flex-col gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => handlePlayOnProvider(track)}
-                        title="Play on streaming service"
-                      >
-                        <Play className="w-4 h-4" />
-                      </Button>
-                      {track.url_youtube && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => window.open(track.url_youtube!, '_blank')}
-                          title="Open on YouTube"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
+                        <QuickStreamButtons
+                          track={{
+                            spotifyId: track.spotify_id,
+                            youtubeId: track.youtube_id,
+                            urlYoutube: track.url_youtube,
+                            urlSpotifyWeb: track.url_spotify_web,
+                          }}
+                          canonicalTrackId={track.id}
+                          trackTitle={track.title}
+                          trackArtist={track.artist}
+                          size="md"
+                          className="justify-end"
+                        />
                     </div>
                   </div>
                 </motion.div>
@@ -412,15 +854,18 @@ export default function SearchPage() {
                         {track.artist}
                       </p>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 flex-shrink-0"
-                      onClick={() => handlePlayOnProvider(track)}
-                      title="Play on streaming service"
-                    >
-                      <Play className="w-4 h-4" />
-                    </Button>
+                    <QuickStreamButtons
+                      track={{
+                        spotifyId: track.spotify_id,
+                        youtubeId: track.youtube_id,
+                        urlYoutube: track.url_youtube,
+                        urlSpotifyWeb: track.url_spotify_web,
+                      }}
+                      canonicalTrackId={track.id}
+                      trackTitle={track.title}
+                      trackArtist={track.artist}
+                      size="sm"
+                    />
                   </div>
                 </motion.div>
               ))}

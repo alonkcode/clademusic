@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
-import { ChordBadge } from './ChordBadge';
-import { Music, Key, RotateCcw } from 'lucide-react';
+import { HarmonicHUD } from './HarmonicHUD';
+import { Key, RotateCcw } from 'lucide-react';
+import type { SongSection } from '@/types';
 
 interface HarmonyCardProps {
   progression: string[];
@@ -9,8 +10,22 @@ interface HarmonyCardProps {
   cadenceType?: string;
   confidenceScore?: number;
   matchReason?: string;
+  /** Track tempo in BPM - the loop plays at the song's own pace when known. */
+  bpm?: number;
+  /** Needed to detect when this exact track is the one actually playing. */
+  trackId?: string;
+  /** Section timestamps - enables the section rail and per-section variants. */
+  sections?: SongSection[];
 }
 
+/**
+ * HarmonyCard - the harmonic identity of a track.
+ *
+ * The dominant element is HarmonicHUD: a big glanceable chord readout with a
+ * slim section rail on the edge, synced to real playback when this track is
+ * playing. This wrapper stays deliberately thin - a one-line key/cadence
+ * header above it, and the match reason/confidence below.
+ */
 export function HarmonyCard({
   progression,
   detectedKey,
@@ -18,60 +33,47 @@ export function HarmonyCard({
   cadenceType,
   confidenceScore,
   matchReason,
+  bpm,
+  trackId,
+  sections,
 }: HarmonyCardProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="glass-strong rounded-2xl p-4 space-y-3"
+      className="space-y-2 w-full min-w-0"
     >
-      {/* Key signature */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Key className="w-4 h-4" />
-          <span className="text-sm font-medium">
+      {/* Compact key/cadence line */}
+      <div className="flex items-center justify-between gap-2 px-1 min-w-0">
+        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+          <Key className="w-3.5 h-3.5 shrink-0" />
+          <span className="text-xs font-medium truncate">
             {detectedKey || 'Unknown'} {detectedMode && detectedMode !== 'unknown' ? detectedMode : ''}
           </span>
         </div>
         {cadenceType && cadenceType !== 'none' && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <RotateCcw className="w-3 h-3" />
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+            <RotateCcw className="w-2.5 h-2.5" />
             <span className="capitalize">{cadenceType}</span>
           </div>
         )}
       </div>
 
-      {/* Chord progression */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <Music className="w-4 h-4 text-primary shrink-0" />
-        <div className="flex flex-wrap gap-1.5">
-          {progression.map((chord, index) => (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: index * 0.05 }}
-            >
-              <ChordBadge 
-                chord={chord} 
-                size="md" 
-                keySignature={detectedKey}
-              />
-            </motion.div>
-          ))}
-        </div>
-      </div>
+      <HarmonicHUD
+        trackId={trackId ?? ''}
+        progression={progression}
+        detectedKey={detectedKey}
+        detectedMode={detectedMode}
+        bpm={bpm}
+        sections={sections}
+      />
 
-      {/* Match reason */}
       {matchReason && (
-        <p className="text-xs text-muted-foreground leading-relaxed pt-1 border-t border-border/50">
-          {matchReason}
-        </p>
+        <p className="text-xs text-muted-foreground leading-relaxed px-1">{matchReason}</p>
       )}
 
-      {/* Confidence indicator */}
       {confidenceScore !== undefined && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 px-1">
           <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
             <motion.div
               initial={{ width: 0 }}
@@ -80,7 +82,7 @@ export function HarmonyCard({
               className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
             />
           </div>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">
             {Math.round(confidenceScore * 100)}%
           </span>
         </div>

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,10 +15,18 @@ const authSchema = z.object({
   displayName: z.string().min(2, 'Name must be at least 2 characters').optional(),
 });
 
-export default function AuthPage() {
+type AuthMode = 'signin' | 'signup';
+
+export default function AuthPage({ initialMode = 'signin' }: { initialMode?: AuthMode }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { signIn, signUp, user } = useAuth();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const initial = useMemo<AuthMode>(() => {
+    const qp = searchParams.get('mode');
+    if (qp === 'signup' || qp === 'signin') return qp;
+    return initialMode;
+  }, [searchParams, initialMode]);
+  const [mode, setMode] = useState<AuthMode>(initial);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -26,11 +34,14 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Redirect if already logged in
-  if (user) {
-    navigate('/');
-    return null;
-  }
+  // Redirect if already logged in. This must be an effect, not a render-time
+  // call: navigating during render updates the router while this component is
+  // still rendering, which React warns about and which can loop.
+  useEffect(() => {
+    if (user) navigate('/', { replace: true });
+  }, [user, navigate]);
+
+  if (user) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,19 +79,35 @@ export default function AuthPage() {
           return;
         }
         toast.success('Welcome back!');
-        navigate('/');
+        navigate('/', { replace: true });
       } else {
-        const { error } = await signUp(email, password, displayName);
+        const { error, needsEmailConfirmation, alreadyRegistered } = await signUp(
+          email,
+          password,
+          displayName
+        );
         if (error) {
-          if (error.message.includes('already registered')) {
-            toast.error('This email is already registered');
-          } else {
-            toast.error(error.message);
-          }
+          toast.error(
+            /already registered|already exists/i.test(error.message)
+              ? 'This email is already registered'
+              : error.message
+          );
           return;
         }
-        toast.success('Account created! You can now sign in.');
-        navigate('/');
+        if (alreadyRegistered) {
+          toast.error('This email is already registered. Try signing in instead.');
+          setMode('signin');
+          return;
+        }
+        if (needsEmailConfirmation) {
+          // Do NOT navigate away or claim they can sign in - the account is
+          // inert until the emailed link is clicked.
+          toast.success(`Check ${email} for a confirmation link to finish signing up.`);
+          return;
+        }
+        // Confirmation disabled: signUp returned a live session, so we are in.
+        toast.success('Welcome to CladeMusic!');
+        navigate('/', { replace: true });
       }
     } finally {
       setLoading(false);
@@ -122,7 +149,7 @@ export default function AuthPage() {
           <div className="p-3 rounded-2xl bg-primary/20 glow-primary">
             <Music className="w-8 h-8 text-primary" />
           </div>
-          <h1 className="text-3xl font-bold gradient-text">HarmonyFeed</h1>
+          <h1 className="text-3xl font-bold gradient-text">CladeMusic</h1>
         </motion.div>
 
         {/* Form card */}
@@ -147,7 +174,9 @@ export default function AuthPage() {
                 <Label htmlFor="displayName">Display name</Label>
                 <Input
                   id="displayName"
+                  name="name"
                   type="text"
+                  autoComplete="name"
                   placeholder="Your name"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
@@ -163,7 +192,12 @@ export default function AuthPage() {
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
+                autoComplete="email"
+                inputMode="email"
+                autoCapitalize="none"
+                spellCheck={false}
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -179,7 +213,11 @@ export default function AuthPage() {
               <div className="relative">
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  // Tells password managers to offer a new password on signup
+                  // and the saved one on sign-in.
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -188,6 +226,7 @@ export default function AuthPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   {showPassword ? (
@@ -224,7 +263,10 @@ export default function AuthPage() {
                 <>
                   Don't have an account?{' '}
                   <button
-                    onClick={() => setMode('signup')}
+                    onClick={() => {
+                      setMode('signup');
+                      setSearchParams({ mode: 'signup' });
+                    }}
                     className="text-primary hover:underline font-medium"
                   >
                     Sign up
@@ -234,7 +276,10 @@ export default function AuthPage() {
                 <>
                   Already have an account?{' '}
                   <button
-                    onClick={() => setMode('signin')}
+                    onClick={() => {
+                      setMode('signin');
+                      setSearchParams({ mode: 'signin' });
+                    }}
                     className="text-primary hover:underline font-medium"
                   >
                     Sign in

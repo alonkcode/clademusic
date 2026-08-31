@@ -25,6 +25,9 @@ This document outlines the organization of Clade's documentation.
 - [build.md](build.md) — Production builds
 - [deployment.md](deployment.md) — Deployment to GitHub Pages and hosting
 - [contributing.md](contributing.md) — Contribution guidelines
+- [RELEASE_PROCESS.md](RELEASE_PROCESS.md) — Versioning + release steps
+- [CODE_REVIEW.md](CODE_REVIEW.md) — Code review checklist (default for every PR)
+- [KNOWN_ISSUES.md](KNOWN_ISSUES.md) — Open issues + operational notes
 
 #### Architecture Documents
 - [HARMONIC_ANALYSIS_ARCHITECTURE.md](HARMONIC_ANALYSIS_ARCHITECTURE.md) — **Core system design** (35KB, comprehensive)
@@ -126,6 +129,11 @@ This document outlines the organization of Clade's documentation.
 - Announce changes
 ```
 
+### 5. Code Review (Every PR)
+- Use the PR template in `.github/pull_request_template.md`
+- Follow the checklist in `docs/CODE_REVIEW.md`
+- Keep `main` deployable (CI + Deploy should be green)
+
 ## 📝 Documentation Standards
 
 ### File Naming
@@ -160,7 +168,7 @@ More content
 ### Links
 - Use relative links: `[features](features.md)`
 - Link to code: `[src/types/harmony.ts](../src/types/harmony.ts)`
-- Link to GitHub issues: `[#123](https://github.com/repoisrael/clade/issues/123)`
+- Link to GitHub issues: `[#123](https://github.com/kaospan/clademusic/issues/123)`
 
 ## 🎯 Documentation Goals
 
@@ -200,4 +208,4 @@ More content
 ---
 
 **Maintained by**: Clade Engineering Team  
-**Last Updated**: January 21, 2026
+**Last Updated**: February 4, 2026

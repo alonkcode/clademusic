@@ -2,11 +2,17 @@
  * Spotify User API Service
  * 
  * Fetches user-specific data from Spotify using their stored access token.
- * Handles token refresh automatically.
  */
 
 import { Track } from '@/types';
 import { getValidAccessToken, refreshSpotifyToken, getSpotifyCredentials } from './spotifyAuthService';
+import { spotifyApiTrackToTrack } from './spotifyTrackMapper';
+
+// Once a top-metrics call returns 401/403, stop re-requesting to avoid noisy 403s and retries.
+let topMetricsDisabled = false;
+// Some Spotify tokens can be present but unusable (e.g. dev-mode allowlist issues, revoked access).
+// Once we detect hard failures (401/403/404) from Spotify Web API, stop spamming requests.
+let spotifyApiDisabled = false;
 
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 
@@ -40,25 +46,7 @@ interface SpotifyRecentlyPlayedResponse {
  * Transform Spotify track to our Track type
  */
 function transformSpotifyTrack(item: SpotifyPlayHistoryItem): Track {
-  const { track } = item;
-  const artwork = track.album.images.sort((a, b) => b.height - a.height)[0];
-
-  return {
-    id: `spotify:${track.id}`,
-    title: track.name,
-    artist: track.artists.map(a => a.name).join(', '),
-    artists: track.artists.map(a => a.name),
-    album: track.album.name,
-    cover_url: artwork?.url,
-    artwork_url: artwork?.url,
-    duration_ms: track.duration_ms,
-    spotify_id: track.id,
-    url_spotify_web: track.external_urls.spotify,
-    url_spotify_app: track.uri,
-    preview_url: track.preview_url,
-    provider: 'spotify',
-    external_id: track.id,
-  };
+  return { ...spotifyApiTrackToTrack(item.track), played_at: item.played_at };
 }
 
 /**
@@ -90,23 +78,35 @@ export async function getRecentlyPlayedTracks(
 
     if (!response.ok) {
       if (response.status === 401) {
-        // Token invalid, try to refresh
-        const newToken = await refreshSpotifyToken(userId, '');
-        if (!newToken) {
-          console.error('Spotify token refresh failed');
-          return null;
+        // Token invalid, try to refresh using stored refresh token
+        const creds = await getSpotifyCredentials(userId);
+        const newToken = creds?.refresh_token ? await refreshSpotifyToken(userId, creds.refresh_token) : null;
+        if (newToken) {
+          return getRecentlyPlayedTracks(userId, limit);
         }
-        // Retry with new token
-        return getRecentlyPlayedTracks(userId, limit);
+        console.error('Spotify token refresh failed (missing/invalid refresh token)');
+        return null;
       }
       console.error('Failed to fetch recently played:', response.status);
       return null;
     }
 
     const data: SpotifyRecentlyPlayedResponse = await response.json();
-    const tracks = data.items.map(transformSpotifyTrack);
 
-    return { tracks, source: 'spotify' };
+    const unique: Track[] = [];
+    const seen = new Set<string>();
+
+    for (const item of data.items) {
+      const t = transformSpotifyTrack(item);
+      const key = t.spotify_id || t.id;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        unique.push(t);
+      }
+      if (unique.length >= limit) break;
+    }
+
+    return { tracks: unique.slice(0, limit), source: 'spotify' };
   } catch (error) {
     console.error('Error fetching recently played:', error);
     return null;
@@ -117,8 +117,33 @@ export async function getRecentlyPlayedTracks(
  * Check if user has Spotify connected
  */
 export async function isSpotifyConnected(userId: string): Promise<boolean> {
-  const credentials = await getSpotifyCredentials(userId);
-  return credentials !== null;
+  const accessToken = await getValidAccessToken(userId);
+  if (!accessToken) return false;
+
+  // Validate token against /me to avoid noisy 403 loops when the token is unusable.
+  try {
+    const res = await fetch(`${SPOTIFY_API_BASE}/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (res.ok) return true;
+    if (res.status === 401) {
+      const creds = await getSpotifyCredentials(userId);
+      const refreshed = creds?.refresh_token ? await refreshSpotifyToken(userId, creds.refresh_token) : null;
+      if (!refreshed) return false;
+      const retry = await fetch(`${SPOTIFY_API_BASE}/me`, {
+        headers: { Authorization: `Bearer ${refreshed}` },
+      });
+      return retry.ok;
+    }
+
+    // Common causes: dev-mode app without whitelisted user, revoked permissions, missing scopes.
+    if (res.status === 403) return false;
+    return false;
+  } catch (err) {
+    console.warn('[Spotify] isSpotifyConnected validation failed', err);
+    return false;
+  }
 }
 
 /**
@@ -230,7 +255,14 @@ export async function getTopTracks(
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        console.warn('[Spotify] top tracks forbidden/unauthorized; treating as disconnected');
+        topMetricsDisabled = true;
+        return [];
+      }
+      return [];
+    }
 
     const data = await response.json();
     return data.items.map((track: SpotifyTopTrack) => ({
@@ -260,6 +292,8 @@ export async function getTopArtists(
   timeRange: TimeRange = 'medium_term',
   limit = 20
 ): Promise<SpotifyArtist[]> {
+  if (topMetricsDisabled) return [];
+
   const accessToken = await getValidAccessToken(userId);
   if (!accessToken) return [];
 
@@ -274,7 +308,14 @@ export async function getTopArtists(
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        console.warn('[Spotify] top artists forbidden/unauthorized; treating as disconnected');
+        topMetricsDisabled = true;
+        return [];
+      }
+      return [];
+    }
 
     const data = await response.json();
     return data.items;
@@ -292,6 +333,7 @@ export async function getAudioFeatures(
   trackIds: string[]
 ): Promise<AudioFeatures[]> {
   if (trackIds.length === 0) return [];
+  if (spotifyApiDisabled) return [];
   
   const accessToken = await getValidAccessToken(userId);
   if (!accessToken) return [];
@@ -304,7 +346,14 @@ export async function getAudioFeatures(
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        spotifyApiDisabled = true;
+        topMetricsDisabled = true;
+        console.warn('[Spotify] audio-features blocked; disabling Spotify Web API calls', response.status);
+      }
+      return [];
+    }
 
     const data = await response.json();
     return data.audio_features.filter(Boolean);
@@ -386,6 +435,7 @@ export async function getRecommendations(
   seedArtistIds: string[] = [],
   limit = 20
 ): Promise<Track[]> {
+  if (spotifyApiDisabled) return [];
   const accessToken = await getValidAccessToken(userId);
   if (!accessToken) return [];
 
@@ -416,7 +466,15 @@ export async function getRecommendations(
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      // 404 is unexpected here; treat as a hard failure to avoid hammering Spotify while the app is misconfigured.
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        spotifyApiDisabled = true;
+        topMetricsDisabled = true;
+        console.warn('[Spotify] recommendations blocked; disabling Spotify Web API calls', response.status);
+      }
+      return [];
+    }
 
     const data = await response.json();
     return data.tracks.map((track: SpotifyTopTrack) => ({

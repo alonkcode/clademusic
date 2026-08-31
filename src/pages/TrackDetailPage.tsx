@@ -13,19 +13,24 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTrack } from '@/hooks/api/useTracks';
-import { useYouTubePlayer } from '@/contexts/YouTubePlayerContext';
+import { usePlayer } from '@/player/PlayerContext';
 import { BottomNav } from '@/components/BottomNav';
 import { ChordBadge } from '@/components/ChordBadge';
-import { YouTubeEmbed } from '@/components/YouTubeEmbed';
 import { TrackLineageView } from '@/components/TrackLineageView';
+import { TrackComments } from '@/components/TrackComments';
+import { TikTokStyleButtons } from '@/components/TikTokStyleButtons';
+import { QuickStreamButtons } from '@/components/QuickStreamButtons';
+import { ScrollingComments } from '@/components/ScrollingComments';
 import { getTrackSections } from '@/api/trackSections';
-import { searchYouTubeVideos, VideoResult } from '@/services/youtubeSearchService';
+import { searchYouTubeVideos } from '@/services/youtubeSearchService';
 import { TrackSection, Track } from '@/types';
 import { ArrowLeft, Play, Music2, Link as LinkIcon, ExternalLink, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import { formatTime, formatDuration } from '@/lib/timeFormat';
+import { ProfileCircle } from '@/components/shared';
 
 interface VideoSource {
   id: string;
@@ -38,14 +43,17 @@ export default function TrackDetailPage() {
   const { trackId } = useParams();
   const navigate = useNavigate();
   const { data: track, isLoading } = useTrack(decodeURIComponent(trackId || ''));
-  const { playVideo, currentVideo, currentTime, seekTo } = useYouTubePlayer();
+  const { openPlayer, provider, trackId: activeTrackId, isPlaying } = usePlayer();
+  // IMPORTANT: There must NEVER be more than one playback surface.
+  // YouTube must be played only through the universal player.
+  const currentTime = 0;
+  const seekTo = (_seconds: number) => {};
   
   const [sections, setSections] = useState<TrackSection[]>([]);
   const [hooktheoryData, setHooktheoryData] = useState<any>(null);
   const [whoSampledData, setWhoSampledData] = useState<any>(null);
   const [youtubeVideos, setYoutubeVideos] = useState<VideoSource[]>([]);
   const [loadingVideos, setLoadingVideos] = useState(false);
-  const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
   
   // Get current section and chord based on playback time
   const currentTimeMs = currentTime * 1000;
@@ -68,14 +76,16 @@ export default function TrackDetailPage() {
   
   const currentChordIndex = getCurrentChordIndex();
   
-  // Load sections when track is available
+  // Load sections and related data when track is available
   useEffect(() => {
     if (!track?.id) return;
-    
-    loadSections();
-    loadHooktheoryData();
-    loadWhoSampledData();
-    loadYouTubeVideos();
+
+    (async () => {
+      await loadSections();
+      await loadHooktheoryData();
+      await loadWhoSampledData();
+      await loadYouTubeVideos();
+    })();
   }, [track?.id]);
 
   async function loadYouTubeVideos() {
@@ -91,18 +101,7 @@ export default function TrackDetailPage() {
         type: r.type,
       }));
       setYoutubeVideos(videos);
-      
-      // Auto-play first video using persistent player
-      if (videos.length > 0 && track.artist && track.title) {
-        const firstVideo = videos[0];
-        setActiveVideoId(firstVideo.videoId);
-        playVideo({
-          videoId: firstVideo.videoId,
-          title: track.title,
-          artist: track.artist,
-          startSeconds: 0,
-        });
-      }
+
     } catch (err) {
       console.error('Failed to load YouTube videos:', err);
     } finally {
@@ -256,21 +255,32 @@ export default function TrackDetailPage() {
   }
 
   function handleSectionClick(section: TrackSection) {
-    if (!activeVideoId || !track?.artist || !track?.title) return;
-    
     const startSeconds = Math.floor(section.start_ms / 1000);
-    seekTo(startSeconds);
+    
+    // Always play sections on YouTube
+    if (track?.youtube_id) {
+      openPlayer({
+        provider: 'youtube',
+        providerTrackId: track.youtube_id,
+        canonicalTrackId: track.id,
+        autoplay: true,
+        startSec: startSeconds,
+        context: 'section_navigation',
+      });
+    }
   }
 
   function handlePlayVideo(video: VideoSource) {
     if (!track?.artist || !track?.title) return;
-    
-    setActiveVideoId(video.videoId);
-    playVideo({
-      videoId: video.videoId,
+
+    openPlayer({
+      canonicalTrackId: track.id,
+      provider: 'youtube',
+      providerTrackId: video.videoId,
+      autoplay: true,
+      context: 'track-detail-video',
       title: track.title,
       artist: track.artist,
-      startSeconds: 0,
     });
   }
 
@@ -313,6 +323,7 @@ export default function TrackDetailPage() {
             <h1 className="text-lg font-bold truncate">{track.title}</h1>
             <p className="text-sm text-muted-foreground truncate">{track.artist}</p>
           </div>
+          <ProfileCircle />
         </div>
       </header>
 
@@ -422,92 +433,32 @@ export default function TrackDetailPage() {
               </div>
             )}
 
-            {/* Play Controls */}
-            <div className="flex gap-2 pt-2">
-              {currentVideo && (
-                <Button
-                  onClick={() => {
-                    if (activeVideoId) {
-                      playVideo({
-                        videoId: activeVideoId,
-                        title: track.title,
-                        artist: track.artist,
-                        startSeconds: 0,
-                      });
-                    }
-                  }}
-                  className="flex-1"
-                >
-                  <Play className="w-4 h-4 mr-2" />
-                  Play on YouTube
-                </Button>
-              )}
-              {track.url_spotify_web && (
-                <Button
-                  variant="outline"
-                  onClick={() => window.open(track.url_spotify_web, '_blank')}
-                  className="flex-1"
-                >
-                  <ExternalLink className="w-4 h-4 mr-2" />
-                  Open in Spotify
-                </Button>
-              )}
+            {/* Play Controls - Provider Icons */}
+            <div className="flex gap-3 pt-2">
+              <QuickStreamButtons
+                track={{
+                  spotifyId: track.spotify_id,
+                  youtubeId: track.youtube_id,
+                }}
+                canonicalTrackId={track.id}
+                trackTitle={track.title}
+                trackArtist={track.artist}
+                size="lg"
+              />
             </div>
           </div>
         </motion.div>
 
-        {/* Embedded YouTube Player */}
-        {currentVideo && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-2xl mx-auto"
-          >
-            <div className="aspect-video rounded-lg overflow-hidden shadow-xl">
-              <iframe
-                src={`https://www.youtube.com/embed/${currentVideo.videoId}?autoplay=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1${
-                  currentVideo.startSeconds ? `&start=${currentVideo.startSeconds}` : ''
-                }`}
-                title={currentVideo.title}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="w-full h-full"
-              />
-            </div>
-          </motion.div>
-        )}
-
-        {/* Embedded Spotify Player */}
-        {track.spotify_id && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="w-full max-w-2xl mx-auto"
-          >
-            <div className="rounded-lg overflow-hidden shadow-xl">
-              <iframe
-                style={{ borderRadius: '12px' }}
-                src={`https://open.spotify.com/embed/track/${track.spotify_id}?utm_source=generator&theme=0`}
-                width="100%"
-                height="352"
-                frameBorder="0"
-                allowFullScreen={false}
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                loading="lazy"
-                className="w-full"
-              />
-            </div>
-          </motion.div>
-        )}
+        {/* IMPORTANT: Playback surfaces must live in the universal player. Use provider buttons above. */}
 
         {/* Tabs */}
         <Tabs defaultValue="sections" className="w-full">
-          <TabsList className="w-full grid grid-cols-4">
+          <TabsList className="w-full grid grid-cols-5">
             <TabsTrigger value="sections">Sections</TabsTrigger>
             <TabsTrigger value="chords">Chords</TabsTrigger>
             <TabsTrigger value="samples">Samples</TabsTrigger>
             <TabsTrigger value="videos">Videos</TabsTrigger>
+            <TabsTrigger value="comments">Comments</TabsTrigger>
           </TabsList>
 
           {/* Sections Tab */}
@@ -531,7 +482,7 @@ export default function TrackDetailPage() {
                       )}
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <div>
+                        <div className="flex-1">
                           <div className={cn(
                             "font-medium capitalize flex items-center gap-2",
                             isActive && "text-primary"
@@ -544,8 +495,36 @@ export default function TrackDetailPage() {
                             {formatTime(section.start_ms)} - {formatTime(section.end_ms)}
                           </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {formatDuration(section.end_ms - section.start_ms)}
+
+                        <div className="flex-shrink-0 ml-4 flex flex-col items-end">
+                          <div className="text-xs text-muted-foreground">
+                            {formatDuration(section.end_ms - section.start_ms)}
+                          </div>
+
+                          {/* IMPORTANT: Playback surfaces must stay in the universal player */}
+                          {((videoSources && videoSources[0]) || track.youtube_id) && (
+                            <div className="mt-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  openPlayer({
+                                    canonicalTrackId: track.id,
+                                    provider: 'youtube',
+                                    providerTrackId: (videoSources && videoSources[0]?.videoId) || track.youtube_id!,
+                                    autoplay: true,
+                                    startSec: Math.floor(section.start_ms / 1000),
+                                    context: 'section-snippet',
+                                    title: track.title,
+                                    artist: track.artist,
+                                  })
+                                }
+                                className="text-xs h-8 px-3"
+                              >
+                                Play section
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
                       
@@ -669,7 +648,7 @@ export default function TrackDetailPage() {
                             {video.type}
                           </div>
                         </div>
-                        {activeVideoId === video.videoId && (
+                        {provider === 'youtube' && activeTrackId === video.videoId && (
                           <span className="text-xs text-primary">Playing</span>
                         )}
                       </button>
@@ -687,22 +666,39 @@ export default function TrackDetailPage() {
               </div>
             </Card>
           </TabsContent>
+
+          {/* Comments Tab */}
+          <TabsContent value="comments" className="space-y-3">
+            <Card className="p-6">
+              <TrackComments trackId={trackId || ''} />
+            </Card>
+          </TabsContent>
         </Tabs>
       </main>
+
+      {/* TikTok-style side buttons (mobile only) */}
+      <TikTokStyleButtons
+        trackId={trackId || ''}
+        likes={Math.floor(Math.random() * 1000)}
+        onComment={() => {
+          // Scroll to comments tab
+          const commentsTab = document.querySelector('[value="comments"]');
+          commentsTab?.scrollIntoView({ behavior: 'smooth' });
+        }}
+        onShare={() => {
+          if (navigator.share) {
+            navigator.share({
+              title: `${track.title} - ${track.artist}`,
+              url: window.location.href,
+            });
+          }
+        }}
+      />
+
+      {/* Scrolling comments overlay */}
+      <ScrollingComments trackId={trackId} maxVisible={3} scrollSpeed={4000} />
 
       <BottomNav />
     </div>
   );
-}
-
-function formatTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  return `${seconds}s`;
 }

@@ -1,242 +1,376 @@
-/**
- * Admin Dashboard
- * 
- * Central hub for admin operations:
- * - User management
- * - Content moderation
- * - Analytics
- * - System settings
- */
-
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useMemo } from 'react';
 import { PageLayout } from '@/components/shared';
-import { useAdminStats, useFlaggedContent } from '@/hooks/api/useAdmin';
-import { UserManagementPanel } from '@/components/admin/UserManagementPanel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useAdminStats, useFlaggedContent, useAdminUsers } from '@/hooks/api/useAdmin';
+import { useLatestTestRuns, useTestRunHistory } from '@/hooks/api/useTestRuns';
+import { Users, Music, PlayCircle, Heart, AlertTriangle, Search, Inbox } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
-import {
-  Users,
-  Activity,
-  BarChart3,
-  Settings,
-  Flag,
-  Music2,
-  Heart,
-  Shield,
-  TrendingUp,
-  AlertCircle,
-} from 'lucide-react';
-import { fadeInUp } from '@/lib/animations';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 export default function AdminDashboard() {
-  const { data: stats, isLoading: statsLoading } = useAdminStats();
-  const { data: flagged = [] } = useFlaggedContent();
   const [activeTab, setActiveTab] = useState('overview');
+  const [userSearch, setUserSearch] = useState('');
+  const [userOffset, setUserOffset] = useState(0);
+  const userLimit = 20;
+  const { data: stats, isLoading: statsLoading } = useAdminStats();
+  const { data: flaggedContent = [], isLoading: flaggedLoading, isError: flaggedError } = useFlaggedContent();
+  const { data: usersData, isLoading: usersLoading, isError: usersError, refetch: refetchUsers } = useAdminUsers(userSearch, userLimit, userOffset);
+  const { data: latestRuns = [] } = useLatestTestRuns();
+  const { data: history = [] } = useTestRunHistory(50);
+
+  const totalUsers = usersData?.total ?? 0;
+  const totalUserPages = useMemo(
+    () => (totalUsers > 0 ? Math.ceil(totalUsers / userLimit) : 1),
+    [totalUsers]
+  );
+  const currentUserPage = Math.floor(userOffset / userLimit) + 1;
+
+  const metrics = [
+    {
+      title: 'Total Users',
+      value: stats?.totalUsers || 0,
+      icon: Users,
+      color: 'text-blue-500',
+    },
+    {
+      title: 'Active (7d)',
+      value: stats?.activeUsers || 0,
+      icon: Users,
+      color: 'text-green-500',
+    },
+    {
+      title: 'Total Tracks',
+      value: stats?.totalTracks || 0,
+      icon: Music,
+      color: 'text-purple-500',
+    },
+    {
+      title: 'Total Plays',
+      value: stats?.totalPlays || 0,
+      icon: PlayCircle,
+      color: 'text-orange-500',
+    },
+    {
+      title: 'Interactions',
+      value: stats?.totalInteractions || 0,
+      icon: Heart,
+      color: 'text-pink-500',
+    },
+  ];
 
   return (
-    <PageLayout
-      title="Admin Dashboard"
-      description="System management and analytics"
-    >
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Stats Overview */}
-        <motion.div
-          variants={fadeInUp}
-          initial="initial"
-          animate="animate"
-          className="grid grid-cols-2 md:grid-cols-5 gap-4"
-        >
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Users className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{statsLoading ? '...' : stats?.totalUsers}</p>
-                <p className="text-xs text-muted-foreground">Total Users</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
-                <Activity className="w-5 h-5 text-green-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{statsLoading ? '...' : stats?.activeUsers}</p>
-                <p className="text-xs text-muted-foreground">Active (7d)</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <Music2 className="w-5 h-5 text-blue-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{statsLoading ? '...' : stats?.totalTracks}</p>
-                <p className="text-xs text-muted-foreground">Tracks</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-purple-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{statsLoading ? '...' : stats?.totalPlays}</p>
-                <p className="text-xs text-muted-foreground">Total Plays</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
-                <Heart className="w-5 h-5 text-orange-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{statsLoading ? '...' : stats?.totalInteractions}</p>
-                <p className="text-xs text-muted-foreground">Interactions</p>
-              </div>
-            </div>
-          </Card>
-        </motion.div>
-
+    <PageLayout title="Admin Dashboard">
+      <div className="space-y-6">
         {/* Flagged Content Alert */}
-        {flagged.length > 0 && (
-          <motion.div
-            variants={fadeInUp}
-            initial="initial"
-            animate="animate"
-            transition={{ delay: 0.1 }}
-          >
-            <Card className="p-4 border-destructive/50 bg-destructive/5">
-              <div className="flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-destructive" />
-                <div className="flex-1">
-                  <p className="font-medium">Flagged Content Requires Attention</p>
-                  <p className="text-sm text-muted-foreground">
-                    {flagged.length} item{flagged.length !== 1 ? 's' : ''} awaiting moderation
-                  </p>
-                </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setActiveTab('moderation')}
-                >
-                  Review Now
-                </Button>
-              </div>
-            </Card>
-          </motion.div>
+        {flaggedContent && flaggedContent.length > 0 && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              {flaggedContent.length} items flagged for review. Check the Moderation tab.
+            </AlertDescription>
+          </Alert>
         )}
 
-        {/* Main Tabs */}
-        <motion.div
-          variants={fadeInUp}
-          initial="initial"
-          animate="animate"
-          transition={{ delay: 0.2 }}
-        >
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid grid-cols-4 w-full max-w-2xl">
-              <TabsTrigger value="overview">
-                <BarChart3 className="w-4 h-4 mr-2" />
-                Overview
-              </TabsTrigger>
-              <TabsTrigger value="users">
-                <Users className="w-4 h-4 mr-2" />
-                Users
-              </TabsTrigger>
-              <TabsTrigger value="moderation">
-                <Flag className="w-4 h-4 mr-2" />
-                Moderation
-                {flagged.length > 0 && (
-                  <span className="ml-2 px-1.5 py-0.5 rounded-full bg-destructive text-destructive-foreground text-xs">
-                    {flagged.length}
-                  </span>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-5">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="users">Users</TabsTrigger>
+            <TabsTrigger value="moderation">Moderation</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+            <TabsTrigger value="testruns">Test Runs</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6">
+            {/* Stats Grid */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+              {statsLoading
+                ? Array.from({ length: 5 }).map((_, i) => (
+                    <Card key={i}>
+                      <CardHeader className="pb-2">
+                        <Skeleton className="h-4 w-20" />
+                      </CardHeader>
+                      <CardContent>
+                        <Skeleton className="h-8 w-16" />
+                      </CardContent>
+                    </Card>
+                  ))
+                : metrics.map((metric) => {
+                    const Icon = metric.icon;
+                    return (
+                      <Card key={metric.title}>
+                        <CardHeader className="flex flex-row items-center justify-between pb-2">
+                          <CardTitle className="text-sm font-medium">
+                            {metric.title}
+                          </CardTitle>
+                          <Icon className={`h-4 w-4 ${metric.color}`} />
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-2xl font-bold">
+                            {metric.value.toLocaleString()}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+            </div>
+
+            {/* Analytics Placeholder */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Analytics</CardTitle>
+                <CardDescription>
+                  Charts and visualizations will be added here
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="h-64 flex items-center justify-center text-muted-foreground">
+                Coming soon: Active users, popular tracks, and system metrics charts
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="users" className="space-y-6">
+            <Card>
+              <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle>User Management</CardTitle>
+                  <CardDescription>Search and browse user accounts</CardDescription>
+                </div>
+                <div className="flex w-full max-w-md gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      value={userSearch}
+                      onChange={(e) => {
+                        setUserSearch(e.target.value);
+                        setUserOffset(0);
+                      }}
+                      placeholder="Search username or email"
+                      className="pl-9"
+                    />
+                  </div>
+                  <Button variant="outline" onClick={() => refetchUsers()}>Refresh</Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {usersError && (
+                  <Alert variant="destructive" className="mb-4">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>Failed to load users.</AlertDescription>
+                  </Alert>
                 )}
-              </TabsTrigger>
-              <TabsTrigger value="settings">
-                <Settings className="w-4 h-4 mr-2" />
-                Settings
-              </TabsTrigger>
-            </TabsList>
 
-            <TabsContent value="overview" className="space-y-4 mt-6">
-              <Card className="p-6">
-                <h3 className="text-lg font-bold mb-4">System Health</h3>
-                <p className="text-sm text-muted-foreground">
-                  Analytics dashboard coming soon...
-                </p>
-              </Card>
-            </TabsContent>
+                {usersLoading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} className="h-12 w-full" />
+                    ))}
+                  </div>
+                ) : usersData?.users && usersData.users.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-muted-foreground">
+                            <th className="py-2 pr-3">Username</th>
+                            <th className="py-2 pr-3">Email</th>
+                            <th className="py-2 pr-3">Roles</th>
+                            <th className="py-2 pr-3">Joined</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {usersData.users.map((user) => (
+                            <tr key={user.id} className="border-t border-border/60">
+                              <td className="py-2 pr-3 font-medium">{user.username || '—'}</td>
+                              <td className="py-2 pr-3 text-muted-foreground">{user.email || '—'}</td>
+                              <td className="py-2 pr-3 text-muted-foreground">
+                                {Array.isArray(user.user_roles) && user.user_roles.length > 0
+                                  ? user.user_roles.map((r: { role: string }) => r.role).join(', ')
+                                  : '—'}
+                              </td>
+                              <td className="py-2 pr-3 text-muted-foreground">
+                                {user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
 
-            <TabsContent value="users" className="space-y-4 mt-6">
-              <UserManagementPanel />
-            </TabsContent>
-
-            <TabsContent value="moderation" className="space-y-4 mt-6">
-              <Card className="p-6">
-                <h3 className="text-lg font-bold mb-4">Content Moderation Queue</h3>
-                {flagged.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-                    <p className="text-sm text-muted-foreground">
-                      No flagged content to review
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground">
+                        Showing {userOffset + 1}-{Math.min(userOffset + userLimit, totalUsers)} of {totalUsers}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={currentUserPage === 1}
+                          onClick={() => setUserOffset((prev) => Math.max(prev - userLimit, 0))}
+                        >
+                          Previous
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          Page {currentUserPage} / {totalUserPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={currentUserPage >= totalUserPages}
+                          onClick={() => setUserOffset((prev) => prev + userLimit)}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
+                    <Inbox className="h-10 w-10" />
+                    <p>No users found</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="moderation" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Content Moderation</CardTitle>
+                <CardDescription>
+                  Review flagged content and take action
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {flaggedError && (
+                  <Alert variant="destructive" className="mb-4">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>Failed to load flagged content.</AlertDescription>
+                  </Alert>
+                )}
+
+                {flaggedLoading ? (
                   <div className="space-y-2">
-                    {flagged.map((item: any) => (
-                      <div
-                        key={item.id}
-                        className="p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-start justify-between">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-16 w-full" />
+                    ))}
+                  </div>
+                ) : flaggedContent && flaggedContent.length > 0 ? (
+                  <div className="space-y-3">
+                    {flaggedContent.map((item) => (
+                      <div key={item.id} className="p-4 border rounded-lg bg-muted/40">
+                        <div className="flex items-center justify-between gap-3">
                           <div>
-                            <p className="font-medium">
-                              {item.tracks?.title || 'Unknown Track'}
-                            </p>
+                            <p className="font-medium">{item.track?.title || 'Unknown track'}</p>
                             <p className="text-sm text-muted-foreground">
-                              Flagged by {item.profiles?.username || 'Anonymous'} •{' '}
-                              {new Date(item.created_at).toLocaleDateString()}
+                              {item.track?.artist || 'Unknown artist'}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-2">
+                              Flagged by {item.user?.username || 'Unknown user'} · {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
                             </p>
                           </div>
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="outline">
-                              Dismiss
-                            </Button>
-                            <Button size="sm" variant="destructive">
-                              Remove
-                            </Button>
-                          </div>
+                          <Badge variant="outline">Flag</Badge>
                         </div>
+                        {item.notes && (
+                          <p className="text-sm text-muted-foreground mt-2">{item.notes}</p>
+                        )}
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <p className="text-muted-foreground">No flagged content</p>
                 )}
-              </Card>
-            </TabsContent>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-            <TabsContent value="settings" className="space-y-4 mt-6">
-              <Card className="p-6">
-                <h3 className="text-lg font-bold mb-4">System Configuration</h3>
-                <p className="text-sm text-muted-foreground">
-                  Settings panel coming soon...
+          <TabsContent value="settings" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>System Settings</CardTitle>
+                <CardDescription>
+                  Configure feature flags, rate limits, and system preferences
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground">
+                  Settings panel will be added here
                 </p>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </motion.div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="testruns" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Latest Test Runs</CardTitle>
+                <CardDescription>Hourly sanity → pentest → performance</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid md:grid-cols-3 gap-3">
+                  {['sanity','pentest','performance'].map((suite) => {
+                    const run = latestRuns.find(r => r.suite === suite);
+                    return (
+                      <div key={suite} className="p-4 rounded-lg bg-muted/40 border border-border/60">
+                        <div className="text-sm font-semibold capitalize">{suite}</div>
+                        <div className="text-xl font-bold mt-1">{run?.status || 'unknown'}</div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {run?.started_at ? new Date(run.started_at).toLocaleString() : 'No data'}
+                        </div>
+                        {run?.duration_ms && (
+                          <div className="text-xs text-muted-foreground">{Math.round(run.duration_ms/1000)}s</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>History (latest 50)</CardTitle>
+                <CardDescription>Status, timings, and artifact links</CardDescription>
+              </CardHeader>
+              <CardContent className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="py-2 pr-3">Suite</th>
+                      <th className="py-2 pr-3">Status</th>
+                      <th className="py-2 pr-3">Started</th>
+                      <th className="py-2 pr-3">Duration</th>
+                      <th className="py-2 pr-3">Commit</th>
+                      <th className="py-2 pr-3">Artifacts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((run) => (
+                      <tr key={`${run.run_id || run.id}-${run.suite}`} className="border-t border-border/60">
+                        <td className="py-2 pr-3 capitalize">{run.suite}</td>
+                        <td className="py-2 pr-3">{run.status}</td>
+                        <td className="py-2 pr-3 text-muted-foreground">
+                          {run.started_at ? new Date(run.started_at).toLocaleString() : '—'}
+                        </td>
+                        <td className="py-2 pr-3">{run.duration_ms ? `${Math.round(run.duration_ms/1000)}s` : '—'}</td>
+                        <td className="py-2 pr-3 text-xs font-mono truncate max-w-[120px]" title={run.commit_sha || ''}>{run.commit_sha?.slice(0,7) || '—'}</td>
+                        <td className="py-2 pr-3">
+                          {run.artifacts_url ? (
+                            <a href={run.artifacts_url} target="_blank" rel="noreferrer" className="text-primary underline text-xs">View</a>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </PageLayout>
   );

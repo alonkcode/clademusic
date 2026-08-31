@@ -28,9 +28,9 @@
 | File | Change |
 |------|--------|
 | `index.html` | Title: "Clade - Find Your Harmony" |
-| `package.json` | Homepage: `repoisrael.github.io/clade/` |
-| `vite.config.ts` | Base path: `/clade/` |
-| `src/App.tsx` | Router basename: `/clade` |
+| `package.json` | Homepage: `kaospan.github.io/clademusic/` |
+| `vite.config.ts` | Base path: `/clademusic/` |
+| `src/App.tsx` | Router basename: `import.meta.env.BASE_URL` |
 | `src/lib/searchHistory.ts` | LocalStorage key: `clade_search_history` |
 | All docs | Updated references (17 files) |
 
@@ -46,14 +46,14 @@
 ### URL Changes
 
 **Old**:
-- Homepage: `https://repoisrael.github.io/cladeai/`
-- GitHub: `https://github.com/repoisrael/cladeai`
+- Homepage: `https://kaospan.github.io/clademusic/`
+- GitHub: `https://github.com/kaospan/clademusic`
 - OG Images: `/cladeai/main/public/og-image.png`
 
 **New**:
-- Homepage: `https://repoisrael.github.io/clade/`
-- GitHub: `https://github.com/repoisrael/clade`
-- OG Images: `/clade/main/public/og-image.png`
+- Homepage: `https://kaospan.github.io/clademusic/`
+- GitHub: `https://github.com/kaospan/clademusic`
+- OG Images: `/clademusic/main/public/og-image.png`
 
 ## Migration Notes
 
@@ -65,7 +65,7 @@
 ### For Developers
 ```bash
 # Update your local repo remote
-git remote set-url origin https://github.com/repoisrael/clade.git
+git remote set-url origin https://github.com/kaospan/clademusic.git
 
 # Clear browser cache and localStorage
 # Update .env files with new redirect URIs
@@ -74,8 +74,8 @@ git remote set-url origin https://github.com/repoisrael/clade.git
 ### For Spotify OAuth
 Update redirect URI in Spotify Dashboard:
 ```
-Old: https://repoisrael.github.io/cladeai/spotify-callback
-New: https://repoisrael.github.io/clade/spotify-callback
+Old: https://kaospan.github.io/clademusic/spotify-callback
+New: https://kaospan.github.io/clademusic/spotify-callback
 ```
 
 ## Brand Assets (TODO)
@@ -161,5 +161,5 @@ New: https://repoisrael.github.io/clade/spotify-callback
 ---
 
 **Rebranded**: January 22, 2026  
-**Version**: 1.1.0 (upcoming)  
+**Version**: 1.0.0+  
 **Status**: Technical migration complete ✓

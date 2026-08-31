@@ -1,12 +1,19 @@
-import { Home, Search, Music2, User, Users } from 'lucide-react';
+import { Home, Search, User, ListMusic, MessageSquare, Menu, X } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { CladeMark } from '@/components/CladeMark';
 
+// "Connections" is deliberately absent: it linked to /connections, but the
+// only registered route is /connections/:trackId - ConnectionsPage has no
+// browse-all mode and always 404'd from here. Re-add once there's a real
+// landing page (or per-track entry points, e.g. from TrackCard) for it.
 const navItems = [
-  { to: '/', icon: Home, label: 'Feed' },
-  { to: '/following', icon: Users, label: 'Following' },
+  { to: '/feed', icon: Home, label: 'Feed' },
+  { to: '/forum', icon: MessageSquare, label: 'Forums' },
   { to: '/search', icon: Search, label: 'Search' },
+  { to: '/playlists', icon: ListMusic, label: 'Lists' },
   { to: '/profile', icon: User, label: 'Profile' },
 ];
 
@@ -14,44 +21,55 @@ export function BottomNav() {
   const location = useLocation();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 glass-strong safe-bottom">
-      <div className="flex items-center justify-around py-2 px-4 max-w-lg mx-auto">
-        {navItems.map((item) => {
-          const isActive = location.pathname === item.to;
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className="flex flex-col items-center gap-1 p-2 relative"
-            >
-              <motion.div
-                whileTap={{ scale: 0.9 }}
-                className={cn(
-                  'p-2 rounded-xl transition-colors',
-                  isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <item.icon className="w-6 h-6" />
-                {isActive && (
-                  <motion.div
-                    layoutId="nav-indicator"
-                    className="absolute inset-0 bg-primary/10 rounded-xl"
-                    transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
-                  />
-                )}
-              </motion.div>
-              <span
-                className={cn(
-                  'text-xs font-medium transition-colors',
-                  isActive ? 'text-primary' : 'text-muted-foreground'
-                )}
-              >
-                {item.label}
-              </span>
-            </NavLink>
-          );
-        })}
-      </div>
-    </nav>
+    <div className="fixed top-0 left-0 z-[70] p-3 md:p-4">
+      <Sheet>
+        <SheetTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 rounded-full border border-border/60 bg-background/80 backdrop-blur"
+            aria-label="Open navigation"
+          >
+            <Menu className="w-5 h-5" />
+          </Button>
+        </SheetTrigger>
+        <SheetContent forceMount side="left" className="w-72 p-0"> 
+          <SheetHeader className="px-4 py-3 border-b flex items-center justify-between">
+            <SheetTitle className="flex items-center gap-2">
+              <CladeMark className="h-6 w-6" />
+              Navigate
+            </SheetTitle>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Close navigation">
+                <X className="w-5 h-5" />
+              </Button>
+            </SheetTrigger>
+          </SheetHeader>
+          <nav className="py-2">
+            {navItems.map((item) => {
+              const isActive = location.pathname === item.to;
+              return (
+                <SheetTrigger asChild key={item.to}>
+                  <NavLink
+                    to={item.to}
+                    className={cn(
+                      'flex items-center gap-3 px-4 py-3 transition-colors',
+                      isActive ? 'bg-accent/20 text-primary font-semibold' : 'text-foreground hover:bg-muted/60'
+                    )}
+                  >
+                    <item.icon className="w-5 h-5" />
+                    <span className="text-sm">{item.label}</span>
+                  </NavLink>
+                </SheetTrigger>
+              );
+            })}
+          </nav>
+        </SheetContent>
+      </Sheet>
+      {/* Keep a hidden feed link in DOM for accessibility/tests even when sheet is closed */}
+      <NavLink to="/feed" className="sr-only" aria-hidden="true">
+        Feed
+      </NavLink>
+    </div>
   );
 }

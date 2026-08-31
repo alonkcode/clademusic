@@ -7,27 +7,24 @@
 
 import { Track } from '@/types';
 import { getValidAccessToken } from './spotifyAuthService';
+import type { SpotifyApiTrack } from './spotifyTrackMapper';
+import { spotifyApiTrackToTrack } from './spotifyTrackMapper';
+import { supabase } from '@/integrations/supabase/client';
 
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 
 interface SpotifySearchResult {
   tracks: {
     items: Array<{
-      id: string;
-      name: string;
-      artists: Array<{ id: string; name: string }>;
-      album: {
-        id: string;
-        name: string;
-        images: Array<{ url: string; height: number; width: number }>;
-      };
-      duration_ms: number;
-      external_urls: { spotify: string };
-      uri: string;
-      preview_url?: string;
-      external_ids?: {
-        isrc?: string;
-      };
+      id: SpotifyApiTrack['id'];
+      name: SpotifyApiTrack['name'];
+      artists: SpotifyApiTrack['artists'];
+      album: SpotifyApiTrack['album'];
+      duration_ms: SpotifyApiTrack['duration_ms'];
+      external_urls: NonNullable<SpotifyApiTrack['external_urls']>;
+      uri: NonNullable<SpotifyApiTrack['uri']>;
+      preview_url?: SpotifyApiTrack['preview_url'];
+      external_ids?: SpotifyApiTrack['external_ids'];
     }>;
     total: number;
   };
@@ -39,13 +36,14 @@ interface SpotifySearchResult {
 export async function searchSpotify(
   userId: string,
   query: string,
-  limit = 20
-): Promise<Track[]> {
+  limit = 50,
+  offset = 0
+): Promise<{ tracks: Track[]; total: number }> {
   const accessToken = await getValidAccessToken(userId);
   
   if (!accessToken) {
     console.warn('No Spotify access token available - user may need to reconnect');
-    return [];
+    return { tracks: [], total: 0 };
   }
 
   try {
@@ -53,6 +51,7 @@ export async function searchSpotify(
       q: query,
       type: 'track',
       limit: Math.min(limit, 50).toString(),
+      offset: Math.max(0, offset).toString(),
       market: 'US',
     });
 
@@ -72,31 +71,18 @@ export async function searchSpotify(
       } else {
         console.error('Spotify search failed:', response.status, await response.text());
       }
-      return [];
+      return { tracks: [], total: 0 };
     }
 
     const data: SpotifySearchResult = await response.json();
 
-    return data.tracks.items.map((track) => ({
-      id: `spotify:${track.id}`,
-      title: track.name,
-      artist: track.artists.map((a) => a.name).join(', '),
-      artists: track.artists.map((a) => a.name),
-      album: track.album.name,
-      cover_url: track.album.images[0]?.url,
-      artwork_url: track.album.images[0]?.url,
-      duration_ms: track.duration_ms,
-      preview_url: track.preview_url,
-      spotify_id: track.id,
-      url_spotify_web: track.external_urls.spotify,
-      url_spotify_app: track.uri,
-      provider: 'spotify' as const,
-      external_id: track.id,
-      isrc: track.external_ids?.isrc,
-    }));
+    return {
+      total: data.tracks.total,
+      tracks: data.tracks.items.map((track) => spotifyApiTrackToTrack(track)),
+    };
   } catch (error) {
     console.error('Error searching Spotify:', error);
-    return [];
+    return { tracks: [], total: 0 };
   }
 }
 
@@ -129,27 +115,45 @@ export async function getSpotifyTrack(
       return null;
     }
 
-    const track = await response.json();
-
-    return {
-      id: `spotify:${track.id}`,
-      title: track.name,
-      artist: track.artists.map((a: any) => a.name).join(', '),
-      artists: track.artists.map((a: any) => a.name),
-      album: track.album.name,
-      cover_url: track.album.images[0]?.url,
-      artwork_url: track.album.images[0]?.url,
-      duration_ms: track.duration_ms,
-      preview_url: track.preview_url,
-      spotify_id: track.id,
-      url_spotify_web: track.external_urls.spotify,
-      url_spotify_app: track.uri,
-      provider: 'spotify' as const,
-      external_id: track.id,
-      isrc: track.external_ids?.isrc,
-    };
+    const track: SpotifyApiTrack = await response.json();
+    return spotifyApiTrackToTrack(track);
   } catch (error) {
     console.error('Error fetching Spotify track:', error);
     return null;
+  }
+}
+
+/**
+ * Search Spotify's catalog for anyone - no personal Spotify connection
+ * required. Unlike `searchSpotify` above, this does not use the caller's own
+ * OAuth token; it calls the search-spotify Edge Function, which authenticates
+ * to Spotify at the app level (Client Credentials flow). This is what
+ * SearchPage uses for the general search box, so results are not gated behind
+ * "connect your Spotify account first."
+ */
+export async function searchSpotifyPublic(
+  query: string,
+  limit = 20,
+  offset = 0
+): Promise<{ tracks: Track[]; total: number }> {
+  if (!query.trim()) return { tracks: [], total: 0 };
+
+  try {
+    const { data, error } = await supabase.functions.invoke('search-spotify', {
+      body: { query, limit, offset },
+    });
+
+    if (error || !data?.tracks) {
+      if (error) console.error('Public Spotify search failed:', error);
+      return { tracks: [], total: 0 };
+    }
+
+    return {
+      total: data.total ?? 0,
+      tracks: (data.tracks as SpotifyApiTrack[]).map((track) => spotifyApiTrackToTrack(track)),
+    };
+  } catch (error) {
+    console.error('Error calling search-spotify function:', error);
+    return { tracks: [], total: 0 };
   }
 }

@@ -7,7 +7,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { seedTracksWithProviders } from '../src/data/seedTracksWithProviders';
+import { seedTracksWithProviders } from '../src/data/seedTracksWithProviders.ts';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://fteefcvikpowcewuqqez.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY;

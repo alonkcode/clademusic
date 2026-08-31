@@ -5,8 +5,9 @@
  * Exchanges the authorization code for tokens and stores them.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { getStoredOAuthState, clearOAuthState } from '@/hooks/api/useSpotifyConnect';
@@ -34,12 +35,18 @@ interface SpotifyUserProfile {
 export default function SpotifyCallbackPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [warningMessage, setWarningMessage] = useState<string>('');
+  const handledRef = useRef(false);
+  const consumedCodeKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     async function handleCallback() {
+      if (handledRef.current) return; // guard against StrictMode double-invoke
+      handledRef.current = true;
       try {
         console.log('[Spotify Callback] Starting...');
         console.log('[Spotify Callback] URL params:', Object.fromEntries(searchParams.entries()));
@@ -49,6 +56,22 @@ export default function SpotifyCallbackPage() {
         const state = searchParams.get('state');
         const error = searchParams.get('error');
         const errorDescription = searchParams.get('error_description');
+
+        // Prevent re-using the same code (page refresh/back button or multiple loads)
+        if (code) {
+          const key = `spotify_code_${code}`;
+          consumedCodeKeyRef.current = key;
+          const alreadyUsed = localStorage.getItem(key) || sessionStorage.getItem(key);
+          if (alreadyUsed) {
+            console.warn('[Spotify Callback] Code already consumed, skipping re-exchange');
+            setStatus('success');
+            setTimeout(() => navigate('/profile', { replace: true }), 800);
+            return;
+          }
+          // mark in both scopes to survive same-tab refresh and prevent cross-tab reuse
+          sessionStorage.setItem(key, 'used');
+          localStorage.setItem(key, 'used');
+        }
 
         // Handle Spotify errors
         if (error) {
@@ -80,8 +103,10 @@ export default function SpotifyCallbackPage() {
         
         // Exchange code for tokens
         const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
+        const basePath = import.meta.env.BASE_URL || '/';
+        const normalizedBase = basePath.endsWith('/') ? basePath : `${basePath}/`;
         const redirectUri = import.meta.env.VITE_SPOTIFY_REDIRECT_URI || 
-          `${window.location.origin}/spotify-callback`;
+          `${window.location.origin}${normalizedBase}spotify-callback`;
         
         console.log('[Spotify Callback] Using redirect URI:', redirectUri);
 
@@ -106,10 +131,23 @@ export default function SpotifyCallbackPage() {
         }
 
         console.log('[Spotify Callback] Token exchange successful');
+        // Strip code/state from the URL to prevent accidental re-use on refresh
+        try {
+          const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+          window.history.replaceState({}, document.title, cleanUrl);
+        } catch (err) {
+          console.warn('[Spotify Callback] Failed to clean URL', err);
+        }
         const tokens: SpotifyTokenResponse = await tokenResponse.json();
+        console.log(
+          '[Spotify Callback] Token scope:',
+          typeof tokens.scope === 'string' ? tokens.scope : '(missing)'
+        );
 
+        let profile: SpotifyUserProfile | null = null;
         console.log('[Spotify Callback] Fetching Spotify profile...');
-        // Get user's Spotify profile
+        // Get user's Spotify profile (best-effort). Some Spotify apps in dev mode return 403 for non-whitelisted users.
+        // We still store tokens so the user can retry/reconnect after fixing Spotify dashboard settings.
         const profileResponse = await fetch('https://api.spotify.com/v1/me', {
           headers: {
             Authorization: `Bearer ${tokens.access_token}`,
@@ -117,38 +155,68 @@ export default function SpotifyCallbackPage() {
         });
 
         if (!profileResponse.ok) {
-          throw new Error('Failed to fetch Spotify profile');
+          const details = await profileResponse.json().catch(() => null);
+          console.error('[Spotify Callback] Profile fetch failed:', profileResponse.status, details);
+          // Continue; store tokens with a placeholder provider_user_id.
+        } else {
+          profile = await profileResponse.json();
         }
-
-        const profile: SpotifyUserProfile = await profileResponse.json();
 
         // Calculate token expiry time
         const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
-        // Store in user_providers table
+        // Store in user_providers table (do not clobber refresh_token if Spotify omits it)
+        const upsertPayload: {
+          user_id: string;
+          provider: string;
+          provider_user_id: string;
+          access_token: string;
+          expires_at: string;
+          connected_at: string;
+          refresh_token?: string;
+        } = {
+          user_id: user.id,
+          provider: 'spotify',
+          provider_user_id: profile?.id || `unknown_${user.id}`,
+          access_token: tokens.access_token,
+          expires_at: expiresAt,
+          connected_at: new Date().toISOString(),
+        };
+        if (tokens.refresh_token) {
+          upsertPayload.refresh_token = tokens.refresh_token;
+        }
+
         const { error: upsertError } = await supabase
           .from('user_providers')
-          .upsert({
-            user_id: user.id,
-            provider: 'spotify',
-            provider_user_id: profile.id,
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expires_at: expiresAt,
-            connected_at: new Date().toISOString(),
-          }, {
-            onConflict: 'user_id,provider',
-          });
+          .upsert(upsertPayload, { onConflict: 'user_id,provider' });
 
         if (upsertError) {
           console.error('Failed to store Spotify connection:', upsertError);
           throw new Error('Failed to save Spotify connection');
         }
 
-        // Clean up OAuth state
-        clearOAuthState();
+        // Refresh cached "connected" state so the app doesn't keep prompting to reconnect
+        // until a hard refresh (React Query may have cached `false` with a long staleTime).
+        queryClient.setQueryData(['spotify-connected', user.id], true);
+        queryClient.invalidateQueries({ queryKey: ['spotify-connected'] });
+        queryClient.invalidateQueries({ queryKey: ['user-providers'] });
+        queryClient.invalidateQueries({ queryKey: ['spotify-profile'] });
+        queryClient.invalidateQueries({ queryKey: ['spotify-recently-played'] });
+        queryClient.invalidateQueries({ queryKey: ['spotify-top-tracks'] });
+        queryClient.invalidateQueries({ queryKey: ['spotify-top-artists'] });
+        queryClient.invalidateQueries({ queryKey: ['music-stats'] });
+        queryClient.invalidateQueries({ queryKey: ['spotify-recommendations'] });
 
+        // Clean up OAuth state
         setStatus('success');
+        if (!profile) {
+          console.warn(
+            '[Spotify Callback] Connected, but profile fetch failed. This often means the Spotify app is in dev mode and the user is not added as an allowed user in the Spotify dashboard.'
+          );
+          setWarningMessage(
+            'Connected, but Spotify profile fetch was blocked (403). If your Spotify app is in dev mode, add your account as an allowed user in the Spotify dashboard, then reconnect.'
+          );
+        }
 
         // Redirect to profile after a moment
         setTimeout(() => {
@@ -159,12 +227,14 @@ export default function SpotifyCallbackPage() {
         console.error('Spotify callback error:', err);
         setErrorMessage(err instanceof Error ? err.message : 'Unknown error');
         setStatus('error');
+      } finally {
+        // Always clear to avoid stale state; safe because we guard double-run
         clearOAuthState();
       }
     }
 
     handleCallback();
-  }, [searchParams, user, navigate]);
+  }, [searchParams, user, navigate, queryClient]);
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -184,6 +254,9 @@ export default function SpotifyCallbackPage() {
             </div>
             <h2 className="text-xl font-semibold text-green-500">Spotify Connected!</h2>
             <p className="text-muted-foreground">Redirecting to your profile...</p>
+            {warningMessage && (
+              <p className="text-sm text-amber-500/90">{warningMessage}</p>
+            )}
           </div>
         )}
 
