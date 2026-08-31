@@ -88,6 +88,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayer
   const {
     provider,
     autoplaySpotify,
+    playRequestId,
     seekToSec,
     clearSeek,
     volume,
@@ -269,13 +270,17 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayer
           console.warn('[Spotify Web Player] transfer failed', transfer.status, details);
         }
 
-        // Play the requested track (once per track change).
-        if (uri && lastTrackIdRef.current !== providerTrackId) {
+        // Play the requested track. Keyed on the play request rather than the
+        // track id alone, so asking for the same track again restarts it.
+        if (uri && shouldAutoplay) {
           lastTrackIdRef.current = providerTrackId;
-          if (shouldAutoplay) {
+          // Start where the caller asked - tapping a chorus should land on the
+          // chorus, not at 0:00 with a seek racing the SDK's connect.
+          const startMs = seekToSec != null ? Math.max(0, Math.round(seekToSec * 1000)) : 0;
+          {
             const playRes = await spotifyApiFetch(token, `/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
               method: 'PUT',
-              body: JSON.stringify({ uris: [uri] }),
+              body: JSON.stringify({ uris: [uri], position_ms: startMs }),
             });
             if (!playRes.ok && playRes.status !== 204) {
               const details = await playRes.json().catch(() => null);
@@ -284,6 +289,9 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayer
               if (playRes.status === 403) {
                 setError('Spotify playback not permitted (403). Using preview mode.');
               }
+            } else if (seekToSec != null) {
+              // The start position was applied by the play call itself.
+              clearSeek();
             }
           }
         }
@@ -320,7 +328,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayer
     return () => {
       cancelled = true;
     };
-  }, [isMuted, isTestEnv, provider, providerTrackId, shouldAutoplay, uri, updatePlaybackState, user]);
+  }, [isMuted, isTestEnv, playRequestId, provider, providerTrackId, seekToSec, shouldAutoplay, uri, updatePlaybackState, user, clearSeek]);
 
   useEffect(() => {
     if (provider !== 'spotify') return;

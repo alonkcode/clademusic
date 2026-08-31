@@ -4,6 +4,7 @@ import { MusicProvider } from '@/types';
 import { getPreferredProvider } from '@/lib/preferences';
 import type { ProviderControls } from './providers/adapter';
 import { focusUniversalPlayerFrame } from '@/player/universal/UniversalPlayerHost';
+import { preloadSpotifyIframeApi } from '@/services/spotifyIframeApi';
 
 interface ConnectedProviders {
   spotify?: { connected: boolean };
@@ -37,6 +38,10 @@ export interface PlayerState {
   isCinema: boolean;
   miniPosition: { x: number; y: number };
   seekToSec: number | null;
+  /** Bumped on every explicit play/open request. Providers watch it so asking
+   *  for the same track twice starts it again instead of silently no-opping,
+   *  which is what made a second tap on a quick-link do nothing. */
+  playRequestId: number;
   currentSectionId: string | null;
   loopSectionId: string | null;
   queue: import('@/types').Track[];
@@ -189,6 +194,17 @@ const pickProviderForTrack = (track: import('@/types').Track) => {
 };
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
+  // Fetch Spotify's embed API as soon as the app starts, not on the first
+  // Spotify click - see spotifyIframeApi.ts for why the timing matters for
+  // autoplay. Skipped in tests: it schedules a real 10s timeout and injects
+  // an external script tag, neither of which vitest needs to sit through.
+  useEffect(() => {
+    const isTestEnv =
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
+      (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
+    if (!isTestEnv) preloadSpotifyIframeApi();
+  }, []);
+
   const [state, setState] = useState<PlayerState>({
     provider: null,
     trackId: null,
@@ -215,6 +231,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     isCinema: false,
     miniPosition: { x: 0, y: 0 },
     seekToSec: null,
+    playRequestId: 0,
     currentSectionId: null,
     loopSectionId: null,
     queue: [],
@@ -610,6 +627,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         const updates: Partial<PlayerState> = {
           canonicalTrackId: resolvedCanonical,
           seekToSec: startSec ?? null,
+          playRequestId: prev.playRequestId + 1,
           provider,
           trackId: providerTrackId ?? prev.trackId,
           trackTitle: prev.trackTitle ?? prev.lastKnownTitle,
@@ -744,6 +762,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           lastKnownArtist: dedupeArtists(payload.artist ?? prev.trackArtist ?? prev.lastKnownArtist),
           lastKnownAlbum: payload.album ?? prev.trackAlbum ?? prev.lastKnownAlbum,
           seekToSec: payload.startSec ?? null,
+          playRequestId: prev.playRequestId + 1,
           positionMs: payload.startSec ? payload.startSec * 1000 : 0,
           durationMs: 0,
           isMuted: false,
