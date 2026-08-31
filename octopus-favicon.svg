@@ -2,8 +2,8 @@
   <!--
     CladeMusic octopus mark.
     Colors match the app's own theme tokens (src/index.css):
-      --primary (180 70% 50%, teal)  -> mantle
-      --accent  (330 85% 60%, pink)  -> tentacles
+      primary (180 70% 50%, teal)  -> mantle
+      accent  (330 85% 60%, pink)  -> tentacles
     Kept deliberately simple - thick strokes, no fine detail - so it stays
     legible at 16x16/32x32 favicon sizes, not just at full size.
   -->
