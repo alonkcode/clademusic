@@ -7,7 +7,6 @@ import { NearbyListenersSheet } from './NearbyListenersSheet';
 import { ShareSheet } from './ShareSheet';
 import { AudioPreview } from './AudioPreview';
 import { QuickStreamButtons } from './QuickStreamButtons';
-import { SongSections } from './SongSections';
 import { CompactSongSections } from './CompactSongSections';
 import { TrackMenu } from './TrackMenu';
 import { Button } from '@/components/ui/button';

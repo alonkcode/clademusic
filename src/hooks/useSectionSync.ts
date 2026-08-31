@@ -26,8 +26,8 @@ export interface UseSectionSyncResult {
    *  meaningful while isLiveSynced is true; useHarmonicLoop drives its own
    *  index otherwise. */
   liveChordIndex: number;
-  /** Tap a section marker to preview it. Ignored while live-synced, since real
-   *  playback position is the source of truth then. */
+  /** Tap a section marker to jump to it: seeks the player while this track is
+   *  playing, otherwise previews that section's progression. */
   selectSection: (index: number) => void;
 }
 
@@ -52,7 +52,7 @@ export function useSectionSync({
   bpm,
   beatsPerChord = 4,
 }: UseSectionSyncOptions): UseSectionSyncResult {
-  const { canonicalTrackId, isPlaying, positionMs } = usePlayer();
+  const { canonicalTrackId, isPlaying, positionMs, seekTo } = usePlayer();
   // The section chips above the card and this readout must agree, so the
   // selection lives in a shared context when one is mounted. Local state is
   // the fallback for standalone use.
@@ -104,8 +104,16 @@ export function useSectionSync({
   }, [isLiveSynced, activeSection, sectionProgression, bpm, beatsPerChord, positionMs]);
 
   const selectSection = (index: number) => {
-    if (isLiveSynced) return; // real playback position is authoritative
-    setManualIndex(Math.max(0, Math.min(index, orderedSections.length - 1)));
+    const clamped = Math.max(0, Math.min(index, orderedSections.length - 1));
+    if (isLiveSynced) {
+      // Playback position is the source of truth while this track is playing,
+      // so move the playhead rather than the label: seek there and the rest
+      // follows. Works the same on Spotify and YouTube.
+      const target = orderedSections[clamped];
+      if (target) seekTo(target.start_time);
+      return;
+    }
+    setManualIndex(clamped);
   };
 
   return {
