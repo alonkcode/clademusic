@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useRecordListeningActivity } from '@/hooks/api/useNearbyListeners';
 import { useRecordPlay } from '@/hooks/api/useFollowing';
 import { useAuth } from '@/hooks/useAuth';
+import { SectionSelectionProvider } from '@/hooks/useSectionSelection';
 import { usePlayer } from '@/player/PlayerContext';
 import { useTrackComments } from '@/hooks/api/useComments';
 
@@ -198,6 +199,9 @@ export function TrackCard({
   };
 
   return (
+    // One selected stanza for the whole card: the section chips and the
+    // harmonic readout below them read and write the same index.
+    <SectionSelectionProvider trackId={track.id}>
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: isActive ? 1 : 0.5 }}
@@ -482,6 +486,7 @@ export function TrackCard({
         </AnimatePresence>
       </div>
     </motion.div>
+    </SectionSelectionProvider>
   );
 }
 

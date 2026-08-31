@@ -25,10 +25,10 @@ const CHORD_VAR: Record<string, string> = {
   IV: '--chord-iv', V: '--chord-v', VI: '--chord-vi', VII: '--chord-vii',
 };
 
-/** Short, glanceable label for a section marker at tiny sizes. */
-const SECTION_ABBR: Record<SongSectionType, string> = {
-  intro: 'In', verse: 'Vs', 'pre-chorus': 'Pr', chorus: 'Ch',
-  bridge: 'Br', outro: 'Out', breakdown: 'Dn', drop: 'Dr',
+/** Spelled-out section names. Two-letter codes read as noise on a card. */
+const SECTION_LABEL: Record<SongSectionType, string> = {
+  intro: 'Intro', verse: 'Verse', 'pre-chorus': 'Pre-chorus', chorus: 'Chorus',
+  bridge: 'Bridge', outro: 'Outro', breakdown: 'Breakdown', drop: 'Drop',
 };
 
 /**
@@ -86,55 +86,51 @@ export function HarmonicHUD({
 
   return (
     <div className={cn('relative w-full min-w-0 rounded-2xl glass-strong overflow-hidden', className)}>
-      {/* Section rail - small symbols hugging the right edge of the card */}
-      {orderedSections.length > 1 && (
-        <div
-          className="absolute right-1.5 top-1.5 bottom-1.5 z-10 flex flex-col items-center justify-center gap-1"
-          role="tablist"
-          aria-label="Song sections"
-        >
-          {orderedSections.map((section, i) => {
-            const active = i === sync.activeSectionIndex;
-            return (
-              <button
-                key={`${section.type}-${i}`}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                aria-label={section.label || section.type}
-                disabled={sync.isLiveSynced}
-                onClick={() => sync.selectSection(i)}
-                className={cn(
-                  'shrink-0 rounded-full font-mono font-semibold transition-all duration-200',
-                  'flex items-center justify-center leading-none',
-                  'text-[8px] w-6 h-6 sm:w-7 sm:h-7',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                  sync.isLiveSynced ? 'cursor-default' : 'cursor-pointer hover:scale-110',
-                  active
-                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/40 scale-110'
-                    : 'bg-background/60 text-muted-foreground border border-border/60'
-                )}
-                title={section.label || section.type}
-              >
-                {SECTION_ABBR[section.type] ?? section.type.slice(0, 2)}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Live indicator - small symbol, top-left edge */}
-      {sync.isLiveSynced && (
-        <div className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full bg-primary/90 px-1.5 py-0.5 text-[9px] font-semibold text-primary-foreground">
-          <Radio className="w-2.5 h-2.5 animate-pulse" />
-          <span className="hidden xs:inline">LIVE</span>
+      {/* Stanza selector. Named, thumb-sized and horizontal: picking one here
+          changes the chords below, and it stays in step with the section chips
+          above the card through the shared selection context. */}
+      {(orderedSections.length > 1 || sync.isLiveSynced) && (
+        <div className="flex items-center gap-1.5 overflow-x-auto px-2.5 pt-2.5 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {sync.isLiveSynced && (
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/90 px-2 py-1 text-[10px] font-semibold text-primary-foreground">
+              <Radio className="w-2.5 h-2.5 animate-pulse" />
+              Live
+            </span>
+          )}
+          <div className="flex items-center gap-1.5" role="tablist" aria-label="Song sections">
+            {orderedSections.map((section, i) => {
+              const active = i === sync.activeSectionIndex;
+              const name = section.label || SECTION_LABEL[section.type] || section.type;
+              return (
+                <button
+                  key={`${section.type}-${i}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  disabled={sync.isLiveSynced}
+                  onClick={() => sync.selectSection(i)}
+                  className={cn(
+                    'shrink-0 whitespace-nowrap rounded-full border px-2.5 h-7 text-[11px] font-medium',
+                    'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                    sync.isLiveSynced ? 'cursor-default' : 'cursor-pointer',
+                    active
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border/60 bg-background/60 text-muted-foreground hover:text-foreground hover:border-border'
+                  )}
+                  title={sync.isLiveSynced ? 'Following playback' : `Show the chords for ${name}`}
+                >
+                  {name}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Dominant center readout. When live audio detection is capturing, its
           result overrides the analyzed display - the whole point is to show
           what's genuinely being heard right now. */}
-      <div className="flex flex-col items-center justify-center py-4 sm:py-5 px-8 sm:px-10">
+      <div className="flex flex-col items-center justify-center py-4 sm:py-5 px-4 sm:px-5">
         <AnimatePresence mode="wait">
           {live.status === 'capturing' ? (
             <motion.div
@@ -221,13 +217,15 @@ export function HarmonicHUD({
               aria-label={loop.isPlaying ? 'Stop preview' : 'Preview this section'}
               title={live.status === 'capturing' ? 'Stop live detection first' : undefined}
               className={cn(
-                'inline-flex items-center justify-center rounded-full transition-colors shrink-0',
-                'w-8 h-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                'inline-flex items-center justify-center gap-1.5 rounded-full transition-colors shrink-0',
+                'h-8 px-2.5 text-[11px] font-medium',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
                 'disabled:opacity-30 disabled:cursor-not-allowed',
                 loop.isPlaying ? 'bg-primary text-primary-foreground' : 'bg-primary/15 text-primary hover:bg-primary/25'
               )}
             >
               {loop.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-[1px]" />}
+              {loop.isPlaying ? 'Stop' : 'Hear chords'}
             </button>
           )}
 
@@ -242,8 +240,9 @@ export function HarmonicHUD({
               aria-label={live.status === 'capturing' ? 'Stop live audio detection' : 'Detect chords from audio'}
               title="Detect chords from whatever audio you share (experimental)"
               className={cn(
-                'inline-flex items-center justify-center rounded-full transition-colors shrink-0',
-                'w-8 h-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                'inline-flex items-center justify-center gap-1.5 rounded-full transition-colors shrink-0',
+                'h-8 px-2.5 text-[11px] font-medium',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
                 live.status === 'capturing'
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted/60 text-muted-foreground hover:bg-muted'
@@ -256,6 +255,7 @@ export function HarmonicHUD({
               ) : (
                 <AudioLines className="w-3.5 h-3.5" />
               )}
+              {live.status === 'capturing' ? 'Stop' : 'Listen'}
             </button>
           )}
 
@@ -270,10 +270,13 @@ export function HarmonicHUD({
           type="button"
           onClick={() => setControlsOpen(true)}
           aria-label="Key and tempo controls"
-          className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary min-h-[32px] shrink-0"
+          className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 h-8 text-[11px] text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary shrink-0"
         >
           <Sliders className="w-3 h-3" />
-          {pitchClassName(tonic)} {detectedMode === 'minor' ? 'min' : 'maj'}
+          <span className="hidden sm:inline">Key</span>
+          <span className="font-mono">
+            {pitchClassName(tonic)} {detectedMode === 'minor' ? 'min' : 'maj'}
+          </span>
         </button>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePlayer } from '@/player/PlayerContext';
+import { useSectionSelection } from '@/hooks/useSectionSelection';
 import { sectionVariant } from '@/lib/harmony/sectionVariant';
 import type { SongSection } from '@/types';
 
@@ -52,7 +53,13 @@ export function useSectionSync({
   beatsPerChord = 4,
 }: UseSectionSyncOptions): UseSectionSyncResult {
   const { canonicalTrackId, isPlaying, positionMs } = usePlayer();
-  const [manualIndex, setManualIndex] = useState(0);
+  // The section chips above the card and this readout must agree, so the
+  // selection lives in a shared context when one is mounted. Local state is
+  // the fallback for standalone use.
+  const shared = useSectionSelection();
+  const [localIndex, setLocalIndex] = useState(0);
+  const manualIndex = shared ? shared.index : localIndex;
+  const setManualIndex = shared ? shared.select : setLocalIndex;
 
   const orderedSections = useMemo(
     () => [...(sections ?? [])].sort((a, b) => a.start_time - b.start_time),
@@ -62,7 +69,10 @@ export function useSectionSync({
   const isLiveSynced = isPlaying && !!canonicalTrackId && canonicalTrackId === trackId;
 
   // Reset manual selection when the track itself changes underneath us.
-  useEffect(() => setManualIndex(0), [trackId]);
+  // The provider does the same for the shared case.
+  useEffect(() => {
+    if (!shared) setLocalIndex(0);
+  }, [trackId, shared]);
 
   const liveSectionIndex = useMemo(() => {
     if (!isLiveSynced || orderedSections.length === 0) return -1;

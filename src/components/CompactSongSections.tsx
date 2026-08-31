@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { Play } from 'lucide-react';
 import { TrackSection } from '@/types';
 import { usePlayer } from '@/player/PlayerContext';
+import { useSectionSelection } from '@/hooks/useSectionSelection';
 import { cn } from '@/lib/utils';
 import { formatTime } from '@/lib/timeFormat';
 
@@ -35,9 +36,15 @@ export function CompactSongSections({
   canonicalTrackId = null,
   className 
 }: CompactSongSectionsProps) {
-  const { openPlayer, seekTo, youtubeOpen, youtubeTrackId, spotifyOpen, spotifyTrackId, currentSectionId, positionMs } = usePlayer();
+  const { openPlayer, seekTo, youtubeOpen, youtubeTrackId, spotifyOpen, spotifyTrackId, currentSectionId, positionMs, isPlaying } = usePlayer();
 
-  const handleSectionClick = (section: TrackSection) => {
+  const selection = useSectionSelection();
+
+  const handleSectionClick = (section: TrackSection, index: number) => {
+    // Move the harmonic readout below the card to this stanza too, so both
+    // controls always describe the same part of the song.
+    selection?.select(index);
+
     const startSeconds = Math.floor(section.start_ms / 1000);
 
     const isYoutubePlaying = youtubeOpen && youtubeTrackId?.includes(youtubeId || '');
@@ -70,9 +77,17 @@ export function CompactSongSections({
         // Highlight active section: explicit currentSectionId match OR
         // fallback to position-based highlighting when currentSectionId is null
         const isLastSection = index === sections.length - 1;
-        const isActive = currentSectionId === section.id || 
-          (currentSectionId === null && positionMs >= section.start_ms && 
+        // While something is playing, position decides which section is
+        // current; otherwise it is whichever stanza the listener picked here or
+        // on the harmonic readout below.
+        const isPlayingThisSection = currentSectionId === section.id ||
+          (currentSectionId === null && positionMs >= section.start_ms &&
            (isLastSection ? positionMs <= section.end_ms : positionMs < section.end_ms));
+        const isActive = isPlaying
+          ? isPlayingThisSection
+          : selection
+            ? selection.index === index
+            : isPlayingThisSection;
         
         return (
           <motion.button
@@ -80,17 +95,17 @@ export function CompactSongSections({
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: index * 0.03 }}
-            onClick={() => handleSectionClick(section)}
+            onClick={() => handleSectionClick(section, index)}
             className={cn(
-              'group relative px-2 py-1 rounded-md text-xs font-medium',
-              'border transition-all hover:scale-105',
+              'group relative px-2.5 py-1.5 rounded-md text-xs font-medium',
+              'border transition-all hover:brightness-125',
               isActive && 'ring-2 ring-primary ring-offset-1',
               colorClass
             )}
-            title={`Play from ${section.label} at ${formatTime(section.start_ms)}`}
+            title={`Play ${section.label} from ${formatTime(section.start_ms)} and show its chords`}
           >
             <div className="flex items-center gap-1">
-              <Play className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <Play className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100 transition-opacity" />
               <span className="capitalize">{section.label}</span>
               <span className="text-[10px] opacity-60">{formatTime(section.start_ms)}</span>
             </div>
