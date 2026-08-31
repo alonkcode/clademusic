@@ -12,6 +12,23 @@ import { ForumHomePage } from '@/pages/ForumHomePage';
 import { TikTokStyleButtons } from '@/components/TikTokStyleButtons';
 import { ScrollingComments } from '@/components/ScrollingComments';
 
+// jsdom has no PointerEvent constructor, so `fireEvent.pointerDown` et al.
+// fall back to a plain Event with clientX/clientY that React's synthetic
+// event system doesn't recognise as pointer data. A MouseEvent subclass
+// gives jsdom's real (and correct) clientX/clientY handling, which is all
+// the resize-handle test below needs; jsdom already stubs setPointerCapture
+// as absent, which the component itself tolerates.
+if (typeof (globalThis as any).PointerEvent === 'undefined') {
+  class PointerEventPolyfill extends MouseEvent {
+    pointerId: number;
+    constructor(type: string, params: MouseEventInit & { pointerId?: number } = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+    }
+  }
+  (globalThis as any).PointerEvent = PointerEventPolyfill;
+}
+
 const baseAuthContext = {
   user: null,
   session: null,
@@ -206,6 +223,36 @@ describe('Mobile Player QA', () => {
       // Opens as the compact docked bar by default - the 92vw width applies
       // only to the expanded video view, which is no longer the default.
       expect(container.querySelector('.w-\\[min\\(460px\\,90vw\\)\\]')).toBeInTheDocument();
+    });
+
+    it('resizes by dragging a corner handle, and stops exactly at pointer up', () => {
+      mockPlayerContext.provider = 'youtube';
+      const { container } = render(<EmbeddedPlayerDrawer />, { wrapper });
+
+      // Handles only exist in the expanded (non-compact) view.
+      fireEvent.click(screen.getByLabelText(/show video and expand player/i));
+
+      const player = container.querySelector('[data-player="universal"]') as HTMLElement;
+      const handle = screen.getByLabelText(/resize player from the bottom right/i);
+      expect(handle.style.cursor).toBe('nwse-resize');
+
+      // jsdom reports a zero-sized bounding rect, so the player's "center" is
+      // (0,0) and distance-from-center is just distance from the origin -
+      // deterministic without needing real layout.
+      fireEvent.pointerDown(handle, { clientX: 100, clientY: 0, pointerId: 1 });
+      fireEvent.pointerMove(handle, { clientX: 200, clientY: 0, pointerId: 1 });
+      const scaleAfterMove = player.style.scale;
+      // jsdom (via React's inline-style handling for a property it doesn't
+      // recognise as unitless) renders this as e.g. "1.3px"; parseFloat still
+      // reads the number cleanly.
+      expect(parseFloat(scaleAfterMove)).toBeCloseTo(1.3, 1); // clamped at the 1.3 ceiling
+
+      fireEvent.pointerUp(handle, { clientX: 200, clientY: 0, pointerId: 1 });
+      // Movement after release must not still be treated as part of the drag -
+      // this is exactly the bug report: dragging across the player's own
+      // iframe silently lost the mouseup, so the resize never stopped.
+      fireEvent.pointerMove(handle, { clientX: 1000, clientY: 0, pointerId: 1 });
+      expect(player.style.scale).toBe(scaleAfterMove);
     });
   });
 

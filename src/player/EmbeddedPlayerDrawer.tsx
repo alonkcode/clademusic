@@ -252,14 +252,8 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const [queueOpen, setQueueOpen] = useState(false);
   const [scrubSec, setScrubSec] = useState<number | null>(null);
   const [videoScale, setVideoScale] = useState(0.9); // slightly larger, cleaner default for the main player
-  const resizeActiveRef = useRef(false);
-  const lastClientXRef = useRef(0);
-  const lastClientYRef = useRef(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [playerScale, setPlayerScale] = useState(1);
-  const playerResizeActiveRef = useRef(false);
-  const lastPlayerClientXRef = useRef(0);
-  const lastPlayerClientYRef = useRef(0);
   const clampPlayerScale = useCallback((scale: number) => Math.min(Math.max(scale, 0.6), 1.3), []);
   const playerWrapperRef = useRef<HTMLDivElement | null>(null);
   const miniContainerRef = useRef<HTMLDivElement | null>(null);
@@ -688,69 +682,79 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     }
   }, [isIdle, safeQueueIndex, safeQueue.length, playFromQueue, onNext]);
 
-  // Drag-to-resize for video: adjust scale based on diagonal drag of the handle
-  const handleResizeStart = useCallback((clientX: number, clientY: number) => {
-    resizeActiveRef.current = true;
-    lastClientXRef.current = clientX;
-    lastClientYRef.current = clientY;
+  // Player shell resize: 8 handles, uniform scale.
+  //
+  // Driven by pointer events with explicit pointer capture, not the previous
+  // window-level mousemove/mouseup pair. The player's body is almost entirely
+  // a Spotify/YouTube iframe, and once the cursor crosses into it during a
+  // drag, the PARENT page stops receiving mouse events at all - they belong to
+  // the iframe's own document now. The old listeners never saw the eventual
+  // mouseup, so playerResizeActiveRef stayed stuck true and any later mouse
+  // movement (button up or not - it was never checked) kept resizing. Pointer
+  // capture routes every event for this gesture straight to the handle
+  // regardless of what is visually underneath it, which is exactly what a
+  // drag that sweeps across an iframe needs.
+  const resizeGestureRef = useRef<{ startScale: number; startDist: number; cx: number; cy: number } | null>(null);
+
+  const beginPlayerResize = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const rect = playerWrapperRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      // Pointer capture isn't universal (missing in some embedded WebViews,
+      // and in jsdom) - fall back to plain event handlers rather than throw.
+      try {
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+      } catch {
+        // ignore
+      }
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      resizeGestureRef.current = {
+        startScale: playerScale,
+        startDist: Math.max(1, Math.hypot(e.clientX - cx, e.clientY - cy)),
+        cx,
+        cy,
+      };
+    },
+    [playerScale]
+  );
+
+  const movePlayerResize = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const gesture = resizeGestureRef.current;
+      if (!gesture) return;
+      // Scale from distance-to-center rather than the handle's own axis, so
+      // every handle - corner or edge - answers to "drag away from the
+      // player to grow it, toward it to shrink it," regardless of which side
+      // it sits on.
+      const dist = Math.max(1, Math.hypot(e.clientX - gesture.cx, e.clientY - gesture.cy));
+      setPlayerScale(clampPlayerScale(gesture.startScale * (dist / gesture.startDist)));
+    },
+    [clampPlayerScale]
+  );
+
+  const endPlayerResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    resizeGestureRef.current = null;
+    try {
+      if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
   }, []);
 
-  useEffect(() => {
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      if (!resizeActiveRef.current) return;
-      const point = 'touches' in e ? e.touches[0] : (e as MouseEvent);
-      const clientX = point?.clientX ?? lastClientXRef.current;
-      const clientY = point?.clientY ?? lastClientYRef.current;
-      const deltaX = clientX - lastClientXRef.current;
-      const deltaY = clientY - lastClientYRef.current;
-      lastClientXRef.current = clientX;
-      lastClientYRef.current = clientY;
-      const delta = (deltaX + deltaY) * 0.0025; // respond to diagonal drag
-      setVideoScale((prev) => clampScale(prev + delta));
-    };
-    const onUp = () => {
-      resizeActiveRef.current = false;
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('touchmove', onMove, { passive: false });
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchend', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('touchend', onUp);
-    };
-  }, [clampScale]);
-
-  // Player shell resize (width/height via scale)
-  useEffect(() => {
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      if (!playerResizeActiveRef.current) return;
-      const point = 'touches' in e ? e.touches[0] : (e as MouseEvent);
-      const clientX = point?.clientX ?? lastPlayerClientXRef.current;
-      const clientY = point?.clientY ?? lastPlayerClientYRef.current;
-      const deltaX = clientX - lastPlayerClientXRef.current;
-      const deltaY = clientY - lastPlayerClientYRef.current;
-      lastPlayerClientXRef.current = clientX;
-      lastPlayerClientYRef.current = clientY;
-      const delta = (deltaX + deltaY) * 0.0012;
-      setPlayerScale((prev) => clampPlayerScale(prev + delta));
-    };
-    const onUp = () => {
-      playerResizeActiveRef.current = false;
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('touchmove', onMove, { passive: false });
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchend', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('touchend', onUp);
-    };
-  }, [clampPlayerScale]);
+  type HandlePos = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+  const RESIZE_HANDLES: { pos: HandlePos; cursor: string; hit: string; mark: string; label: string }[] = [
+    { pos: 'nw', cursor: 'nwse-resize', hit: 'top-0 left-0 h-5 w-5', mark: 'top-1 left-1 h-2.5 w-2.5 rounded-tl', label: 'top left' },
+    { pos: 'n', cursor: 'ns-resize', hit: 'top-0 left-1/2 -translate-x-1/2 h-3 w-12', mark: 'top-1 inset-x-2 h-1 rounded-full', label: 'top' },
+    { pos: 'ne', cursor: 'nesw-resize', hit: 'top-0 right-0 h-5 w-5', mark: 'top-1 right-1 h-2.5 w-2.5 rounded-tr', label: 'top right' },
+    { pos: 'e', cursor: 'ew-resize', hit: 'top-1/2 right-0 -translate-y-1/2 h-12 w-3', mark: 'right-1 inset-y-2 w-1 rounded-full', label: 'right' },
+    { pos: 'se', cursor: 'nwse-resize', hit: 'bottom-0 right-0 h-5 w-5', mark: 'bottom-1 right-1 h-2.5 w-2.5 rounded-br', label: 'bottom right' },
+    { pos: 's', cursor: 'ns-resize', hit: 'bottom-0 left-1/2 -translate-x-1/2 h-3 w-12', mark: 'bottom-1 inset-x-2 h-1 rounded-full', label: 'bottom' },
+    { pos: 'sw', cursor: 'nesw-resize', hit: 'bottom-0 left-0 h-5 w-5', mark: 'bottom-1 left-1 h-2.5 w-2.5 rounded-bl', label: 'bottom left' },
+    { pos: 'w', cursor: 'ew-resize', hit: 'top-1/2 left-0 -translate-y-1/2 h-12 w-3', mark: 'left-1 inset-y-2 w-1 rounded-full', label: 'left' },
+  ];
 
   const snapCompactToCorner = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -780,7 +784,6 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   useEffect(() => {
     if (provider !== 'youtube') {
       setPlayerScale(1);
-      playerResizeActiveRef.current = false;
     }
     if (isMini) {
       setIsCompact(false);
@@ -1196,41 +1199,54 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               </div>
             </div>
           )}
-          {!isMini && (
+          {/* Resize handles on all four corners and edges, not just the one
+              corner - dragging any of them grows or shrinks the player by
+              scale, toward or away from its center. */}
+          {!isMini && !isCompact && RESIZE_HANDLES.map((h) => (
             <div
-              className="absolute bottom-2 right-2 h-4 w-4 cursor-se-resize outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+              key={h.pos}
+              className={`group absolute z-20 touch-none outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-black ${h.hit}`}
+              style={{ cursor: h.cursor }}
               tabIndex={0}
-              onMouseDown={(e) => {
+              onPointerDown={(e) => {
                 e.preventDefault();
-                playerResizeActiveRef.current = true;
-                lastPlayerClientXRef.current = e.clientX;
-                lastPlayerClientYRef.current = e.clientY;
+                // Stop the whole-player drag (framer-motion's own native
+                // pointerdown listener on an ancestor) from also starting.
+                // This has to happen inside the SAME bubble-phase handler
+                // that begins the resize, not a separate capture-phase one on
+                // this node - React short-circuits its own dispatch once
+                // stopPropagation is called, so an earlier capture listener
+                // here previously skipped this handler entirely.
+                e.stopPropagation();
+                beginPlayerResize(e);
               }}
-              onTouchStart={(e) => {
-                e.preventDefault();
-                const touch = e.touches[0];
-                lastPlayerClientXRef.current = touch?.clientX ?? 0;
-                lastPlayerClientYRef.current = touch?.clientY ?? 0;
-                playerResizeActiveRef.current = true;
-              }}
-              onPointerDownCapture={(e) => e.stopPropagation()}
+              onPointerMove={movePlayerResize}
+              onPointerUp={endPlayerResize}
+              onPointerCancel={endPlayerResize}
+              onLostPointerCapture={endPlayerResize}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   setPlayerScale(1);
+                } else if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                  e.preventDefault();
+                  setPlayerScale((prev) => clampPlayerScale(prev + 0.05));
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                  e.preventDefault();
+                  setPlayerScale((prev) => clampPlayerScale(prev - 0.05));
                 }
               }}
-              title="Drag to resize player window"
-              aria-label="Resize player window"
-              style={{
-                borderBottom: '8px solid rgba(255,255,255,0.65)',
-                borderRight: '8px solid rgba(255,255,255,0.65)',
-                borderTop: '8px solid transparent',
-                borderLeft: '8px solid transparent',
-                borderBottomRightRadius: '4px',
-              }}
-            />
-          )}
+              title={`Drag to resize (${h.label}) - Enter to reset`}
+              aria-label={`Resize player from the ${h.label}`}
+            >
+              {/* Visible affordance for an otherwise invisible hit target -
+                  faint at rest, brighter on hover/focus so the handle reads
+                  as grabbable before the cursor even changes. */}
+              <div
+                className={`pointer-events-none absolute bg-white/40 transition-colors group-hover:bg-white/80 group-focus-visible:bg-white/80 ${h.mark}`}
+              />
+            </div>
+          ))}
         </div>
       </PlayerRoot>
 
