@@ -5,6 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Track } from '@/types';
+import { TrackThumbnail } from '@/components/TrackThumbnail';
 
 interface ShareSheetProps {
   track: Track;
@@ -113,17 +114,15 @@ export function ShareSheet({ track, onShare }: ShareSheetProps) {
         <div className="space-y-4 pb-8">
           {/* Track preview */}
           <div className="flex gap-3 p-3 rounded-xl glass">
-            {track.cover_url ? (
-              <img 
-                src={track.cover_url} 
-                alt="" 
-                className="w-16 h-16 rounded-lg object-cover"
-              />
-            ) : (
-              <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center">
-                <Link2 className="w-6 h-6 text-muted-foreground" />
-              </div>
-            )}
+            <TrackThumbnail
+              track={track}
+              className="w-16 h-16 rounded-lg object-cover"
+              fallback={
+                <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center">
+                  <Link2 className="w-6 h-6 text-muted-foreground" />
+                </div>
+              }
+            />
             <div className="flex-1 min-w-0">
               <h4 className="font-medium truncate">{track.title}</h4>
               <p className="text-sm text-muted-foreground truncate">{track.artist}</p>

@@ -19,6 +19,7 @@ import { ResponsiveContainer, ResponsiveGrid } from '@/components/layout/Respons
 import { QuickStreamButtons } from '@/components/QuickStreamButtons';
 import { ProfileCircle } from '@/components/shared';
 import { parseProgressionQuery, progressionContainsSequence } from '@/lib/harmony/progressionSearch';
+import { TrackThumbnail } from '@/components/TrackThumbnail';
 import {
   getSearchHistory,
   addToSearchHistory,
@@ -708,13 +709,10 @@ export default function SearchPage() {
                   onClick={() => handlePlayOnProvider(track)}
                 >
                   <div className="flex gap-4">
-                    {track.cover_url && (
-                      <img
-                        src={track.cover_url}
-                        alt=""
-                        className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                      />
-                    )}
+                    <TrackThumbnail
+                      track={track}
+                      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                    />
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium truncate">{track.title}</h3>
                       <p className="text-sm text-muted-foreground truncate">
@@ -766,13 +764,10 @@ export default function SearchPage() {
                   onClick={() => handlePlayOnProvider(track)}
                 >
                   <div className="flex gap-4">
-                    {track.cover_url && (
-                      <img
-                        src={track.cover_url}
-                        alt=""
-                        className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                      />
-                    )}
+                    <TrackThumbnail
+                      track={track}
+                      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                    />
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium truncate">{track.title}</h3>
                       <p className="text-sm text-muted-foreground truncate">
@@ -806,13 +801,10 @@ export default function SearchPage() {
                   className="p-4 glass rounded-xl"
                 >
                   <div className="flex gap-4">
-                    {track.cover_url && (
-                      <img
-                        src={track.cover_url}
-                        alt=""
-                        className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                      />
-                    )}
+                    <TrackThumbnail
+                      track={track}
+                      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                    />
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium truncate">{track.title}</h3>
                       <p className="text-sm text-muted-foreground truncate">
@@ -882,13 +874,10 @@ export default function SearchPage() {
                     <div className="flex items-center justify-center w-8 text-lg font-bold text-muted-foreground">
                       {index + 1}
                     </div>
-                    {track.cover_url && (
-                      <img
-                        src={track.cover_url}
-                        alt=""
-                        className="w-12 h-12 rounded-lg object-cover"
-                      />
-                    )}
+                    <TrackThumbnail
+                      track={track}
+                      className="w-12 h-12 rounded-lg object-cover"
+                    />
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium truncate">{track.title}</h3>
                       <p className="text-sm text-muted-foreground truncate">

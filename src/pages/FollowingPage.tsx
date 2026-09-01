@@ -11,6 +11,7 @@ import { useFollowingFeed, useFollowing, useRecordPlay } from '@/hooks/api/useFo
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { fadeInUp } from '@/lib/animations';
+import { TrackThumbnail } from '@/components/TrackThumbnail';
 
 export default function FollowingPage() {
   const { user, loading: authLoading } = useAuth();
@@ -114,17 +115,15 @@ export default function FollowingPage() {
                       <div className="flex items-center gap-4">
                         {/* Cover art */}
                         <div className="relative w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-muted">
-                          {item.track.cover_url ? (
-                            <img
-                              src={item.track.cover_url}
-                              alt=""
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <Music className="w-8 h-8 text-muted-foreground" />
-                            </div>
-                          )}
+                          <TrackThumbnail
+                            track={item.track}
+                            className="w-full h-full object-cover"
+                            fallback={
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Music className="w-8 h-8 text-muted-foreground" />
+                              </div>
+                            }
+                          />
                         </div>
 
                         {/* Track info */}

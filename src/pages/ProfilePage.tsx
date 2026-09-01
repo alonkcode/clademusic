@@ -70,6 +70,7 @@ import { normalizeLastFmUsername } from '@/services/lastfmService';
 import { QuickStreamButtons } from '@/components/QuickStreamButtons';
 import { usePlayer } from '@/player/PlayerContext';
 import { getPreferredProvider } from '@/lib/preferences';
+import { TrackThumbnail } from '@/components/TrackThumbnail';
 
 // Mood profile styling
 const moodColors: Record<string, string> = {
@@ -852,13 +853,15 @@ export default function ProfilePage() {
                     >
                       <span className="w-6 text-center text-muted-foreground text-sm">{i + 1}</span>
                       <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted">
-                        {track.cover_url ? (
-                          <img src={track.cover_url} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Music className="w-4 h-4 text-muted-foreground" />
-                          </div>
-                        )}
+                        <TrackThumbnail
+                          track={track}
+                          className="w-full h-full object-cover"
+                          fallback={
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Music className="w-4 h-4 text-muted-foreground" />
+                            </div>
+                          }
+                        />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm truncate">{track.title}</p>
@@ -909,13 +912,15 @@ export default function ProfilePage() {
                         onClick={() => handlePlayTrack(track)}
                       >
                         <div className="w-12 h-12 rounded-xl overflow-hidden bg-muted">
-                          {track.cover_url ? (
-                            <img src={track.cover_url} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <Music className="w-5 h-5 text-muted-foreground" />
-                            </div>
-                          )}
+                          <TrackThumbnail
+                            track={track}
+                            className="w-full h-full object-cover"
+                            fallback={
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Music className="w-5 h-5 text-muted-foreground" />
+                              </div>
+                            }
+                          />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-sm truncate">{track.title}</p>
@@ -976,13 +981,15 @@ export default function ProfilePage() {
               {recommendations.slice(0, 10).map((track) => (
                 <div key={track.id} className="p-2 glass rounded-xl hover:bg-muted/30 transition-colors group cursor-pointer">
                   <div className="aspect-square rounded-lg overflow-hidden bg-muted mb-2">
-                    {track.cover_url ? (
-                      <img src={track.cover_url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Disc3 className="w-8 h-8 text-muted-foreground" />
-                      </div>
-                    )}
+                    <TrackThumbnail
+                      track={track}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      fallback={
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Disc3 className="w-8 h-8 text-muted-foreground" />
+                        </div>
+                      }
+                    />
                   </div>
                   <p className="font-medium text-xs truncate">{track.title}</p>
                   <p className="text-xs text-muted-foreground truncate">{track.artist}</p>

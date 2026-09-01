@@ -20,6 +20,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { SectionSelectionProvider } from '@/hooks/useSectionSelection';
 import { usePlayer } from '@/player/PlayerContext';
 import { useTrackComments } from '@/hooks/api/useComments';
+import { useTrackCoverArt } from '@/hooks/useTrackCoverArt';
 
 interface TrackCardProps {
   track: Track;
@@ -48,6 +49,7 @@ export function TrackCard({
   const { openPlayer } = usePlayer();
   const { data: comments } = useTrackComments(track.id);
   const commentCount = comments?.length || 0;
+  const coverUrl = useTrackCoverArt(track);
 
   // Convert SongSection to TrackSection format
   const convertSections = useCallback((sections: SongSection[]): TrackSection[] => {
@@ -219,10 +221,10 @@ export function TrackCard({
 
       {/* Background with cover art. IMPORTANT: All playback surfaces must live in the universal player only. */}
       <div className="absolute inset-0 z-0">
-        {track.cover_url ? (
+        {coverUrl ? (
           <>
             <img
-              src={track.cover_url}
+              src={coverUrl}
               alt=""
               className="w-full h-full object-cover"
             />

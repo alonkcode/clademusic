@@ -9,6 +9,7 @@ import { seedTracks } from '@/data/seedTracks';
 import { Track } from '@/types';
 import { ArrowLeftRight, Check, Sparkles, Music, Key, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { TrackThumbnail } from '@/components/TrackThumbnail';
 import {
   Select,
   SelectContent,
@@ -171,13 +172,10 @@ export default function ComparePage() {
             <div className="text-center py-6">
               <div className="inline-flex items-center gap-4">
                 <div className="flex flex-col items-center">
-                  {trackA.cover_url && (
-                    <img
-                      src={trackA.cover_url}
-                      alt=""
-                      className="w-16 h-16 rounded-xl object-cover mb-2"
-                    />
-                  )}
+                  <TrackThumbnail
+                    track={trackA}
+                    className="w-16 h-16 rounded-xl object-cover mb-2"
+                  />
                   <span className="text-xs text-muted-foreground truncate max-w-20">
                     {trackA.title}
                   </span>
@@ -210,13 +208,10 @@ export default function ComparePage() {
                 </div>
 
                 <div className="flex flex-col items-center">
-                  {trackB.cover_url && (
-                    <img
-                      src={trackB.cover_url}
-                      alt=""
-                      className="w-16 h-16 rounded-xl object-cover mb-2"
-                    />
-                  )}
+                  <TrackThumbnail
+                    track={trackB}
+                    className="w-16 h-16 rounded-xl object-cover mb-2"
+                  />
                   <span className="text-xs text-muted-foreground truncate max-w-20">
                     {trackB.title}
                   </span>

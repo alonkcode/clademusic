@@ -31,6 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { formatTime, formatDuration } from '@/lib/timeFormat';
 import { ProfileCircle } from '@/components/shared';
+import { TrackThumbnail } from '@/components/TrackThumbnail';
 
 interface VideoSource {
   id: string;
@@ -335,13 +336,11 @@ export default function TrackDetailPage() {
           animate={{ opacity: 1, y: 0 }}
           className="flex gap-4"
         >
-          {track.cover_url && (
-            <img
-              src={track.cover_url}
-              alt={track.title}
-              className="w-32 h-32 rounded-lg object-cover flex-shrink-0 shadow-lg"
-            />
-          )}
+          <TrackThumbnail
+            track={track}
+            alt={track.title}
+            className="w-32 h-32 rounded-lg object-cover flex-shrink-0 shadow-lg"
+          />
           <div className="flex-1 space-y-3">
             <div>
               <h2 className="text-2xl font-bold">{track.title}</h2>
