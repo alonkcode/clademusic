@@ -954,8 +954,13 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               className="flex items-center gap-3 flex-1 min-w-0 cursor-grab active:cursor-grabbing touch-none"
               onPointerDown={(e) => dragControls.start(e)}
             >
+              {/* The provider's real logo, not the old emoji badge: YouTube's
+                  was a bare "▶" in a circular tile - indistinguishable from
+                  an actual play button, and the only provider indicator
+                  visible at all below the sm breakpoint, where the labelled
+                  icon+text badge just beneath this is hidden. */}
               <span className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-full bg-background/80 text-lg md:text-xl shadow-inner">
-                {meta.badge}
+                {meta.Icon ? <meta.Icon className="h-4 w-4 md:h-5 md:w-5" /> : meta.badge}
               </span>
               {meta.Icon && (
                 <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 text-white text-[10px] md:text-xs shadow-inner">
