@@ -19,6 +19,7 @@ import {
   Badge as BadgeIcon,
 } from 'lucide-react';
 import { ConnectionType } from '@/types';
+import { TrackThumbnail } from '@/components/TrackThumbnail';
 
 const CONNECTION_LABELS: Record<ConnectionType, { label: string; icon: string; color: string }> = {
   sample: { label: 'Sample', icon: '🎵', color: 'text-blue-500' },
@@ -93,13 +94,11 @@ export default function ConnectionsPage() {
           className="p-6 glass rounded-2xl"
         >
           <div className="flex items-center gap-4">
-            {track.cover_url && (
-              <img
-                src={track.cover_url}
-                alt={track.title}
-                className="w-20 h-20 rounded-xl object-cover"
-              />
-            )}
+            <TrackThumbnail
+              track={track}
+              alt={track.title}
+              className="w-20 h-20 rounded-xl object-cover"
+            />
             <div className="flex-1 min-w-0">
               <h2 className="font-bold text-lg truncate">{track.title}</h2>
               <p className="text-muted-foreground truncate">

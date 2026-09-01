@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Track } from '@/types';
 import { Music, X, Play, GripVertical, Shuffle, SkipForward } from 'lucide-react';
 import { motion, Reorder } from 'framer-motion';
+import { TrackThumbnail } from '@/components/TrackThumbnail';
 
 interface QueueSheetProps {
   open: boolean;
@@ -91,17 +92,16 @@ export function QueueSheet({
                 layout
                 className="flex items-center gap-3 p-3 rounded-lg bg-accent/10 border border-accent/20"
               >
-                {currentTrack.cover_url ? (
-                  <img
-                    src={currentTrack.cover_url}
-                    alt={currentTrack.title}
-                    className="w-12 h-12 rounded object-cover"
-                  />
-                ) : (
-                  <div className="w-12 h-12 rounded bg-muted flex items-center justify-center">
-                    <Music className="w-6 h-6 text-muted-foreground" />
-                  </div>
-                )}
+                <TrackThumbnail
+                  track={currentTrack}
+                  alt={currentTrack.title}
+                  className="w-12 h-12 rounded object-cover"
+                  fallback={
+                    <div className="w-12 h-12 rounded bg-muted flex items-center justify-center">
+                      <Music className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                  }
+                />
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm truncate">{currentTrack.title}</p>
                   <p className="text-xs text-muted-foreground truncate">{currentTrack.artist}</p>
@@ -135,17 +135,16 @@ export function QueueSheet({
                     className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 cursor-grab active:cursor-grabbing group"
                   >
                     <GripVertical className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    {track.cover_url ? (
-                      <img
-                        src={track.cover_url}
-                        alt={track.title}
-                        className="w-10 h-10 rounded object-cover"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
-                        <Music className="w-5 h-5 text-muted-foreground" />
-                      </div>
-                    )}
+                    <TrackThumbnail
+                      track={track}
+                      alt={track.title}
+                      className="w-10 h-10 rounded object-cover"
+                      fallback={
+                        <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
+                          <Music className="w-5 h-5 text-muted-foreground" />
+                        </div>
+                      }
+                    />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{track.title}</p>
                       <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
@@ -188,17 +187,16 @@ export function QueueSheet({
                     key={`prev-${track.id}-${idx}`}
                     className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30"
                   >
-                    {track.cover_url ? (
-                      <img
-                        src={track.cover_url}
-                        alt={track.title}
-                        className="w-10 h-10 rounded object-cover"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
-                        <Music className="w-5 h-5 text-muted-foreground" />
-                      </div>
-                    )}
+                    <TrackThumbnail
+                      track={track}
+                      alt={track.title}
+                      className="w-10 h-10 rounded object-cover"
+                      fallback={
+                        <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
+                          <Music className="w-5 h-5 text-muted-foreground" />
+                        </div>
+                      }
+                    />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{track.title}</p>
                       <p className="text-xs text-muted-foreground truncate">{track.artist}</p>

@@ -4,6 +4,14 @@ import { render, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import ProfilePage from '@/pages/ProfilePage';
 
+// TrackThumbnail's useTrackCoverArt calls the real useQuery, which needs a
+// QueryClientProvider this test doesn't set up, and - if it did - would try
+// a real network call to search-spotify for the uncovered track below. Not
+// what this test is about; stub it out like the other data hooks above.
+vi.mock('@/components/TrackThumbnail', () => ({
+  TrackThumbnail: ({ fallback }: { fallback?: React.ReactNode }) => <>{fallback ?? null}</>,
+}));
+
 // Mocks
 const openPlayerMock = vi.fn();
 
