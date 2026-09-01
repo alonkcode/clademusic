@@ -14,6 +14,8 @@ import { useTrack } from '@/hooks/api/useTracks';
 import { useHarmonicFingerprint } from '@/hooks/api/useHarmonicFingerprint';
 import { ChordBadge } from '@/components/ChordBadge';
 import { UniversalPlayerHost } from '@/player/universal/UniversalPlayerHost';
+import { HarmonicHUD } from '@/components/HarmonicHUD';
+import type { SongSection } from '@/types';
 import { buildProviderDeepLink } from '@/player/universal/buildEmbedSrc';
 
 const providerMeta = {
@@ -241,8 +243,21 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
       cadenceType,
       confidenceScore,
       progression,
+      bpm: typeof track?.tempo === 'number' ? track.tempo : undefined,
     };
   }, [fingerprintQuery.data, trackQuery.data]);
+
+  // HarmonicHUD - the rotating chord readout - already existed and already
+  // does exactly this (chords that advance with real playback position), but
+  // only ever got mounted inside the feed's TrackCard. The player itself
+  // stays mounted across every route, so that was the whole reason chords
+  // never showed up anywhere except the feed. sections needs converting: HUD
+  // takes seconds (SongSection), this component's own sections are
+  // milliseconds (TrackSection, from track_sections).
+  const hudSections: SongSection[] = useMemo(
+    () => sections.map((s) => ({ type: s.label, start_time: s.start_ms / 1000, end_time: s.end_ms / 1000 })),
+    [sections]
+  );
 
   const safeQueue = Array.isArray(queue) ? queue : [];
   const safeQueueIndex = typeof queueIndex === 'number' ? queueIndex : -1;
@@ -977,6 +992,25 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               </button>
             </div>
           </div>
+
+          {/* Rotating chord readout - available on whatever page the
+              listener is on, not just the feed, since this player is what's
+              mounted everywhere. Skipped in the default compact bar, which
+              is deliberately kept small; expanding (one tap, always
+              available) has the room for it. Renders nothing on its own
+              when there's no stored progression for this track. */}
+          {!isCompact && !isMini && (
+            <div className="px-3 pt-3 md:px-4">
+              <HarmonicHUD
+                trackId={canonicalTrackId ?? ''}
+                progression={harmony.progression}
+                detectedKey={harmony.detectedKey ?? undefined}
+                detectedMode={harmony.detectedMode ?? undefined}
+                bpm={harmony.bpm}
+                sections={hudSections}
+              />
+            </div>
+          )}
 
           {/* Embedded playback surface (singleton universal iframe) */}
           <VideoPanel
