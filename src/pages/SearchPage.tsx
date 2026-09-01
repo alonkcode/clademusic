@@ -28,6 +28,7 @@ import {
   type SearchHistoryItem
 } from '@/lib/searchHistory';
 import { formatDistanceToNowStrict } from 'date-fns';
+import { shuffle } from '@/lib/utils';
 
 export default function SearchPage() {
   const navigate = useNavigate();
@@ -45,6 +46,12 @@ export default function SearchPage() {
   const [energyFilter, setEnergyFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const [moodFilter, setMoodFilter] = useState<'all' | 'happy' | 'sad' | 'neutral'>('all');
   const [showFilters, setShowFilters] = useState(false);
+  // Trending Tracks always opened on the same slice of seedTracks in source
+  // order - "Blinding Lights" is literally the first entry in that array, so
+  // it (and the same nine after it) was the whole "trending" list on every
+  // visit. Shuffled once per mount, not on every render, so it doesn't
+  // reorder itself while the page is open.
+  const trendingTracks = useMemo(() => shuffle(seedTracks).slice(0, 10), []);
 
   // Load search history on mount
   useEffect(() => {
@@ -172,6 +179,14 @@ export default function SearchPage() {
 
   // Instant local search with memoization for zero-latency feel
   const results = useMemo(() => {
+    // With nothing typed, this is not "results" of anything - it used to
+    // return the entire local catalog, unfiltered and in source order, under
+    // a "Results (67)" heading that looked exactly like an actual search:
+    // same seedTracks order every time, so the same first entry
+    // ("Blinding Lights") led every empty-query view. Trending Tracks and
+    // Recent Searches already cover "what to show with no query typed."
+    if (!query.trim()) return [];
+
     let filtered: Track[] = [];
 
     // Step 1: Text search filtering
@@ -179,7 +194,6 @@ export default function SearchPage() {
       const lowerQuery = query.toLowerCase();
       filtered = seedTracks.filter(
         (t) =>
-          !query.trim() || // Include all if no query
           t.title?.toLowerCase().includes(lowerQuery) ||
           t.artist?.toLowerCase().includes(lowerQuery) ||
           t.album?.toLowerCase().includes(lowerQuery) ||
@@ -862,7 +876,7 @@ export default function SearchPage() {
               Trending Tracks
             </h2>
             <div className="space-y-2">
-              {seedTracks.slice(0, 10).map((track, index) => (
+              {trendingTracks.map((track, index) => (
                 <motion.div
                   key={track.id}
                   initial={{ opacity: 0, y: 10 }}
