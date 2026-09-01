@@ -379,11 +379,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const togglePlayPause = useCallback(() => {
     setState((prev) => {
       const activeProvider = prev.provider;
-      const controls = activeProvider ? providerControlsRef.current[activeProvider] : undefined;
-      if (!controls) return prev;
+      // Nothing open at all - genuinely nothing to toggle.
+      if (!activeProvider) return prev;
 
+      const controls = providerControlsRef.current[activeProvider];
+      // The provider is still connecting (Spotify's SDK setup in particular
+      // is a multi-step async chain - load the SDK, get a token, create the
+      // device, wait for it to report ready - easily a second or more).
+      // Bailing out here entirely, as this used to, silently dropped the
+      // press: the button did nothing, with no error and no retry. State
+      // still updates below regardless of whether controls exist yet; each
+      // provider's own setup effect reads isPlaying/autoplay* once it
+      // finishes connecting and starts playback then, so a press made before
+      // "ready" is honored the moment it is, not lost.
       if (prev.isPlaying) {
-        controls.pause?.();
+        controls?.pause?.();
         return {
           ...prev,
           isPlaying: false,
@@ -392,7 +402,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      controls.play?.(prev.seekToSec ?? null);
+      controls?.play?.(prev.seekToSec ?? null);
       return {
         ...prev,
         isPlaying: true,

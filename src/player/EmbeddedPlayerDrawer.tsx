@@ -1048,7 +1048,6 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 max={seekMaxSec}
                 step={seekStepSec}
                 value={seekValueSec}
-                onPointerDownCapture={(e) => e.stopPropagation()}
                 onMouseDownCapture={(e) => e.stopPropagation()}
                 onTouchStartCapture={(e) => e.stopPropagation()}
                 // One commit point, on release - not one per drag tick. Every
@@ -1066,6 +1065,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   setScrubSec(nextSec); // visual feedback only while dragging
                 }}
                 onPointerDown={(e) => {
+                  // Stopping propagation here (not in a separate
+                  // onPointerDownCapture on this same node) matters: React
+                  // short-circuits its whole dispatch list once
+                  // stopPropagation is called, so a capture-phase handler on
+                  // this exact element previously skipped this bubble-phase
+                  // one entirely - the drag-start (setIsScrubbing) below
+                  // never ran, and the seek thumb was fighting the whole
+                  // player panel's own drag-to-reposition gesture on every
+                  // scrub. This still shields that ancestor gesture (the
+                  // underlying native event's own stopPropagation is what
+                  // framer-motion's listener respects), while also actually
+                  // running.
+                  e.stopPropagation();
                   if (!canSeekInEmbed) return;
                   const target = e.currentTarget as HTMLInputElement;
                   const nextSec = Number(target.value);

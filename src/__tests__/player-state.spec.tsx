@@ -174,4 +174,43 @@ describe('Player state invariants', () => {
       expect(latest?.isPlaying).toBe(true);
     });
   });
+
+  it('pressing play before the provider finishes connecting still registers the intent', async () => {
+    // openPlayer sets isPlaying itself; toggle it off first to isolate
+    // togglePlayPause's own behavior with no controls registered yet - the
+    // state right after a track is opened but before its provider component
+    // has mounted and called registerProviderControls.
+    let latest: ReturnType<typeof usePlayer> | null = null;
+
+    withProvider((ctx) => {
+      latest = ctx;
+    });
+
+    await waitFor(() => expect(latest).toBeTruthy());
+
+    act(() => {
+      latest?.openPlayer({
+        canonicalTrackId: 'track-1',
+        provider: 'spotify' as MusicProvider,
+        providerTrackId: 's-1',
+        title: 'Test Track',
+        artist: 'Tester',
+        autoplay: false,
+      });
+    });
+
+    await waitFor(() => expect(latest?.provider).toBe('spotify'));
+    expect(latest?.isPlaying).toBe(false);
+
+    // No registerProviderControls call has happened - controls for
+    // 'spotify' do not exist. Pressing play here used to be silently
+    // dropped entirely (isPlaying never flipped, no error, nothing to
+    // retry once the provider did connect).
+    act(() => {
+      latest?.togglePlayPause();
+    });
+
+    await waitFor(() => expect(latest?.isPlaying).toBe(true));
+    expect(latest?.autoplaySpotify).toBe(true);
+  });
 });
