@@ -12,6 +12,7 @@ import { useFeedTracks } from '@/hooks/api/useTracks';
 import { useAuth } from '@/hooks/useAuth';
 import { useLastFmRecentTracks } from '@/hooks/api/useLastFm';
 import { useSpotifyRecommendations } from '@/hooks/api/useSpotifyUser';
+import { usePlayHistory } from '@/hooks/api/usePlayEvents';
 import { InteractionType, Track } from '@/types';
 import { ChevronUp, ChevronDown, LogIn, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,13 @@ export default function FeedPage() {
   // Fetch from multiple sources
   const { data: trackResult, isLoading: tracksLoading, error: tracksError } = useFeedTracks(50);
   const { data: recommendations = [], isLoading: recommendationsLoading } = useSpotifyRecommendations([], [], 50);
+  // What this listener has already played, so the feed can push those toward
+  // the back instead of opening on the exact same tracks every visit.
+  const { data: playHistory = [] } = usePlayHistory({ limit: 200 });
+  const recentlyPlayedIds = useMemo(
+    () => new Set(playHistory.map((p) => p.track_id).filter(Boolean)),
+    [playHistory]
+  );
 
   // Always show both recent feed tracks and personalized recommendations (if available and signed-in).
   const baseFeed = trackResult?.tracks ?? [];
@@ -73,7 +81,7 @@ export default function FeedPage() {
   const tracks: Track[] = useMemo(() => {
     const seen = new Set<string>();
     const all = [...lastfmRecent, ...baseFeed, ...personalizedRecs];
-    return all.filter((t) => {
+    const deduped = all.filter((t) => {
       const title = (t.title || (t as any).name || '').toLowerCase().trim();
       const artist = (t.artist || t.artists?.[0] || '').toLowerCase().trim();
       const key = (t.spotify_id || t.youtube_id || `${title}|${artist}`) || t.id;
@@ -82,7 +90,17 @@ export default function FeedPage() {
       seen.add(key);
       return true;
     });
-  }, [lastfmRecent, baseFeed, personalizedRecs]);
+
+    if (recentlyPlayedIds.size === 0) return deduped;
+
+    // Push what's already been played toward the back rather than dropping
+    // it - the catalog is small enough that hiding it outright could leave
+    // an active listener with barely anything - so a returning visitor's
+    // feed opens on what they haven't heard, without ever going empty.
+    const unseen = deduped.filter((t) => !recentlyPlayedIds.has(t.id));
+    const seenBefore = deduped.filter((t) => recentlyPlayedIds.has(t.id));
+    return [...unseen, ...seenBefore];
+  }, [lastfmRecent, baseFeed, personalizedRecs, recentlyPlayedIds]);
   
   const [currentIndex, setCurrentIndex] = useState(0);
   const [interactions, setInteractions] = useState<Map<string, Set<InteractionType>>>(new Map());

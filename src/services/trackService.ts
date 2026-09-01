@@ -27,6 +27,20 @@ export interface TrackQuery {
   search?: string;
   limit?: number;
   offset?: number;
+  /** Shuffle a wider pool and return a random slice of it, rather than the
+   *  database's default (stable, identical-every-time) row order. */
+  randomize?: boolean;
+}
+
+/** Fisher-Yates. Used for the feed, where "the same order every load" reads
+ *  as "the same tracks every load" even when the underlying set is larger. */
+export function shuffle<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 export interface TrackResult {
@@ -89,23 +103,37 @@ async function fetchFromDatabase(query: TrackQuery): Promise<Track[] | null> {
       );
     }
     
-    if (query.limit) {
-      supabaseQuery = supabaseQuery.limit(query.limit);
+    // PostgREST's query builder has no way to ORDER BY random() - .order()
+    // takes a real column, not an expression - so a random feed means
+    // fetching a wider, still-deterministic pool and shuffling client-side
+    // instead. Only applies to a plain "give me the feed" call: combined with
+    // an offset it would make pagination incoherent (page 2 could repeat
+    // page 1's tracks), so a randomized query is never paginated.
+    const randomizing = query.randomize && !query.offset;
+    const dbLimit = randomizing
+      ? Math.min(Math.max((query.limit || 20) * 4, 150), 300)
+      : query.limit;
+
+    if (dbLimit) {
+      supabaseQuery = supabaseQuery.limit(dbLimit);
     }
-    
+
     if (query.offset) {
       supabaseQuery = supabaseQuery.range(query.offset, query.offset + (query.limit || 20) - 1);
     }
-    
+
     const { data, error } = await supabaseQuery;
-    
+
     if (error) {
       console.warn('Database fetch failed:', error.message);
       return null;
     }
-    
+
     // Transform database rows to proper Track types
-    return data ? data.map(row => transformDbRowToTrack(row as Record<string, unknown>)) : null;
+    const tracks = data ? data.map(row => transformDbRowToTrack(row as Record<string, unknown>)) : null;
+    if (!tracks) return null;
+
+    return randomizing ? shuffle(tracks).slice(0, query.limit ?? tracks.length) : tracks;
   } catch (error) {
     console.warn('Database fetch error:', error);
     return null;
@@ -139,7 +167,11 @@ async function filterSeedTracks(query: TrackQuery): Promise<Track[]> {
       t.album?.toLowerCase().includes(lowerSearch)
     );
   }
-  
+
+  if (query.randomize && !query.offset) {
+    results = shuffle(results);
+  }
+
   const offset = query.offset || 0;
   const limit = query.limit || 20;
   
@@ -205,7 +237,7 @@ export async function searchTracks(
  * Get all available tracks (for feed)
  */
 export async function getFeedTracks(limit = 20): Promise<TrackResult> {
-  return fetchTracks({ limit });
+  return fetchTracks({ limit, randomize: true });
 }
 
 /**
