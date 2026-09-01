@@ -246,11 +246,18 @@ describe('Mobile Player QA', () => {
       const player = container.querySelector('[data-player="universal"]') as HTMLElement;
 
       // Docks to the right edge, vertically centered - not the old bottom-
-      // center overlay - and opens noticeably smaller than full size.
+      // center overlay - and opens noticeably smaller than full size. The
+      // centering itself is a plain-number y (panel height / 2, from a
+      // ResizeObserver - unavailable in jsdom, so not asserted here), not a
+      // Tailwind transform class: framer-motion's own x/y/scale style
+      // replaces rather than merges with a transform coming from a class on
+      // the same element, and a calc() string there can't be dragged by
+      // framer-motion's drag (which adds pixels to a motion value live).
       expect(player).toHaveClass('top-1/2');
       expect(player).toHaveClass('right-4');
-      expect(player).toHaveClass('-translate-y-1/2');
+      expect(player).not.toHaveClass('-translate-y-1/2');
       expect(player).not.toHaveClass('left-1/2');
+      expect(player.style.transform).not.toContain('calc');
       const initialScale = parseFloat(player.style.scale);
       expect(initialScale).toBeGreaterThan(0);
       expect(initialScale).toBeLessThan(0.6);

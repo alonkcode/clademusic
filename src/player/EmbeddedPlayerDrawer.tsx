@@ -1,5 +1,5 @@
 import { useMemo, useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useDragControls } from 'framer-motion';
 import { usePlayer } from './PlayerContext';
 import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, RefreshCcw, Repeat, Sparkles, ArrowLeftRight } from 'lucide-react';
 import { QueueSheet } from './QueueSheet';
@@ -279,6 +279,30 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const clampPlayerScale = useCallback((scale: number) => Math.min(Math.max(scale, 0.35), 1.3), []);
   const playerWrapperRef = useRef<HTMLDivElement | null>(null);
   const miniContainerRef = useRef<HTMLDivElement | null>(null);
+  // Vertical centering for the expanded view needs the panel's own height,
+  // kept as a plain number (not a CSS `calc(-50% + ...)` string) precisely so
+  // it can share the `y` motion value with drag: framer-motion adds the
+  // pointer delta straight to that value's current number while dragging,
+  // and has no notion of incrementing a CSS string - a calc() there rendered
+  // fine at rest but produced no movement at all once an actual drag
+  // started. offsetHeight (not the transform-scaled getBoundingClientRect)
+  // because transform-origin is this element's own center: scaling never
+  // moves that center point, so centering only has to account for the
+  // unscaled layout size, not however large the panel currently renders.
+  const [mainPanelHeight, setMainPanelHeight] = useState(0);
+  useLayoutEffect(() => {
+    const node = playerWrapperRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    // The observer itself reacts to every future size change (mode
+    // switches, video showing/hiding, content loading in) without needing
+    // any of those listed as effect dependencies - it only needs setting up
+    // once, against this stable ref. Layout (not passive) effect so the
+    // first measurement lands before paint, not one frame of y=0 after it.
+    const observer = new ResizeObserver(() => setMainPanelHeight(node.offsetHeight));
+    observer.observe(node);
+    setMainPanelHeight(node.offsetHeight);
+    return () => observer.disconnect();
+  }, []);
   const miniMargin = 8;
   const getDefaultMiniPosition = useCallback(() => {
     if (typeof window === 'undefined') return { x: 0, y: 0 };
@@ -665,8 +689,20 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
       setCompactPosition((prev) => clampCompactPosition(prev));
       return;
     }
-    setMainPosition((prev) => clampPositionToBounds(prev));
-  }, [clampCompactPosition, clampMiniPosition, clampPositionToBounds, isCompact, isMini]);
+    // Deliberately not clamping mainPosition here (the expanded/main view).
+    // dragBounds is derived from the panel's own measured rect, and right at
+    // this transition that rect can still reflect the previous mode's
+    // transform for a frame - framer-motion applies x/y/scale outside
+    // React's own commit, so this effect (which runs the instant the mode
+    // flips) can read a rect that mixes the NEW css classes with the OLD
+    // transform. That stale reading is what threw mainPosition hundreds of
+    // pixels off and pushed the expanded panel almost entirely off-screen.
+    // Unlike compact/mini, expanded's anchor (top-1/2 right-4) is valid on
+    // its own at the default {x:0,y:0} regardless of viewport size, so
+    // clamping on this specific transition was never actually needed - only
+    // the real resize handler (below) has to correct it, and that fires from
+    // a stable, already-settled layout.
+  }, [clampCompactPosition, clampMiniPosition, isCompact, isMini]);
 
   const handlePrev = useCallback(() => {
     if (isIdle) return;
@@ -716,6 +752,17 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   // capture routes every event for this gesture straight to the handle
   // regardless of what is visually underneath it, which is exactly what a
   // drag that sweeps across an iframe needs.
+  // Whole-panel drag is opt-in per gesture (dragListener: false on PlayerRoot
+  // below), started only from the header. Framer-motion's own drag-start
+  // listener attaches directly to PlayerRoot's DOM node and can fire before
+  // React's synthetic events on a descendant even get a chance to run
+  // (let alone call stopPropagation in time) - no amount of stopPropagation
+  // on the resize handles or the seekbar reliably kept it from also engaging
+  // on every one of their pointerdowns, which is what made a resize
+  // occasionally also drag the whole player, or the transform reset
+  // outright mid-gesture. Restricting where a drag can even start removes
+  // the race instead of trying to out-run it.
+  const dragControls = useDragControls();
   const resizeGestureRef = useRef<{ startScale: number; startDist: number; cx: number; cy: number } | null>(null);
 
   const beginPlayerResize = useCallback(
@@ -802,11 +849,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     setCompactPosition(best);
   }, []);
 
-  // Reset outer player scale when leaving YouTube (only YouTube is resizable)
   useEffect(() => {
-    if (provider !== 'youtube') {
-      setPlayerScale(1);
-    }
     if (isMini) {
       setIsCompact(false);
     }
@@ -828,11 +871,21 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           ? {}
           : {
               drag: isMini || !isScrubbing,
+              // Only the header (badge/title area, not its buttons) can
+              // start a drag now - see the comment on dragControls above.
+              dragListener: false,
+              dragControls,
               dragConstraints: dragBounds,
               dragElastic: 0.15,
-              initial: { y: 0, opacity: 0 },
-              animate: { y: 0, opacity: 1 },
-              exit: { y: -20, opacity: 0 },
+              // No `y` here (it used to be a same-value 0->0 pair, doing
+              // nothing animation-wise): framer-motion gives an `animate`
+              // target ownership of a motion value over a plain `style`
+              // value for the same key, so a y ever mentioned here - even at
+              // 0 - silently overrode the real centering value below,
+              // collapsing it to nothing on every mode change.
+              initial: { opacity: 0 },
+              animate: { opacity: 1 },
+              exit: { opacity: 0 },
               transition: { duration: 0.2, ease: 'easeOut' },
             })}
         onDragEnd={(_, info) => {
@@ -860,7 +913,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               // available, but it no longer sits over the feed header/content
               // (bottom-center) or the harmonic/chords readout on the card
               // beneath it (which the old full-width overlay could reach).
-              : 'top-1/2 right-4 -translate-y-1/2 w-[92vw] max-w-[720px] max-h-[calc(100dvh-6rem)] overflow-y-auto'
+              //
+              // No -translate-y-1/2 utility here: framer-motion writes x/y/
+              // scale as one inline `transform`, which completely replaces
+              // (not merges with) a transform coming from a Tailwind class
+              // on the same element - the -50% centering was silently
+              // discarded, and the panel rendered with its TOP edge at
+              // vertical-center instead of being centered there, pushing
+              // most of a fairly tall panel below the fold. The centering
+              // travels inside the y value itself instead (below) - as a
+              // plain number derived from the panel's own measured height,
+              // not a CSS calc() string, since framer-motion's drag needs a
+              // number it can add pixels to live.
+              : 'top-1/2 right-4 w-[92vw] max-w-[720px] max-h-[calc(100dvh-6rem)] overflow-y-auto'
         }`}
         style={{
           scale: isMini ? 0.9 : isCompact ? 0.7 : playerScale,
@@ -869,30 +934,44 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           // reads as "the right side stays put," not "it drifts around."
           transformOrigin: isMini ? 'center' : isCompact ? 'top left' : 'center right',
           x: isMini ? -2000 : isCompact ? compactPosition.x : mainPosition.x,
-          y: isMini ? -2000 : isCompact ? compactPosition.y : mainPosition.y,
+          y: isMini
+            ? -2000
+            : isCompact
+              ? compactPosition.y
+              : mainPosition.y - mainPanelHeight / 2,
           visibility: isMini ? 'hidden' : 'visible',
         }}
       >
         <div className={`relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br ${meta.color} shadow-[0_18px_60px_-30px_rgba(0,0,0,0.75)] backdrop-blur-xl`}>
-          {/* Header - Always visible, compact on mobile */}
+          {/* Header - Always visible, compact on mobile. The badge/title area
+              (not the button row after it) is the drag handle: with
+              dragListener off, only an explicit dragControls.start() call
+              can begin moving the panel, so its own controls - and every
+              other interactive element in the panel - can never accidentally
+              trigger a drag just by being pressed. */}
           <div className="flex items-center gap-3 px-3 py-2.5 md:px-5 md:py-3 bg-background/80 backdrop-blur">
-            <span className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-full bg-background/80 text-lg md:text-xl shadow-inner">
-              {meta.badge}
-            </span>
-            {meta.Icon && (
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 text-white text-[10px] md:text-xs shadow-inner">
-                <meta.Icon className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                <span className="font-semibold tracking-tight">{meta.label}</span>
+            <div
+              className="flex items-center gap-3 flex-1 min-w-0 cursor-grab active:cursor-grabbing touch-none"
+              onPointerDown={(e) => dragControls.start(e)}
+            >
+              <span className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-full bg-background/80 text-lg md:text-xl shadow-inner">
+                {meta.badge}
               </span>
-            )}
-            <div className="flex flex-col leading-tight flex-1 min-w-0">
-              <span className="text-[9px] md:text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80 font-medium">Now Playing</span>
-              {resolvedTitle && (
-                <span className="text-xs md:text-sm font-bold text-foreground truncate" aria-label="Track title">{resolvedTitle}</span>
+              {meta.Icon && (
+                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 text-white text-[10px] md:text-xs shadow-inner">
+                  <meta.Icon className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                  <span className="font-semibold tracking-tight">{meta.label}</span>
+                </span>
               )}
-              {resolvedArtist && (
-                <span className="text-[11px] md:text-xs text-muted-foreground truncate" aria-label="Artist name">{resolvedArtist}</span>
-              )}
+              <div className="flex flex-col leading-tight flex-1 min-w-0">
+                <span className="text-[9px] md:text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80 font-medium">Now Playing</span>
+                {resolvedTitle && (
+                  <span className="text-xs md:text-sm font-bold text-foreground truncate" aria-label="Track title">{resolvedTitle}</span>
+                )}
+                {resolvedArtist && (
+                  <span className="text-[11px] md:text-xs text-muted-foreground truncate" aria-label="Artist name">{resolvedArtist}</span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-1.5">
               <button
