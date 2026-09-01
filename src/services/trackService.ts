@@ -11,6 +11,13 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { Track, SongSection } from '@/types';
+import { shuffle } from '@/lib/utils';
+
+// Re-exported for existing importers (e.g. this file's own tests) - the
+// implementation itself moved to lib/utils so non-service code (a component
+// shuffling a static list, say) isn't reaching into a data-fetching service
+// for a generic array utility.
+export { shuffle };
 let seedTracksCache: Track[] | null = null;
 
 async function getSeedTracks(): Promise<Track[]> {
@@ -30,17 +37,6 @@ export interface TrackQuery {
   /** Shuffle a wider pool and return a random slice of it, rather than the
    *  database's default (stable, identical-every-time) row order. */
   randomize?: boolean;
-}
-
-/** Fisher-Yates. Used for the feed, where "the same order every load" reads
- *  as "the same tracks every load" even when the underlying set is larger. */
-export function shuffle<T>(items: T[]): T[] {
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
 }
 
 export interface TrackResult {
