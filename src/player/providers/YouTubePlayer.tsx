@@ -188,6 +188,13 @@ export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlaye
             if (pendingSeekRef.current !== null) {
               attemptSeek(pendingSeekRef.current, true);
             }
+            // getDuration() is commonly 0 here - YouTube hasn't loaded the
+            // video's metadata yet at "ready", only once it starts
+            // buffering/playing. Poll continuously (not just while
+            // PLAYING) so the seekbar's duration/position self-correct
+            // instead of freezing at whatever was true the instant the
+            // player last reported PLAYING.
+            startRaf();
           },
           onStateChange: (event: any) => {
             const ytState = window.YT?.PlayerState;
@@ -202,8 +209,12 @@ export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlaye
             if (isPlaying && !mutedRef.current) {
               event.target.unMute?.();
             }
-            if (isPlaying) startRaf();
-            else stopRaf();
+            // Keep the rAF loop running through BUFFERING/PAUSED too - a
+            // seek (e.g. tapping a section chip) routinely bounces through
+            // BUFFERING, and stopping the loop there is what let the
+            // seekbar drift out of sync with the actual player instead of
+            // just recovering on the next frame.
+            startRaf();
           },
         },
       });
@@ -237,6 +248,11 @@ export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlaye
           else playerRef.current?.unMute?.();
         },
         teardown: async () => {
+          // The rAF loop now runs continuously (not just while PLAYING - see
+          // onReady/onStateChange above), so it must be stopped explicitly
+          // here too, or it keeps polling a destroyed player after a
+          // provider switch and pushes stale state into the context.
+          stopRaf();
           try {
             playerRef.current?.stopVideo?.();
             playerRef.current?.mute?.();
@@ -244,6 +260,8 @@ export function YouTubePlayer({ providerTrackId, autoplay = true }: YouTubePlaye
           } catch (err) {
             console.warn('YouTube teardown failed', err);
           }
+          playerRef.current = null;
+          readyRef.current = false;
           if (playerHostRef.current) {
             playerHostRef.current.replaceChildren();
           }

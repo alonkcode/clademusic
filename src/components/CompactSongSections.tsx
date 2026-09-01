@@ -66,6 +66,7 @@ export function CompactSongSections({
     isPlaying,
     provider: activeProvider,
     trackId: activeTrackId,
+    canonicalTrackId: activePlayingTrackId,
   } = usePlayer();
 
   const selection = useSectionSelection();
@@ -126,17 +127,23 @@ export function CompactSongSections({
         // Highlight active section: explicit currentSectionId match OR
         // fallback to position-based highlighting when currentSectionId is null
         const isLastSection = index === sections.length - 1;
-        // While something is playing, position decides which section is
-        // current; otherwise it is whichever stanza the listener picked here or
-        // on the harmonic readout below.
-        const isPlayingThisSection = currentSectionId === section.id ||
+        // positionMs/currentSectionId belong to whatever the global player has
+        // loaded, not necessarily this card's track - comparing them against
+        // this card's own section timestamps without checking that first is
+        // what let a card highlight a "current" chip based on some other
+        // track's playback position. Gate on canonicalTrackId, exactly like
+        // useSectionSync's isLiveSynced below the card, so the two agree.
+        const isThisTrackLive = isPlaying && !!canonicalTrackId && canonicalTrackId === activePlayingTrackId;
+        const isPlayingThisSection = isThisTrackLive && (
+          currentSectionId === section.id ||
           (currentSectionId === null && positionMs >= section.start_ms &&
-           (isLastSection ? positionMs <= section.end_ms : positionMs < section.end_ms));
-        const isActive = isPlaying
+           (isLastSection ? positionMs <= section.end_ms : positionMs < section.end_ms))
+        );
+        const isActive = isThisTrackLive
           ? isPlayingThisSection
           : selection
             ? selection.index === index
-            : isPlayingThisSection;
+            : false;
         
         return (
           <motion.button

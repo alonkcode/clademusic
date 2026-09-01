@@ -1,9 +1,11 @@
 /**
  * Last.fm API Service
- * 
+ *
  * Fetches user data from Last.fm using their public API.
  * Last.fm uses username-based lookup (no OAuth required).
  */
+
+import { supabase } from '@/integrations/supabase/client';
 
 const LASTFM_API_BASE = 'https://ws.audioscrobbler.com/2.0';
 
