@@ -253,8 +253,15 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const [scrubSec, setScrubSec] = useState<number | null>(null);
   const [videoScale, setVideoScale] = useState(0.9); // slightly larger, cleaner default for the main player
   const [isScrubbing, setIsScrubbing] = useState(false);
-  const [playerScale, setPlayerScale] = useState(1);
-  const clampPlayerScale = useCallback((scale: number) => Math.min(Math.max(scale, 0.6), 1.3), []);
+  // The expanded video view now docks small by default - roughly a third of
+  // its old ~720px width - rather than opening at full size over whatever
+  // the listener was looking at. Still a uniform CSS scale (see the style
+  // block below), so every control shrinks proportionally with it instead of
+  // wrapping or overflowing; the resize handles can take it back up to full
+  // size (or down further) at any time.
+  const DEFAULT_PLAYER_SCALE = 0.45;
+  const [playerScale, setPlayerScale] = useState(DEFAULT_PLAYER_SCALE);
+  const clampPlayerScale = useCallback((scale: number) => Math.min(Math.max(scale, 0.35), 1.3), []);
   const playerWrapperRef = useRef<HTMLDivElement | null>(null);
   const miniContainerRef = useRef<HTMLDivElement | null>(null);
   const miniMargin = 8;
@@ -833,14 +840,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             ? 'top-0 left-1/2 -translate-x-1/2 w-[min(720px,calc(100vw-32px))]'
             : isCompact
               ? 'top-0 left-0 translate-x-0 w-[min(460px,90vw)]'
-              // Docked near the bottom rather than top-center: expanding to
-              // watch the video stays available, but even then the player no
-              // longer sits directly over the feed header/content.
-              : 'bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 w-[92vw] max-w-[720px] max-h-[calc(100dvh-6rem)] overflow-y-auto'
+              // Docked to the right edge, vertically centered, rather than
+              // spanning bottom-center: expanding to watch the video stays
+              // available, but it no longer sits over the feed header/content
+              // (bottom-center) or the harmonic/chords readout on the card
+              // beneath it (which the old full-width overlay could reach).
+              : 'top-1/2 right-4 -translate-y-1/2 w-[92vw] max-w-[720px] max-h-[calc(100dvh-6rem)] overflow-y-auto'
         }`}
         style={{
           scale: isMini ? 0.9 : isCompact ? 0.7 : playerScale,
-          transformOrigin: isMini ? 'center' : isCompact ? 'top left' : 'bottom center',
+          // Scaling from the right edge keeps that edge docked in place at
+          // any size - shrinking (or the resize handles growing it back)
+          // reads as "the right side stays put," not "it drifts around."
+          transformOrigin: isMini ? 'center' : isCompact ? 'top left' : 'center right',
           x: isMini ? -2000 : isCompact ? compactPosition.x : mainPosition.x,
           y: isMini ? -2000 : isCompact ? compactPosition.y : mainPosition.y,
           visibility: isMini ? 'hidden' : 'visible',

@@ -102,6 +102,17 @@ const queryClient = new QueryClient({
 beforeEach(() => {
   vi.clearAllMocks();
 
+  // EmbeddedPlayerDrawer persists its layout/position to localStorage and
+  // cookies, both of which jsdom keeps live across every test in this file.
+  // A test that changes the player's size/position (e.g. a resize-handle
+  // drag) leaves that behind for whichever test mounts the drawer next,
+  // silently overriding its fresh defaults via the hydrate-on-mount effects.
+  localStorage.clear();
+  document.cookie.split(';').forEach((c) => {
+    const name = c.split('=')[0]?.trim();
+    if (name) document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+  });
+
   Object.assign(mockAuthContext, {
     user: null,
     session: null,
@@ -233,14 +244,27 @@ describe('Mobile Player QA', () => {
       fireEvent.click(screen.getByLabelText(/show video and expand player/i));
 
       const player = container.querySelector('[data-player="universal"]') as HTMLElement;
+
+      // Docks to the right edge, vertically centered - not the old bottom-
+      // center overlay - and opens noticeably smaller than full size.
+      expect(player).toHaveClass('top-1/2');
+      expect(player).toHaveClass('right-4');
+      expect(player).toHaveClass('-translate-y-1/2');
+      expect(player).not.toHaveClass('left-1/2');
+      const initialScale = parseFloat(player.style.scale);
+      expect(initialScale).toBeGreaterThan(0);
+      expect(initialScale).toBeLessThan(0.6);
+
       const handle = screen.getByLabelText(/resize player from the bottom right/i);
       expect(handle.style.cursor).toBe('nwse-resize');
 
       // jsdom reports a zero-sized bounding rect, so the player's "center" is
       // (0,0) and distance-from-center is just distance from the origin -
-      // deterministic without needing real layout.
+      // deterministic without needing real layout. The move is a full 10x
+      // the starting distance so the ceiling clamp is reached regardless of
+      // the default scale (0.45) the gesture started from.
       fireEvent.pointerDown(handle, { clientX: 100, clientY: 0, pointerId: 1 });
-      fireEvent.pointerMove(handle, { clientX: 200, clientY: 0, pointerId: 1 });
+      fireEvent.pointerMove(handle, { clientX: 1000, clientY: 0, pointerId: 1 });
       const scaleAfterMove = player.style.scale;
       // jsdom (via React's inline-style handling for a property it doesn't
       // recognise as unitless) renders this as e.g. "1.3px"; parseFloat still
