@@ -34,6 +34,17 @@ vi.mock('@/components/TrackThumbnail', () => ({
   TrackThumbnail: () => null,
 }));
 
+// Trending Tracks shuffles the full local catalog and takes the first 10 -
+// genuinely random, so asserting a specific title's absence was flaky by
+// design (Blinding Lights, seedTracks[0], has a real ~5% chance of landing
+// in a random 10-of-200+ draw). Make the reorder deterministic here so the
+// test checks "the catalog gets reordered, not shown as-is" reliably,
+// without weakening what it actually verifies.
+vi.mock('@/lib/utils', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/utils')>('@/lib/utils');
+  return { ...actual, shuffle: <T,>(items: T[]) => [...items].reverse() };
+});
+
 function renderSearchPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

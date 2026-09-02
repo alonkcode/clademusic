@@ -12,23 +12,6 @@ import { ForumHomePage } from '@/pages/ForumHomePage';
 import { TikTokStyleButtons } from '@/components/TikTokStyleButtons';
 import { ScrollingComments } from '@/components/ScrollingComments';
 
-// jsdom has no PointerEvent constructor, so `fireEvent.pointerDown` et al.
-// fall back to a plain Event with clientX/clientY that React's synthetic
-// event system doesn't recognise as pointer data. A MouseEvent subclass
-// gives jsdom's real (and correct) clientX/clientY handling, which is all
-// the resize-handle test below needs; jsdom already stubs setPointerCapture
-// as absent, which the component itself tolerates.
-if (typeof (globalThis as any).PointerEvent === 'undefined') {
-  class PointerEventPolyfill extends MouseEvent {
-    pointerId: number;
-    constructor(type: string, params: MouseEventInit & { pointerId?: number } = {}) {
-      super(type, params);
-      this.pointerId = params.pointerId ?? 0;
-    }
-  }
-  (globalThis as any).PointerEvent = PointerEventPolyfill;
-}
-
 const baseAuthContext = {
   user: null,
   session: null,
@@ -176,37 +159,36 @@ describe('Mobile Player QA', () => {
     it('should render player when open', () => {
       render(<EmbeddedPlayerDrawer />, { wrapper });
 
-      // Opens docked/compact by default (no video overlay), so play/pause -
+      // Opens docked/compact by default (no video panel), so play/pause -
       // present in every state - is the reliable thing to check for, rather
       // than the fullscreen control, which only renders once video is shown.
       expect(screen.getAllByLabelText(/^(play|pause)$/i).length).toBeGreaterThan(0);
     });
 
-    it('should show a hide button on mobile', () => {
+    it('should show a close button', () => {
       render(<EmbeddedPlayerDrawer />, { wrapper });
 
-      const hideButton = screen.queryByLabelText(/hide player/i);
-      expect(hideButton).toBeInTheDocument();
+      const closeButton = screen.queryByLabelText(/close player/i);
+      expect(closeButton).toBeInTheDocument();
     });
 
-    it('docks compactly rather than overlapping the feed header/content', () => {
+    it('docks as a fixed, full-width bar at the bottom of the screen - like Spotify', () => {
       const { container } = render(<EmbeddedPlayerDrawer />, { wrapper });
       const player = container.querySelector('[data-player="universal"]');
-      // Opens as the small docked bar (top-0/left-0 anchor plus a bottom-right
-      // pixel offset applied via transform), not the old top-16 centered video
-      // overlay that sat directly over the feed.
-      expect(player).toHaveClass('top-0');
-      expect(player).toHaveClass('left-0');
-      expect(player).not.toHaveClass('top-16');
+      // Always fixed to the bottom edge, spanning the full viewport width -
+      // never dragged, resized, or left floating somewhere that could cover
+      // (or get lost behind) the page's own content.
+      expect(player).toHaveClass('fixed');
+      expect(player).toHaveClass('inset-x-0');
+      expect(player).toHaveClass('bottom-0');
     });
 
-    it('should allow dragging when minimized', () => {
+    it('closing the player stops playback rather than just hiding it', () => {
       render(<EmbeddedPlayerDrawer />, { wrapper });
 
-      const hideButton = screen.getByLabelText(/hide player/i);
-      fireEvent.click(hideButton);
+      fireEvent.click(screen.getByLabelText(/close player/i));
 
-      expect(mockPlayerContext.collapseToMini).toHaveBeenCalled();
+      expect(mockPlayerContext.closePlayer).toHaveBeenCalled();
     });
 
     it('should switch between Spotify and YouTube', async () => {
@@ -224,66 +206,30 @@ describe('Mobile Player QA', () => {
     it('should have proper z-index hierarchy', () => {
       const { container } = render(<EmbeddedPlayerDrawer />, { wrapper });
       const player = container.querySelector('.z-\\[110\\]');
-      
+
       expect(player).toBeInTheDocument();
     });
 
-    it('should be compact on mobile', () => {
+    it('renders nothing when idle, instead of an empty bar', () => {
+      mockPlayerContext.isOpen = false;
+      mockPlayerContext.provider = null as any;
+      mockPlayerContext.trackId = null as any;
       const { container } = render(<EmbeddedPlayerDrawer />, { wrapper });
 
-      // Opens as the compact docked bar by default - the 92vw width applies
-      // only to the expanded video view, which is no longer the default.
-      expect(container.querySelector('.w-\\[min\\(460px\\,90vw\\)\\]')).toBeInTheDocument();
+      expect(container.querySelector('[data-player="universal"]')).not.toBeInTheDocument();
     });
 
-    it('resizes by dragging a corner handle, and stops exactly at pointer up', () => {
+    it('shows a compact video miniplayer - not a resizable/draggable panel - once expanded', () => {
       mockPlayerContext.provider = 'youtube';
       const { container } = render(<EmbeddedPlayerDrawer />, { wrapper });
 
-      // Handles only exist in the expanded (non-compact) view.
       fireEvent.click(screen.getByLabelText(/show video and expand player/i));
 
-      const player = container.querySelector('[data-player="universal"]') as HTMLElement;
-
-      // Docks to the right edge, vertically centered - not the old bottom-
-      // center overlay - and opens noticeably smaller than full size. The
-      // centering itself is a plain-number y (panel height / 2, from a
-      // ResizeObserver - unavailable in jsdom, so not asserted here), not a
-      // Tailwind transform class: framer-motion's own x/y/scale style
-      // replaces rather than merges with a transform coming from a class on
-      // the same element, and a calc() string there can't be dragged by
-      // framer-motion's drag (which adds pixels to a motion value live).
-      expect(player).toHaveClass('top-1/2');
-      expect(player).toHaveClass('right-4');
-      expect(player).not.toHaveClass('-translate-y-1/2');
-      expect(player).not.toHaveClass('left-1/2');
-      expect(player.style.transform).not.toContain('calc');
-      const initialScale = parseFloat(player.style.scale);
-      expect(initialScale).toBeGreaterThan(0);
-      expect(initialScale).toBeLessThan(0.6);
-
-      const handle = screen.getByLabelText(/resize player from the bottom right/i);
-      expect(handle.style.cursor).toBe('nwse-resize');
-
-      // jsdom reports a zero-sized bounding rect, so the player's "center" is
-      // (0,0) and distance-from-center is just distance from the origin -
-      // deterministic without needing real layout. The move is a full 10x
-      // the starting distance so the ceiling clamp is reached regardless of
-      // the default scale (0.45) the gesture started from.
-      fireEvent.pointerDown(handle, { clientX: 100, clientY: 0, pointerId: 1 });
-      fireEvent.pointerMove(handle, { clientX: 1000, clientY: 0, pointerId: 1 });
-      const scaleAfterMove = player.style.scale;
-      // jsdom (via React's inline-style handling for a property it doesn't
-      // recognise as unitless) renders this as e.g. "1.3px"; parseFloat still
-      // reads the number cleanly.
-      expect(parseFloat(scaleAfterMove)).toBeCloseTo(1.3, 1); // clamped at the 1.3 ceiling
-
-      fireEvent.pointerUp(handle, { clientX: 200, clientY: 0, pointerId: 1 });
-      // Movement after release must not still be treated as part of the drag -
-      // this is exactly the bug report: dragging across the player's own
-      // iframe silently lost the mouseup, so the resize never stopped.
-      fireEvent.pointerMove(handle, { clientX: 1000, clientY: 0, pointerId: 1 });
-      expect(player.style.scale).toBe(scaleAfterMove);
+      // A small, fixed-aspect box (a miniplayer), not a full-width/full-screen
+      // panel, and nothing left to drag or resize it with.
+      expect(container.querySelector('.aspect-video')).toBeInTheDocument();
+      expect(container.querySelector('[aria-label*="Resize player" i]')).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/compact player and hide video/i)).toBeInTheDocument();
     });
   });
 
@@ -558,7 +504,7 @@ describe('Accessibility QA', () => {
     render(<EmbeddedPlayerDrawer />, { wrapper });
     
     expect(screen.getAllByLabelText(/^(play|pause)$/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText(/hide player/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText(/close player/i).length).toBeGreaterThan(0);
   });
 
   it('should support keyboard navigation', () => {

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChordSmoother,
+  chromaEnergy,
   chromaFromMagnitudes,
   matchChordTemplate,
   type DetectedChord,
 } from '@/lib/harmony/chordDetection';
+import { detectSections, type ChromaFrame, type DetectedSection } from '@/lib/harmony/sectionDetection';
+import { usePlayer } from '@/player/PlayerContext';
 
 export type LiveDetectionStatus = 'idle' | 'requesting' | 'capturing' | 'unsupported' | 'error';
 
@@ -14,12 +17,18 @@ export interface UseLiveChordDetectionResult {
   supported: boolean | null;
   chord: DetectedChord | null;
   errorMessage: string | null;
+  /** Section boundaries found so far in this capture - grows and refines as
+   *  more audio comes in; empty until enough has accumulated to say anything. */
+  detectedSections: DetectedSection[];
   start: () => Promise<void>;
   stop: () => void;
 }
 
 const FFT_SIZE = 8192; // higher resolution than the default 2048, for cleaner low-note bins
 const TICK_MS = 120;
+/** Re-running the self-similarity segmentation on every 120ms chord tick
+ *  would be wasted work - boundaries don't need to update that often. */
+const SECTION_RECOMPUTE_MS = 3000;
 
 /**
  * Detects the chord in whatever audio the browser lets the user share -
@@ -42,12 +51,27 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   const [status, setStatus] = useState<LiveDetectionStatus>('idle');
   const [chord, setChord] = useState<DetectedChord | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [detectedSections, setDetectedSections] = useState<DetectedSection[]>([]);
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const smootherRef = useRef(new ChordSmoother());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chromaHistoryRef = useRef<ChromaFrame[]>([]);
+  const captureStartedAtRef = useRef<number>(0);
+
+  // Sections are timed against the app player's own playback position, when
+  // this track is the one actually playing through it, so a detected
+  // boundary lands where selectSection's seek would actually go. Read via a
+  // ref (not the value itself) so the capture loop always sees the current
+  // position without needing to restart on every position update.
+  const { positionMs, isPlaying } = usePlayer();
+  const positionRef = useRef({ positionMs, isPlaying });
+  useEffect(() => {
+    positionRef.current = { positionMs, isPlaying };
+  }, [positionMs, isPlaying]);
 
   const supported =
     typeof navigator !== 'undefined' &&
@@ -58,13 +82,19 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    if (sectionIntervalRef.current) {
+      clearInterval(sectionIntervalRef.current);
+      sectionIntervalRef.current = null;
+    }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     void audioCtxRef.current?.close();
     audioCtxRef.current = null;
     analyserRef.current = null;
     smootherRef.current.reset();
+    chromaHistoryRef.current = [];
     setChord(null);
+    setDetectedSections([]);
     setStatus('idle');
   }, []);
 
@@ -116,6 +146,8 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
       // Linear magnitudes: dB output would need a costly conversion per bin
       // per tick for no benefit here, since only relative energy matters.
       const linear = new Float32Array(analyser.frequencyBinCount);
+      chromaHistoryRef.current = [];
+      captureStartedAtRef.current = performance.now();
 
       intervalRef.current = setInterval(() => {
         analyser.getFloatFrequencyData(magnitudes);
@@ -124,10 +156,27 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
           linear[i] = Math.pow(10, magnitudes[i] / 20);
         }
         const chroma = chromaFromMagnitudes(linear, ctx.sampleRate, FFT_SIZE);
-        const raw = matchChordTemplate(chroma);
+        const energy = chromaEnergy(linear, ctx.sampleRate, FFT_SIZE);
+        const raw = matchChordTemplate(chroma, energy);
         const smoothed = smootherRef.current.push(raw);
         setChord(smoothed);
+
+        // Time each frame against the app player's real position while this
+        // track is the one actually playing, so a detected boundary is
+        // exactly where tapping it would seek to; otherwise fall back to
+        // elapsed capture time (still internally consistent, just not tied
+        // to a seekable timeline).
+        const { positionMs, isPlaying } = positionRef.current;
+        const timeSec = isPlaying
+          ? positionMs / 1000
+          : (performance.now() - captureStartedAtRef.current) / 1000;
+        chromaHistoryRef.current.push({ chroma, timeSec });
       }, TICK_MS);
+
+      sectionIntervalRef.current = setInterval(() => {
+        const sections = detectSections(chromaHistoryRef.current);
+        setDetectedSections(sections);
+      }, SECTION_RECOMPUTE_MS);
 
       setStatus('capturing');
 
@@ -148,5 +197,5 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
 
   useEffect(() => stop, [stop]); // release the stream/context on unmount
 
-  return { status, supported, chord, errorMessage, start, stop };
+  return { status, supported, chord, errorMessage, detectedSections, start, stop };
 }

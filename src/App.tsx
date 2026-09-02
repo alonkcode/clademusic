@@ -5,7 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
-import { PlayerProvider } from "@/player/PlayerContext";
+import { PlayerProvider, usePlayer } from "@/player/PlayerContext";
 import { EmbeddedPlayerDrawer } from "@/player/EmbeddedPlayerDrawer";
 import { ErrorBoundary, GlobalErrorHandlers, LoadingSpinner } from "@/components/shared";
 import { AdminRoute } from "@/components/AdminRoute";
@@ -63,6 +63,16 @@ const RouteErrorBoundary = ({ children }: { children: ReactNode }) => {
   return <ErrorBoundary resetKeys={[location.pathname]}>{children}</ErrorBoundary>;
 };
 
+// The player now docks as a fixed, full-width bar at the bottom of the
+// screen - reserve space for it so it never sits over the bottom of a
+// page's own content (a footer link, a compose button), the way it did
+// briefly as a small floating box that could just be dragged out of the way.
+const PlayerBottomPadding = ({ children }: { children: ReactNode }) => {
+  const { isOpen, provider, trackId } = usePlayer();
+  const active = isOpen && !!provider && !!trackId;
+  return <div className={active ? 'pb-16 md:pb-[4.5rem]' : undefined}>{children}</div>;
+};
+
 const PlayerVisibilityGate = () => {
   const location = useLocation();
   const { user } = useAuth();
@@ -102,6 +112,7 @@ const App = () => (
                 future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
               >
                 <GlobalErrorHandlers />
+                <PlayerBottomPadding>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageLoader />}>
                     <Routes>
@@ -143,6 +154,7 @@ const App = () => (
                     </Routes>
                   </Suspense>
                 </RouteErrorBoundary>
+                </PlayerBottomPadding>
                 <PlayerVisibilityGate />
               </BrowserRouter>
         </PlayerProvider>
