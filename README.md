@@ -24,7 +24,7 @@ A TikTok-style music discovery platform that helps you find songs based on **har
 - **YouTube & Spotify** — Seamless playback with embedded players
 - **Quick stream buttons** — One-tap access to Apple Music, Deezer, SoundCloud
 - **Provider badges** — Visual indicators for available platforms
-- **Floating players** — Picture-in-picture mode with active player z-index management
+- **Docked player** — Fixed bottom bar (like Spotify's desktop player) with a compact video miniplayer, not a floating/draggable panel
 
 ### 👥 Social Features
 - **Following system** — Track friends and discover their music taste

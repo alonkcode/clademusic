@@ -49,6 +49,9 @@ This document outlines the organization of Clade's documentation.
 - [EDGE_FUNCTION_VERIFY_2FA.md](EDGE_FUNCTION_VERIFY_2FA.md) — 2FA verification edge function
 - [SECURITY_FIXES_SUMMARY.md](SECURITY_FIXES_SUMMARY.md) — Security improvements log
 
+#### Business
+- [MONETIZATION.md](MONETIZATION.md) — Billing/credits system, pricing-model inconsistencies, monetization strategy options
+
 #### Legal
 - [license.md](license.md) — MIT License
 

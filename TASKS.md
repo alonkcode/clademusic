@@ -1,6 +1,6 @@
 # 🎯 Clade - Task List & Progress
 
-**Last Updated**: August 28, 2026
+**Last Updated**: August 31, 2026
 
 ## 🚧 Active — Supabase project migration
 
@@ -26,6 +26,29 @@ Editor route. See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md).
 holds real data before seeding. `config.toml` still points at the old ref.
 
 ## ✅ Completed Features
+
+### Player redesign, harmony accuracy, dead links (Aug 31, 2026)
+- [x] **Player docks fixed to the bottom** — full-width bar, like Spotify's
+      desktop player, replacing the floating/draggable/resizable panel;
+      expanding shows a compact video miniplayer, not a full-screen one
+- [x] **Automatic section-boundary detection from live audio** — verse/
+      chorus/bridge segmentation via self-similarity + novelty-curve
+      analysis over the same tab-audio capture used for chord detection
+      (`src/lib/harmony/sectionDetection.ts`); see
+      [docs/HARMONIC_ANALYSIS_ARCHITECTURE.md](docs/HARMONIC_ANALYSIS_ARCHITECTURE.md)
+      for how this relates to the offline analysis pipeline
+- [x] **Seekbar sync fixed** — no longer freezes at 0:00 or drifts on YouTube
+- [x] **Live chord detection silence gate fixed** — was comparing an
+      always-normalized vector against itself, so it never worked
+- [x] **Last.fm connect fixed** — missing `supabase` import
+- [x] **~18 dead footer links fixed** — pages that were never built, across
+      nearly every screen in the app
+- [x] **Forum navigation fixed** — clicking a post/forum did nothing visible;
+      Create Post/Create Forum/Join went nowhere useful
+- [x] **First monetization/business-plan writeup** —
+      [docs/MONETIZATION.md](docs/MONETIZATION.md), including the finding
+      that three different pricing models coexist in the codebase (see
+      below) and that credits are granted but never spent
 
 ### Harmonic Loop — audible progressions (Aug 2026)
 - [x] **Theory layer** — `src/lib/harmony/theory.ts`; numeral parsing, accidentals, qualities, octave voice leading
@@ -203,7 +226,10 @@ holds real data before seeding. `config.toml` still points at the old ref.
 - [ ] **System configuration**
   - Feature flags (enable/disable features)
   - Rate limit settings
-  - Credit system configuration
+  - Credit system configuration — granting/billing already works (Stripe →
+    `credits.balance`); nothing spends credits yet. See
+    [docs/MONETIZATION.md §4](docs/MONETIZATION.md#4-the-credits-system-what-actually-happens-today)
+    for what a spend function/gate would need
   - Maintenance mode toggle
 
 #### Profile Theme Customization (MySpace meets TikTok)
@@ -347,6 +373,6 @@ holds real data before seeding. `config.toml` still points at the old ref.
 
 ---
 
-**Last Updated**: August 28, 2026
+**Last Updated**: August 31, 2026
 **Priority**: Apply the schema to the new Supabase project, seed it, then set
 Vercel env vars. Everything else is blocked behind a working database.

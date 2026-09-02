@@ -41,9 +41,11 @@
 - **Provider Badges** — Visual indicators showing availability across platforms
 
 ### Player Features
-- **Floating Players** — Picture-in-picture mode with drag-and-drop positioning
+- **Docked Player** — Fixed, full-width bar at the bottom of the screen (like Spotify's desktop player), not a floating/draggable panel
+- **Video Miniplayer** — Expanding the bar shows a small fixed-aspect video box, not a full-width/full-screen one
 - **Active Player Management** — Smart z-index handling (100 for active, 50 for inactive)
 - **Section Jump** — Tap song sections to seek to that timestamp
+- **Automatic Section Detection** — Verse/chorus/bridge boundaries detected from live-captured audio when no curated sections exist yet
 - **Queue Management** — Play next, play later, reorder queue, remove tracks
 - **3-Dot Track Menu** — Quick access to queue actions and similar tracks
 

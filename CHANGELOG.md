@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Automatic section-boundary detection (Aug 31, 2026)
+- Verse/chorus/bridge/intro/outro segmentation from live-captured audio,
+  built on the same tab-audio capture already used for live chord detection
+  (one "Listen" permission, not two features): chroma aggregated into ~1s
+  buckets, scored for novelty with a checkerboard kernel over a
+  self-similarity matrix (Foote's method), peak-picked into boundaries, then
+  labeled with ordinary songwriting conventions (most-repeated segment =
+  chorus, first = intro, last = outro, late one-off = bridge).
+  Recomputes every 3s as more audio accumulates.
+  - `src/lib/harmony/sectionDetection.ts` (new), wired into
+    `useLiveChordDetection.ts` and `HarmonicHUD.tsx`
+
+### Changed — Player redesign: fixed bottom bar + video miniplayer
+- Replaced the floating, draggable, manually-resizable player panel with a
+  fixed, full-width bar docked to the bottom of the screen (like Spotify's
+  desktop player) — always in the same place, never draggable/resizable.
+  Expanding it slides a details panel up above the bar (chord readout,
+  section chips, and — for video — a small fixed-aspect miniplayer, not a
+  full-width/full-screen one).
+- Pages now reserve bottom padding while the bar is docked so it never
+  covers a page's own bottom content.
+
+### Fixed — Player/harmony accuracy
+- Seekbar no longer freezes at 0:00 or drifts out of sync on YouTube tracks
+  — the position/duration poll only ran while the player reported PLAYING,
+  and a seek (tapping a section chip) routinely bounces through BUFFERING
+  first, silently stopping it.
+- Section chips no longer light up from another track's playback position —
+  they compared the global player's position against a card's own sections
+  without checking the playing track was actually that card's track.
+- Live chord detection's silence gate fixed — it compared an
+  always-unit-normalized chroma vector against itself, so it could never
+  actually distinguish a quiet passage from a loud one and always guessed a
+  chord. Now gates on the pre-normalization signal energy.
+- `ReferenceError: supabase is not defined` when connecting Last.fm — a
+  plain missing import; added regression tests for the three functions
+  that touch it (`src/services/lastfmService.test.ts`).
+
+### Fixed — Dead links and broken navigation
+- ~18 footer links across nearly every page pointed at pages that were
+  never built (About/Contact/Careers/Blog/FAQ/Docs/Guide/Community/Support/
+  Cookie Policy/Licenses) — dropped or repointed at real equivalents rather
+  than left 404ing, and rather than faking placeholder pages for content
+  that doesn't exist. Also fixed placeholder social links (bare
+  `https://github.com`/`https://twitter.com`, and unclaimed
+  `twitter.com/clade` / `instagram.com/clade` handles) and a newsletter
+  "Subscribe" button with no `onClick` at all.
+- Forum navigation: `/forum/:forumName` and `/forum/post/:postId` render the
+  same page but it never read the route params, so clicking any post or
+  forum changed the URL and showed the identical unfiltered listing. Now
+  filters/fetches accordingly, with proper not-found states. "Create Post",
+  "Create Forum", and "Join" went nowhere useful (unregistered routes, or no
+  handler at all) — now say "Coming soon" honestly instead.
+
+### Added — Documentation
+- [docs/MONETIZATION.md](docs/MONETIZATION.md) — first monetization/business
+  plan writeup, grounded in what the billing code actually does today
+  (subscriptions + credit *granting* work; credit *spending* doesn't exist
+  yet), and flagging that three different, mutually-inconsistent pricing
+  models currently coexist in the codebase (only one is wired to Stripe).
+
 ### Added — Harmonic Loop (Aug 28, 2026)
 - **Audible chord progressions** — any track's Roman-numeral progression plays
   back as real synthesised chords, transposable to all 12 keys, tempo-locked to
