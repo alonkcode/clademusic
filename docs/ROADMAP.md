@@ -50,7 +50,7 @@ This roadmap consolidates all pending tasks, user requests, and feature backlog 
 #### 1.6 System Configuration
 - [ ] Feature flags panel (toggle features on/off)
 - [ ] Rate limit editor (API throttling settings)
-- [ ] Credit system configuration
+- [ ] Credit system configuration — see [MONETIZATION.md](MONETIZATION.md) for current state (granting works, spending doesn't exist yet)
 - [ ] Maintenance mode toggle with custom message
 - [ ] SMTP/email settings management
 

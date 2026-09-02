@@ -32,6 +32,9 @@ Clade is a TikTok-style music discovery platform that analyzes songs by **harmon
 - [Harmonic Loop](HARMONIC_LOOP.md) — Web Audio playback of progressions in any key
 - [Architecture Summary](ARCHITECTURE_SUMMARY.md) — Quick reference for technical decisions
 
+### Business
+- [Monetization & Business Plan](MONETIZATION.md) — Billing, the credits system (what's built vs. aspirational), and open pricing decisions
+
 ### Contributing
 - [Contributing Guide](contributing.md) — How to contribute
 - [FAQ](faq.md) — Common questions
