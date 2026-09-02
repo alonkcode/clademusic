@@ -1,4 +1,4 @@
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Track } from '@/types';
@@ -248,6 +248,11 @@ export function QueueSheet({
       {open && (
         <Dialog open={open} onOpenChange={onOpenChange}>
           <DialogContent className="md:hidden p-0 max-w-[92vw] w-[92vw] h-[85vh] flex flex-col">
+            {/* queueBody already renders a visible "Queue" heading, but it's
+                a plain <h2> shared with the desktop sidebar (not this
+                dialog's accessible name) - a sr-only DialogTitle gives
+                screen readers one without changing anything visually. */}
+            <DialogTitle className="sr-only">Queue</DialogTitle>
             {queueBody}
           </DialogContent>
         </Dialog>

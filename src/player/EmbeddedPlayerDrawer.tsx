@@ -648,11 +648,16 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
+            {/* Previous/next hide below sm - on a narrow phone width there is
+                not enough room for badge + title + prev + play + next + seek
+                + expand + close all in one non-wrapping row without things
+                overlapping; Spotify's own mobile bar drops to just
+                play/pause too, leaving prev/next to the expanded view. */}
             <button
               type="button"
               onClick={() => (effectiveCanPrev ? handlePrev() : null)}
               disabled={!effectiveCanPrev}
-              className="inline-flex h-9 w-9 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              className="hidden h-9 w-9 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed sm:inline-flex"
               aria-label="Previous track"
               title="Previous track"
             >
@@ -671,7 +676,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               type="button"
               onClick={() => (effectiveCanNext ? handleNext() : null)}
               disabled={!effectiveCanNext}
-              className="inline-flex h-9 w-9 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              className="hidden h-9 w-9 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed sm:inline-flex"
               aria-label="Next track"
               title="Next track"
             >
@@ -679,8 +684,15 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             </button>
           </div>
 
-          {/* Seekbar - takes the remaining space, like Spotify's own bar. */}
-          <div className="flex min-w-0 flex-1 items-center gap-2 text-white">
+          {/* Seekbar - takes the remaining space, like Spotify's own bar.
+              min-w-[130px] is a real floor (time label + seek track + time
+              label at their own minimums), not just min-w-0: a flex-1 item
+              with flex-basis 0 gets shrunk before items with an explicit
+              basis (the title block) do, so without this floor the seekbar
+              - not the title - was the one collapsing, and its own children
+              (which never got the memo) kept their size and visually spilled
+              into the icon buttons after it. */}
+          <div className="flex min-w-[130px] flex-1 items-center gap-2 text-white">
             <span className="w-9 shrink-0 text-right text-[10px] tabular-nums md:w-10 md:text-xs" aria-label="Elapsed time">{formatTime(positionSec)}</span>
             <div className="relative min-w-[40px] flex-1">
               {sections.length > 1 && durationMsSafe > 0 && (
@@ -798,7 +810,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           <button
             type="button"
             onClick={() => setQueueOpen(true)}
-            className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
+            className="hidden h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground sm:inline-flex"
             aria-label="Show queue"
             title="Show queue"
           >
