@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Music2, Github, Twitter, Mail, Heart } from 'lucide-react';
+import { Music2, Github, Mail, Heart } from 'lucide-react';
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
@@ -18,23 +18,19 @@ export function Footer() {
               Discover, discuss, and share music with a passionate community of listeners worldwide.
             </p>
             <div className="flex gap-3">
+              {/* Was a bare https://github.com / https://twitter.com - not
+                  even a wrong handle, just the generic homepages. GitHub now
+                  points at the real repo; Twitter had no real account to
+                  link to, so it's gone rather than sending people to a
+                  stranger's (or squatted) profile. */}
               <a
-                href="https://github.com"
+                href="https://github.com/kaospan/clademusic"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-muted-foreground hover:text-foreground transition"
                 aria-label="GitHub"
               >
                 <Github className="h-5 w-5" />
-              </a>
-              <a
-                href="https://twitter.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-muted-foreground hover:text-foreground transition"
-                aria-label="Twitter"
-              >
-                <Twitter className="h-5 w-5" />
               </a>
               <a
                 href="mailto:hello@cladeai.com"
@@ -76,26 +72,15 @@ export function Footer() {
           {/* Company */}
           <div>
             <h3 className="font-semibold mb-3">Company</h3>
+            {/* About/Careers/Blog dropped - no such pages exist, and there's
+                no real content to put on them. Contact -> the same address
+                as the mail icon above, rather than a /contact page that
+                only ever 404'd. */}
             <ul className="space-y-2 text-sm">
               <li>
-                <Link to="/about" className="text-muted-foreground hover:text-foreground transition">
-                  About Us
-                </Link>
-              </li>
-              <li>
-                <Link to="/contact" className="text-muted-foreground hover:text-foreground transition">
+                <a href="mailto:hello@cladeai.com" className="text-muted-foreground hover:text-foreground transition">
                   Contact
-                </Link>
-              </li>
-              <li>
-                <Link to="/careers" className="text-muted-foreground hover:text-foreground transition">
-                  Careers
-                </Link>
-              </li>
-              <li>
-                <Link to="/blog" className="text-muted-foreground hover:text-foreground transition">
-                  Blog
-                </Link>
+                </a>
               </li>
             </ul>
           </div>
@@ -114,13 +99,16 @@ export function Footer() {
                   Privacy Policy
                 </Link>
               </li>
+              {/* Cookie Policy and Community Guidelines never had their own
+                  pages - Privacy Policy already covers cookies (section
+                  5.4), and Forums is this app's actual community. */}
               <li>
-                <Link to="/cookies" className="text-muted-foreground hover:text-foreground transition">
+                <Link to="/privacy" className="text-muted-foreground hover:text-foreground transition">
                   Cookie Policy
                 </Link>
               </li>
               <li>
-                <Link to="/community-guidelines" className="text-muted-foreground hover:text-foreground transition">
+                <Link to="/forum" className="text-muted-foreground hover:text-foreground transition">
                   Community Guidelines
                 </Link>
               </li>

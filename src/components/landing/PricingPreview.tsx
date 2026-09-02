@@ -202,7 +202,7 @@ export function PricingPreview() {
           className="mt-12 text-center text-gray-400"
         >
           <p>All plans include a 7-day free trial. No credit card required.</p>
-          <p className="mt-2">Need a custom plan? <a href="/contact" className="text-[#00F5FF] hover:underline">Contact us</a></p>
+          <p className="mt-2">Need a custom plan? <a href="mailto:hello@cladeai.com" className="text-[#00F5FF] hover:underline">Contact us</a></p>
         </motion.div>
       </div>
     </section>

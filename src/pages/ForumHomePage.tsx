@@ -2,10 +2,11 @@
 /// <reference lib="es2015.iterable" />
 
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { toast } from '@/hooks/use-toast';
 import { Card } from '@/components/ui/card';
 import { CladeBrand, ProfileCircle } from '@/components/shared';
 import { Button } from '@/components/ui/button';
@@ -57,11 +58,30 @@ interface Post {
 export function ForumHomePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  // /forum, /forum/:forumName and /forum/post/:postId all render this same
+  // component (see App.tsx), but until now nothing here ever read the
+  // params - every "click a post" or "click a forum" changed the URL and
+  // then showed the exact same unfiltered listing, with no visible sign the
+  // click did anything.
+  const { forumName, postId } = useParams<{ forumName?: string; postId?: string }>();
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'hot' | 'new' | 'top'>('hot');
   const [forums, setForums] = useState<Forum[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // These used to navigate('/forum/create-post') / navigate('/forum/create-forum') -
+  // routes that were never registered, so React Router matched them against
+  // /forum/:forumName instead and silently tried (and failed) to look up a
+  // forum literally named "create-post"/"create-forum". Neither creation
+  // flow has a backend yet (no forum_posts/forums insert service exists),
+  // so this says so honestly instead of dead-ending on a broken lookup.
+  const notYetAvailable = () => {
+    toast({
+      title: 'Coming soon',
+      description: 'Creating posts and forums isn\'t available yet.',
+    });
+  };
 
   useEffect(() => {
     if (IS_TEST) return;
@@ -82,9 +102,10 @@ export function ForumHomePage() {
   }, [forums, searchQuery]);
 
   const filteredPosts = useMemo(() => {
-    if (!searchQuery.trim()) return posts;
+    const scoped = forumName ? posts.filter((p) => p.forum.name === forumName) : posts;
+    if (!searchQuery.trim()) return scoped;
     const q = searchQuery.toLowerCase();
-    return posts.filter((p) => {
+    return scoped.filter((p) => {
       return (
         p.title.toLowerCase().includes(q) ||
         (p.content || '').toLowerCase().includes(q) ||
@@ -94,7 +115,41 @@ export function ForumHomePage() {
         (p.user.username || '').toLowerCase().includes(q)
       );
     });
-  }, [posts, searchQuery]);
+  }, [posts, searchQuery, forumName]);
+
+  const currentForum = forumName ? forums.find((f) => f.name === forumName) ?? null : null;
+
+  // A direct link to one post (e.g. from a share) shouldn't depend on that
+  // post being inside loadPosts' own top-50 - fetch it on its own so
+  // /forum/post/:id works for any post, not just recently-active ones.
+  const [singlePost, setSinglePost] = useState<Post | null>(null);
+  const [singlePostLoading, setSinglePostLoading] = useState(false);
+  const [singlePostMissing, setSinglePostMissing] = useState(false);
+
+  useEffect(() => {
+    if (IS_TEST || !postId) return;
+    let cancelled = false;
+    setSinglePostLoading(true);
+    setSinglePostMissing(false);
+    supabase
+      .from('forum_posts')
+      .select(`
+        *,
+        user:profiles!user_id(username, display_name, avatar_url),
+        forum:forums!forum_id(name, display_name)
+      `)
+      .eq('id', postId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setSinglePost((data as Post | null) ?? null);
+        setSinglePostMissing(!data);
+        setSinglePostLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [postId]);
 
   async function loadForums() {
     if (IS_TEST) return;
@@ -170,7 +225,7 @@ export function ForumHomePage() {
               </div>
             </div>
 
-            <Button onClick={() => navigate('/forum/create-post')}>
+            <Button onClick={() => notYetAvailable()}>
               <Plus className="h-5 w-5 mr-2" />
               Create Post
             </Button>
@@ -198,12 +253,42 @@ export function ForumHomePage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {(forumName || postId) && (
+          <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
+            <Link to="/forum" className="hover:text-foreground transition">Forums</Link>
+            {forumName && <><span>/</span><span className="text-foreground">f/{forumName}</span></>}
+            {postId && <><span>/</span><span className="text-foreground">{singlePost?.title ?? 'post'}</span></>}
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
-            {loading ? (
+            {postId ? (
+              singlePostLoading ? (
+                <div className="text-center py-12">
+                  <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-current border-r-transparent" />
+                </div>
+              ) : singlePostMissing || !singlePost ? (
+                <Card className="p-8 text-center text-muted-foreground">
+                  This post doesn't exist or was removed.
+                </Card>
+              ) : (
+                <>
+                  <PostCard post={singlePost} onVote={handleVote} onClick={() => {}} />
+                  <Card className="p-6 text-sm text-muted-foreground">Comments aren't available yet.</Card>
+                </>
+              )
+            ) : forumName && !currentForum && forums.length > 0 ? (
+              <Card className="p-8 text-center text-muted-foreground">
+                f/{forumName} doesn't exist.
+              </Card>
+            ) : loading ? (
               <div className="text-center py-12">
                 <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-current border-r-transparent" />
               </div>
+            ) : filteredPosts.length === 0 ? (
+              <Card className="p-8 text-center text-muted-foreground">
+                {forumName ? `No posts in f/${forumName} yet.` : 'No posts yet.'}
+              </Card>
             ) : (
               filteredPosts.map((post) => (
                 <PostCard
@@ -225,11 +310,45 @@ export function ForumHomePage() {
 
               <div className="space-y-3">
                 {filteredForums.map((forum) => (
-                  <motion.button
+                  // A <button> containing the real "Join" <button> below is
+                  // invalid HTML (React warns on it) and behaves
+                  // inconsistently across browsers - a div with button
+                  // semantics gets the same clickability and keyboard access
+                  // without nesting one interactive element inside another.
+                  // Plain div, not motion.div: framer-motion gesture props
+                  // (whileHover included) attach their own native pointer
+                  // listeners for gesture recognition, entirely separate
+                  // from React's synthetic event system - Join's
+                  // stopPropagation() had no effect on those, so this row's
+                  // onClick fired anyway (the same class of bug fixed
+                  // earlier this session for the player's drag gesture). A
+                  // CSS hover transform gets the same effect with no
+                  // framer-motion involved to race against.
+                  <div
                     key={forum.id}
-                    whileHover={{ x: 4 }}
+                    role="button"
+                    tabIndex={0}
+                    // Without an explicit label, this row's accessible name
+                    // is its full text content - "f/music 0 members Join" -
+                    // swallowing the nested Join button's own name into the
+                    // row's, which is wrong for screen readers and (this is
+                    // how the bug above got found) ambiguous for anything
+                    // matching by accessible name/role.
+                    aria-label={`Open f/${forum.name}`}
                     onClick={() => navigate(`/forum/${forum.name}`)}
-                    className="w-full text-left p-3 rounded-lg hover:bg-accent transition-colors"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate(`/forum/${forum.name}`);
+                      }
+                    }}
+                    // No hover:translate-x - shifting the row (and the real
+                    // Join button riding along with it) while a click is
+                    // mid-gesture (mousedown then mouseup at the same screen
+                    // point) can leave mouseup landing past where the
+                    // button moved to, which is what let a Join click fall
+                    // through to this row's own onClick underneath it.
+                    className="w-full text-left p-3 rounded-lg hover:bg-accent transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     <div className="flex items-center justify-between">
                       <div>
@@ -238,11 +357,23 @@ export function ForumHomePage() {
                           {forum.member_count.toLocaleString()} members
                         </div>
                       </div>
-                      <Button size="sm" variant="outline">
+                      {/* Had no onClick and no stopPropagation - clicking it
+                          did nothing itself, then bubbled up into the row's
+                          own onClick and navigated away, which read as "Join
+                          took me somewhere" rather than nothing happening.
+                          No forum_members join service exists yet either. */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          notYetAvailable();
+                        }}
+                      >
                         Join
                       </Button>
                     </div>
-                  </motion.button>
+                  </div>
                 ))}
               </div>
             </Card>
@@ -252,7 +383,7 @@ export function ForumHomePage() {
               <p className="text-sm text-muted-foreground mb-4">
                 Build a community around your passion
               </p>
-              <Button className="w-full" onClick={() => navigate('/forum/create-forum')}>
+              <Button className="w-full" onClick={() => notYetAvailable()}>
                 <Plus className="h-4 w-4 mr-2" />
                 Create Forum
               </Button>
