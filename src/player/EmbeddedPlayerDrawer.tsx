@@ -507,10 +507,16 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     }
   }, [isIdle, safeQueueIndex, safeQueue.length, playFromQueue, onNext]);
 
-  // Nothing loaded yet - stay out of the way entirely rather than reserving
-  // a full-width strip of the viewport for an empty bar.
-  if (isIdle) return null;
-
+  // NOT an early return on isIdle: UniversalPlayerHost mounts a single,
+  // persistent <iframe id="universal-player"> that every provider switch
+  // reuses via postMessage rather than remounting - CI's own E2E test
+  // (tests/universal-player.spec.ts) asserts that iframe exists the moment
+  // the page loads, before anything has ever played. Returning null here
+  // while idle unmounted it entirely until the first track started, which
+  // broke that invariant (every CI run since this file's rewrite failed on
+  // exactly that assertion). The visible bar chrome below is still hidden
+  // while idle - see `{!isIdle && (...)}` - so there is nothing to look at,
+  // same as before; only the always-on iframe host stays mounted.
   const DetailsPanel: any = isTestEnv ? 'div' : motion.div;
 
   return (
@@ -633,7 +639,12 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           </div>
         </DetailsPanel>
 
-        {/* Always-visible bar row. */}
+        {/* Bar row - visible whenever a track is loaded. Absent (not just
+            visually hidden) while idle, so there's no empty-looking strip
+            reserved at the bottom of every page before anything has played;
+            the iframe host above keeps mounting regardless (see isIdle
+            comment above the DetailsPanel setup). */}
+        {!isIdle && (
         <div className="flex items-center gap-2 px-3 py-2 md:gap-3 md:px-4 md:py-2.5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/80 text-lg shadow-inner md:h-10 md:w-10">
             {meta.Icon ? <meta.Icon className="h-4 w-4 md:h-5 md:w-5" /> : meta.badge}
@@ -849,6 +860,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             <X className="h-4 w-4" />
           </button>
         </div>
+        )}
       </div>
 
       {/* Queue sheet */}
