@@ -34,7 +34,7 @@ const MAX_FREQ_HZ = 4000;
  * @param sampleRate Audio context sample rate.
  * @param fftSize    Size of the FFT that produced `magnitudes` (bin count * 2).
  */
-export function chromaFromMagnitudes(
+function foldToChroma(
   magnitudes: Float32Array | number[],
   sampleRate: number,
   fftSize: number
@@ -54,7 +54,32 @@ export function chromaFromMagnitudes(
     chroma[pitchClass] += mag * mag;
   }
 
-  return normalize(chroma);
+  return chroma;
+}
+
+export function chromaFromMagnitudes(
+  magnitudes: Float32Array | number[],
+  sampleRate: number,
+  fftSize: number
+): number[] {
+  return normalize(foldToChroma(magnitudes, sampleRate, fftSize));
+}
+
+/**
+ * In-band energy BEFORE normalization - chromaFromMagnitudes' own output is
+ * always unit-normalized (or all-zero), so its norm can never distinguish a
+ * quiet passage from a loud one; this can. Pass this alongside the chroma
+ * vector to matchChordTemplate so "is there enough signal to trust a match"
+ * is decided from the real signal, not from a vector that was rescaled to
+ * length 1 for every non-silent input.
+ */
+export function chromaEnergy(
+  magnitudes: Float32Array | number[],
+  sampleRate: number,
+  fftSize: number
+): number {
+  const raw = foldToChroma(magnitudes, sampleRate, fftSize);
+  return Math.sqrt(raw.reduce((sum, v) => sum + v * v, 0));
 }
 
 function normalize(vector: number[]): number[] {
@@ -82,16 +107,26 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / normB; // `a` (chroma) is already unit-normalised.
 }
 
-/** Below this, treat the input as silence/noise rather than force a guess. */
-const SILENCE_ENERGY_THRESHOLD = 0.05;
+/**
+ * Below this raw (pre-normalization) energy, treat the input as silence/noise
+ * rather than force a guess. A rough heuristic, not a calibrated noise
+ * floor: getFloatFrequencyData's dBFS values (typically -100..-30) are
+ * converted back to linear before folding into chroma, so a mostly-quiet
+ * signal across the ~55-4000Hz band stays under this while a few genuinely
+ * audible tonal bins push over it. Tune here if live captures prove too
+ * eager or too reluctant to call something silence.
+ */
+const SILENCE_ENERGY_THRESHOLD = 0.02;
 
 /**
  * Match a chroma vector against all 24 major/minor triad templates.
- * Returns null when the signal is too quiet to trust (silence, or between
- * chords) rather than returning a low-confidence guess.
+ * `energy` is the chroma's pre-normalization magnitude (see chromaEnergy) -
+ * chroma itself is always unit-normalized (or all-zero), so it alone can't
+ * tell a quiet passage from a loud one. Returns null when there isn't
+ * enough signal to trust a match (silence, or between chords) rather than
+ * returning a low-confidence guess.
  */
-export function matchChordTemplate(chroma: number[]): DetectedChord | null {
-  const energy = Math.sqrt(chroma.reduce((sum, v) => sum + v * v, 0));
+export function matchChordTemplate(chroma: number[], energy: number): DetectedChord | null {
   if (energy < SILENCE_ENERGY_THRESHOLD) return null;
 
   let best: DetectedChord | null = null;
