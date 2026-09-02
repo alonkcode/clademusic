@@ -1,40 +1,44 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Waves, Github, Twitter, Instagram, Mail } from 'lucide-react';
+import { Waves, Github, Mail } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
+// Every entry here has to resolve to something real: either a registered
+// route, an in-page anchor that actually exists on the landing page, or a
+// mailto: fallback. This footer previously linked to a dozen pages (About,
+// Blog, Careers, Docs, FAQ, ...) that were never built - every one of them
+// dead-ended on the 404 page. Rather than fake placeholder pages for
+// content that doesn't exist, unbuilt destinations are either dropped or
+// pointed at the closest real equivalent (e.g. Cookie Policy -> the
+// Privacy Policy page, which already covers cookies in section 5.4).
 export function Footer() {
+  const [newsletterEmail, setNewsletterEmail] = useState('');
   const footerLinks = {
     Product: [
-      { label: 'Features', href: '#features' },
+      { label: 'Features', href: '/#features' },
       { label: 'Pricing', href: '/pricing' },
-      { label: 'Demo', href: '#demo' },
-      { label: 'FAQ', href: '/faq' },
+      { label: 'Demo', href: '/#demo' },
     ],
     Company: [
-      { label: 'About', href: '/about' },
-      { label: 'Blog', href: '/blog' },
-      { label: 'Careers', href: '/careers' },
-      { label: 'Contact', href: '/contact' },
+      { label: 'Contact', href: 'mailto:hello@cladeai.com' },
     ],
     Resources: [
-      { label: 'Documentation', href: '/docs' },
-      { label: 'Music Theory Guide', href: '/guide' },
-      { label: 'Community', href: '/community' },
-      { label: 'Support', href: '/support' },
+      { label: 'Community (Forums)', href: '/forum' },
     ],
     Legal: [
       { label: 'Privacy Policy', href: '/privacy' },
       { label: 'Terms of Service', href: '/terms' },
-      { label: 'Cookie Policy', href: '/cookies' },
-      { label: 'Licenses', href: '/licenses' },
+      { label: 'Cookie Policy', href: '/privacy' },
     ],
   };
 
+  // GitHub points at the real repo. Twitter/Instagram were bare, unclaimed
+  // handles (twitter.com/clade, instagram.com/clade) - not this project's
+  // accounts, and sending users to a stranger's profile (or a squatted one)
+  // is worse than just not showing the icon.
   const socialLinks = [
-    { icon: Twitter, href: 'https://twitter.com/clade', color: '#00F5FF' },
-    { icon: Instagram, href: 'https://instagram.com/clade', color: '#FF00FF' },
-    { icon: Github, href: 'https://github.com/clade', color: '#FFD700' },
-    { icon: Mail, href: 'mailto:hello@clade.app', color: '#90EE90' },
+    { icon: Github, href: 'https://github.com/kaospan/clademusic', color: '#FFD700' },
+    { icon: Mail, href: 'mailto:hello@cladeai.com', color: '#90EE90' },
   ];
 
   return (
@@ -84,12 +88,21 @@ export function Footer() {
               <ul className="space-y-3">
                 {links.map((link) => (
                   <li key={link.label}>
-                    <Link
-                      to={link.href}
-                      className="text-gray-400 hover:text-[#00F5FF] transition-colors text-sm"
-                    >
-                      {link.label}
-                    </Link>
+                    {/* mailto: is a real navigation, not an internal route -
+                        Link's `to` would try to client-side-route to it and
+                        just 404 within the SPA instead of opening mail. */}
+                    {link.href.startsWith('mailto:') ? (
+                      <a href={link.href} className="text-gray-400 hover:text-[#00F5FF] transition-colors text-sm">
+                        {link.label}
+                      </a>
+                    ) : (
+                      <Link
+                        to={link.href}
+                        className="text-gray-400 hover:text-[#00F5FF] transition-colors text-sm"
+                      >
+                        {link.label}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -112,20 +125,36 @@ export function Footer() {
             <p className="text-gray-400 mb-6">
               Get the latest features, music theory tips, and harmony insights delivered to your inbox.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto">
+            {/* There's no newsletter/ESP integration behind this yet - it
+                previously just submitted nowhere. Opening a pre-filled
+                mailto: is an honest stand-in (a real signup, just routed
+                through email instead of a service) rather than a button
+                that silently did nothing. */}
+            <form
+              className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const email = newsletterEmail.trim();
+                window.location.href = `mailto:hello@cladeai.com?subject=${encodeURIComponent('Newsletter signup')}&body=${encodeURIComponent(email ? `Please add ${email} to the newsletter.` : '')}`;
+              }}
+            >
               <input
                 type="email"
+                required
+                value={newsletterEmail}
+                onChange={(e) => setNewsletterEmail(e.target.value)}
                 placeholder="Enter your email"
                 className="flex-1 px-4 py-3 bg-[#1A1A2E] border border-gray-800 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00F5FF] transition-all"
               />
               <motion.button
+                type="submit"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.95 }}
                 className="px-6 py-3 bg-gradient-to-r from-[#00F5FF] to-[#FF00FF] text-white font-semibold rounded-lg hover:shadow-lg hover:shadow-[#00F5FF]/50 transition-all"
               >
                 Subscribe
               </motion.button>
-            </div>
+            </form>
           </div>
         </motion.div>
 
