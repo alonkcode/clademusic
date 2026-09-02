@@ -58,10 +58,25 @@ export function HarmonicHUD({
   const [controlsOpen, setControlsOpen] = useState(false);
   const live = useLiveChordDetection();
 
+  // While actually listening to the audio, the sections detected from it are
+  // what's really there - preferred over whatever (if anything) was passed
+  // in. Falls back to the passed-in sections until enough capture has
+  // accumulated to say something, and again once capture stops.
+  const liveSections: SongSection[] | undefined =
+    live.status === 'capturing' && live.detectedSections.length > 0
+      ? live.detectedSections.map((s) => ({
+          type: s.type,
+          label: s.label,
+          start_time: s.startSec,
+          end_time: s.endSec,
+        }))
+      : undefined;
+  const effectiveSections = liveSections ?? sections;
+
   const sync = useSectionSync({
     trackId,
     progression,
-    sections,
+    sections: effectiveSections,
     detectedMode,
     bpm,
   });
@@ -82,7 +97,7 @@ export function HarmonicHUD({
   const current = chords[Math.max(activeIndex, 0)] ?? chords[0];
   const tonic = loop.tonic;
 
-  const orderedSections = [...(sections ?? [])].sort((a, b) => a.start_time - b.start_time);
+  const orderedSections = [...(effectiveSections ?? [])].sort((a, b) => a.start_time - b.start_time);
 
   return (
     <div className={cn('relative w-full min-w-0 rounded-2xl glass-strong overflow-hidden', className)}>
