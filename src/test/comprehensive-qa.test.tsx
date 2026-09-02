@@ -210,13 +210,23 @@ describe('Mobile Player QA', () => {
       expect(player).toBeInTheDocument();
     });
 
-    it('renders nothing when idle, instead of an empty bar', () => {
+    it('hides the visible bar while idle, but keeps the universal iframe host mounted', () => {
+      // The singleton universal iframe (UniversalPlayerHost) has to stay
+      // mounted from page load - CI's own E2E suite asserts it exists
+      // before anything has ever played, since every provider switch
+      // reuses that one iframe via postMessage rather than remounting.
+      // Returning null for the whole component while idle broke exactly
+      // that (every CI run failed on this after the player redesign);
+      // only the visible bar chrome should disappear when idle, not the
+      // iframe host underneath it.
       mockPlayerContext.isOpen = false;
       mockPlayerContext.provider = null as any;
       mockPlayerContext.trackId = null as any;
       const { container } = render(<EmbeddedPlayerDrawer />, { wrapper });
 
-      expect(container.querySelector('[data-player="universal"]')).not.toBeInTheDocument();
+      expect(container.querySelector('[data-player="universal"]')).toBeInTheDocument();
+      expect(container.querySelector('#universal-player')).toBeInTheDocument();
+      expect(screen.queryByLabelText(/close player/i)).not.toBeInTheDocument();
     });
 
     it('shows a compact video miniplayer - not a resizable/draggable panel - once expanded', () => {
