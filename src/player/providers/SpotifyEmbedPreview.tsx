@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePlayer } from '../PlayerContext';
 import { loadSpotifyIframeApi as loadIframeApi, type SpotifyIframeController } from '@/services/spotifyIframeApi';
+import { isTestEnv } from '@/lib/env';
 
 interface SpotifyEmbedPreviewProps {
   providerTrackId: string | null;
@@ -8,9 +9,6 @@ interface SpotifyEmbedPreviewProps {
 }
 
 export function SpotifyEmbedPreview({ providerTrackId, autoplay }: SpotifyEmbedPreviewProps) {
-  const isTestEnv =
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-    (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
   const {
     provider,
     autoplaySpotify,
@@ -155,7 +153,7 @@ export function SpotifyEmbedPreview({ providerTrackId, autoplay }: SpotifyEmbedP
     return () => {
       cancelled = true;
     };
-  }, [provider, providerTrackId, autoplay, autoplaySpotify, playRequestId, registerProviderControls, isTestEnv]);
+  }, [provider, providerTrackId, autoplay, autoplaySpotify, playRequestId, registerProviderControls]);
 
   useEffect(() => {
     if (provider === 'spotify') return;

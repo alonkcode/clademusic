@@ -16,6 +16,7 @@ import { UniversalPlayerHost } from '@/player/universal/UniversalPlayerHost';
 import { HarmonicHUD } from '@/components/HarmonicHUD';
 import type { SongSection } from '@/types';
 import { buildProviderDeepLink } from '@/player/universal/buildEmbedSrc';
+import { isTestEnv } from '@/lib/env';
 
 const providerMeta = {
   spotify: { label: 'Spotify', badge: '🎧', color: 'bg-black/90', Icon: SpotifyIcon },
@@ -81,9 +82,6 @@ function useAnimatedSeekbar(
   durationMs: number,
   isPlaying: boolean
 ): number {
-  const isTestEnv =
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-    (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
   const [displayMs, setDisplayMs] = useState(positionMs);
   const rafIdRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(performance.now());
@@ -150,15 +148,12 @@ function useAnimatedSeekbar(
         rafIdRef.current = null;
       }
     };
-  }, [isPlaying, durationMs, isTestEnv]);
+  }, [isPlaying, durationMs]);
 
   return displayMs;
 }
 
 export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: EmbeddedPlayerDrawerProps) {
-  const isTestEnv =
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-    (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
   const {
     provider,
     trackId,
@@ -441,9 +436,6 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   // Skip in tests (React 18 StrictMode can mount/unmount twice in jsdom harness).
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    const isTestEnv =
-      (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-      (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
     if (isTestEnv) return;
     if (process.env.NODE_ENV === 'production') return;
     const players = document.querySelectorAll('[data-player="universal"]');
@@ -457,9 +449,6 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   // Dev guard: ensure only one iframe/provider instance and metadata present
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    const isTestEnv =
-      (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-      (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
     if (isTestEnv) return;
     if (process.env.NODE_ENV === 'production') return;
     const frames = document.querySelectorAll('iframe[src*="spotify"], iframe[src*="youtube"]');

@@ -5,6 +5,7 @@ import { getPreferredProvider } from '@/lib/preferences';
 import type { ProviderControls } from './providers/adapter';
 import { focusUniversalPlayerFrame } from '@/player/universal/UniversalPlayerHost';
 import { preloadSpotifyIframeApi } from '@/services/spotifyIframeApi';
+import { isTestEnv } from '@/lib/env';
 
 interface ConnectedProviders {
   spotify?: { connected: boolean };
@@ -199,9 +200,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // autoplay. Skipped in tests: it schedules a real 10s timeout and injects
   // an external script tag, neither of which vitest needs to sit through.
   useEffect(() => {
-    const isTestEnv =
-      (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-      (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
     if (!isTestEnv) preloadSpotifyIframeApi();
   }, []);
 

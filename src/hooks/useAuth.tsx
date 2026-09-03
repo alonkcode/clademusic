@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { clearSpotifyCredentialCache } from '@/services/spotifyAuthService';
+import { isTestEnv as IS_TEST } from '@/lib/env';
 
 export interface AuthState {
   user: User | null;
@@ -31,9 +32,6 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const IS_TEST =
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-    (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);

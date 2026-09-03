@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from '@/hooks/use-toast';
+import { isTestEnv as IS_TEST } from '@/lib/env';
 import { Card } from '@/components/ui/card';
 import { CladeBrand, ProfileCircle } from '@/components/shared';
 import { Button } from '@/components/ui/button';
@@ -22,8 +23,6 @@ import {
   Bookmark,
   Share2,
 } from 'lucide-react';
-
-const IS_TEST = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
 
 interface Forum {
   id: string;

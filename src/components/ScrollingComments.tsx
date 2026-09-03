@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
+import { isTestEnv as IS_TEST } from '@/lib/env';
 
 interface Comment {
   id: string;
@@ -21,9 +22,6 @@ interface ScrollingCommentsProps {
  * Shows real-time comments overlaid on the content
  */
 let chatSchemaMissing = false;
-const IS_TEST =
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-  (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
 
 export function ScrollingComments({
   trackId,
