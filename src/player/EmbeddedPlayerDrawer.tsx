@@ -13,10 +13,12 @@ import { useNavigate } from 'react-router-dom';
 import { useTrack } from '@/hooks/api/useTracks';
 import { useHarmonicFingerprint } from '@/hooks/api/useHarmonicFingerprint';
 import { UniversalPlayerHost } from '@/player/universal/UniversalPlayerHost';
+import { SpotifyWebPlayer } from '@/player/providers/SpotifyWebPlayer';
 import { HarmonicHUD } from '@/components/HarmonicHUD';
 import type { SongSection } from '@/types';
 import { buildProviderDeepLink } from '@/player/universal/buildEmbedSrc';
 import { isTestEnv } from '@/lib/env';
+import { toast } from '@/hooks/use-toast';
 
 const providerMeta = {
   spotify: { label: 'Spotify', badge: '🎧', color: 'bg-black/90', Icon: SpotifyIcon },
@@ -261,6 +263,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   // the bar (the "miniplayer") rather than taking over the screen.
   const [showVideo, setShowVideo] = useState(false);
   const layoutStorageKey = 'player_layout_v2';
+
+  // Real Spotify playback (Web Playback SDK - actual full tracks, actual
+  // play/pause/seek/volume control, driven by the user's own connected
+  // account) is attempted for any signed-in, Spotify-connected user.
+  // UniversalPlayerHost's plain embed iframe has no such control wired up
+  // at all (it only ever sets the iframe's initial src) - it's the correct
+  // fallback for guests and non-Premium accounts, not the primary path for
+  // someone who actually connected Premium.
+  const [spotifySdkFailed, setSpotifySdkFailed] = useState(false);
+  useEffect(() => {
+    setSpotifySdkFailed(false);
+  }, [provider, trackId]);
+  const useSpotifySdk = provider === 'spotify' && !!user && isSpotifyConnected === true && !spotifySdkFailed;
 
   const commitSeek = useCallback(
     (sec: number) => {
@@ -544,27 +559,49 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               sections={hudSections}
             />
 
-            {/* The miniplayer itself: a small, fixed-aspect video box, not a
-                resizable/draggable panel - Spotify's bar has no equivalent,
-                since it never plays video, but a YouTube track needs
-                somewhere to actually show the picture. */}
-            <div className="mt-3 flex justify-center">
-              <div className="relative w-full max-w-sm overflow-hidden rounded-xl bg-black/80 aspect-video">
-                <UniversalPlayerHost
-                  request={
-                    provider && trackId
-                      ? {
-                          provider,
-                          id: trackId,
-                          title: resolvedTitle,
-                          artist: resolvedArtist,
-                          autoplay,
-                        }
-                      : null
-                  }
+            {useSpotifySdk ? (
+              // Audio-only - Premium SDK playback has no picture to show,
+              // just real transport control via the docked bar.
+              <div className="mt-3">
+                <SpotifyWebPlayer
+                  providerTrackId={trackId}
+                  autoplay={autoplay}
+                  onFallback={(reason) => {
+                    setSpotifySdkFailed(true);
+                    toast({
+                      title: reason.toLowerCase().includes('premium')
+                        ? 'Spotify Premium required'
+                        : 'Falling back to Spotify preview',
+                      description: reason,
+                    });
+                  }}
                 />
               </div>
-            </div>
+            ) : (
+              /* The miniplayer itself: a small, fixed-aspect video box, not a
+                 resizable/draggable panel - Spotify's bar has no equivalent,
+                 since it never plays video, but a YouTube track needs
+                 somewhere to actually show the picture. Also the fallback
+                 surface for Spotify when SDK playback isn't available
+                 (guest, non-Premium, or an SDK error). */
+              <div className="mt-3 flex justify-center">
+                <div className="relative w-full max-w-sm overflow-hidden rounded-xl bg-black/80 aspect-video">
+                  <UniversalPlayerHost
+                    request={
+                      provider && trackId
+                        ? {
+                            provider,
+                            id: trackId,
+                            title: resolvedTitle,
+                            artist: resolvedArtist,
+                            autoplay,
+                          }
+                        : null
+                    }
+                  />
+                </div>
+              </div>
+            )}
 
             {sections.length > 0 && (
               <div className="mt-3 flex items-center gap-2">

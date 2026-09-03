@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePlayer } from '../PlayerContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getValidAccessToken } from '@/services/spotifyAuthService';
-import { SpotifyEmbedPreview } from './SpotifyEmbedPreview';
 import { isTestEnv } from '@/lib/env';
 
 declare global {
@@ -75,13 +74,20 @@ async function spotifyApiFetch(token: string, path: string, init?: RequestInit) 
 interface SpotifyWebPlayerProps {
   providerTrackId: string | null;
   autoplay?: boolean;
+  /** Called once when SDK playback can't proceed (no session, not Premium,
+   *  device/auth error, ...) so the caller can swap in the plain embed
+   *  player instead - kept as one visible "spotify iframe" mechanism
+   *  (UniversalPlayerHost's singleton) rather than this component also
+   *  mounting a second, competing Spotify iframe of its own. */
+  onFallback?: (reason: string) => void;
 }
 
 /**
  * Spotify full-track playback via Web Playback SDK (requires Spotify Premium).
- * Falls back to the embed preview when SDK/auth/device isn't available.
+ * Calls onFallback when SDK/auth/device isn't available so the caller can
+ * switch to the embed player.
  */
-export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayerProps) {
+export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: SpotifyWebPlayerProps) {
   const { user } = useAuth();
   const {
     provider,
@@ -106,6 +112,19 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayer
   useEffect(() => {
     volumeRef.current = volume;
   }, [volume]);
+
+  // Reported via a ref-based dedupe rather than a plain dependency on
+  // `error`: onFallback's identity can change across renders (it's an
+  // inline arrow at the call site), and firing again on that alone would
+  // re-trigger the parent's fallback state update mid-render-cycle for no
+  // real change - only a genuinely new/changed error string should notify.
+  const lastReportedErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!error || error === lastReportedErrorRef.current) return;
+    lastReportedErrorRef.current = error;
+    onFallback?.(error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]);
 
   const shouldAutoplay = useMemo(() => autoplay ?? autoplaySpotify ?? true, [autoplay, autoplaySpotify]);
   const uri = useMemo(() => (providerTrackId ? `spotify:track:${providerTrackId}` : null), [providerTrackId]);
@@ -357,27 +376,10 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayer
 
   if (provider !== 'spotify' || !providerTrackId) return null;
 
-  // When full playback can't start (auth/dev-mode/premium/device), fall back to the embed preview.
-  if (error) {
-    return (
-      <div className="space-y-2">
-        <div className="text-[11px] text-white/70">
-          {error}
-          {error.includes('403') && (
-            <span>
-              {' '}
-              If your Spotify app is in dev mode, add your Spotify account under Spotify Developer Dashboard → Users and
-              Access, then reconnect.
-            </span>
-          )}
-          {error.toLowerCase().includes('premium') && (
-            <span> Full tracks require Spotify Premium. Guest mode will use the embed preview.</span>
-          )}
-        </div>
-        <SpotifyEmbedPreview providerTrackId={providerTrackId} autoplay={shouldAutoplay} />
-      </div>
-    );
-  }
+  // When full playback can't start (auth/dev-mode/premium/device), the
+  // caller falls back to the embed player - nothing to render here for
+  // that case, the effect above already told it why.
+  if (error) return null;
 
   // We don’t render an extra UI; playback is driven by the SDK + the universal seekbar.
   // Keep a tiny status line for debuggability.
