@@ -107,3 +107,36 @@ export async function recordPlayEvent(params: RecordPlayEventParams): Promise<vo
     console.warn('[PlayEvents] exception:', error);
   }
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Record a play into `play_history` - the table Recently Played/Top Artists
+ * (ProfilePage) and the following feed (useFollowing.ts) actually read from.
+ * Signed-in only (its RLS write policy is `auth.uid() = user_id`, and
+ * anonymous listening has nowhere else to attribute the row to) and only
+ * for a real catalog track (`track_id` is a hard FK to `tracks.id` - a
+ * synthetic id like `spotify:<id>` for a track outside the catalog would
+ * just fail the constraint).
+ */
+export async function recordPlayHistory(trackId: string, source = 'player'): Promise<void> {
+  if (IS_TEST) return;
+  if (!UUID_RE.test(trackId)) return;
+  try {
+    const { data: userRes } = await supabase.auth.getUser();
+    const userId = userRes?.user?.id;
+    if (!userId) return;
+
+    const { error } = await supabase.from('play_history').insert({
+      user_id: userId,
+      track_id: trackId,
+      source,
+    });
+
+    if (error) {
+      console.warn('[PlayEvents] play_history insert failed:', error.message || error.code || error);
+    }
+  } catch (error) {
+    console.warn('[PlayEvents] play_history exception:', error);
+  }
+}

@@ -32,6 +32,7 @@ vi.mock('@/hooks/api/useProfile', () => ({
 vi.mock('@/hooks/api/usePlayEvents', () => ({
   usePlayHistory: () => ({ data: [] }),
   usePlayStats: () => ({ data: { totalPlays: 0 } }),
+  useTopArtists: () => ({ data: [] }),
 }));
 
 vi.mock('@/hooks/api/useFeed', () => ({
