@@ -278,7 +278,7 @@ export default function LoginPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     className="bg-muted/50"
                   />
-                  {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
+                  {errors.email && <p className="text-xs text-destructive" role="alert">{errors.email}</p>}
                 </div>
 
                 <Button
@@ -340,7 +340,7 @@ export default function LoginPage() {
                     className="bg-muted/50"
                   />
                   {errors.displayName && (
-                    <p className="text-xs text-destructive">{errors.displayName}</p>
+                    <p className="text-xs text-destructive" role="alert">{errors.displayName}</p>
                   )}
                 </div>
               )}
@@ -360,7 +360,7 @@ export default function LoginPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   className="bg-muted/50"
                 />
-                {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
+                {errors.email && <p className="text-xs text-destructive" role="alert">{errors.email}</p>}
               </div>
 
               <div className="space-y-2">
@@ -396,7 +396,7 @@ export default function LoginPage() {
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-                {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
+                {errors.password && <p className="text-xs text-destructive" role="alert">{errors.password}</p>}
               </div>
 
               <Button

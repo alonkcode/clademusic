@@ -16,10 +16,14 @@ describe('Smoke Tests - Critical Paths', () => {
       cy.title().should('not.be.empty');
     });
 
-    it('should display the bottom navigation', () => {
+    it('should display the landing page navigation', () => {
+      // The landing page's nav (LandingNav) is guest-facing marketing chrome,
+      // not the signed-in app's own navigation - its items are <button>s
+      // (some scroll to an in-page section, some navigate imperatively),
+      // not <a> tags, so this checks for either rather than assuming anchors.
       cy.visit('/');
       cy.get('nav').should('be.visible');
-      cy.get('nav a').should('have.length.at.least', 3);
+      cy.get('nav button, nav a').should('have.length.at.least', 3);
     });
 
     it('should not have any console errors on load', () => {
@@ -31,23 +35,29 @@ describe('Smoke Tests - Critical Paths', () => {
   });
 
   describe('Navigation', () => {
-    beforeEach(() => {
-      cy.visit('/');
-    });
-
-    it('should navigate to search page', () => {
-      cy.get('a[href="/search"]').click();
+    it('should navigate to the search page from the app nav', () => {
+      // The landing page (/) has no direct link into the signed-in app's
+      // pages - that navigation lives behind /feed's hamburger menu
+      // (BottomNav), which is the real path a user takes to get there.
+      cy.visit('/feed');
+      cy.get('[aria-label="Open navigation"]').click();
+      cy.get('nav a[href$="/search"]').click();
       cy.url().should('include', '/search');
     });
 
-    it('should navigate to compare page', () => {
-      cy.get('a[href="/compare"]').click();
-      cy.url().should('include', '/compare');
+    it('should navigate to the profile page from the app nav', () => {
+      cy.visit('/feed');
+      cy.get('[aria-label="Open navigation"]').click();
+      cy.get('nav a[href$="/profile"]').click();
+      cy.url().should('include', '/profile');
     });
 
-    it('should navigate to profile page', () => {
-      cy.get('a[href="/profile"]').click();
-      cy.url().should('include', '/profile');
+    it('should load the compare page directly', () => {
+      // Not linked from the app nav today (BottomNav has no Compare entry) -
+      // this just confirms the route itself renders, same as the Album/
+      // Artist page checks further down.
+      cy.visit('/compare');
+      cy.get('body').should('be.visible');
     });
 
     it('should handle 404 routes gracefully', () => {
@@ -58,7 +68,7 @@ describe('Smoke Tests - Critical Paths', () => {
 
   describe('Feed Page', () => {
     beforeEach(() => {
-      cy.visit('/');
+      cy.visit('/feed');
     });
 
     it('should display feed content or empty state', () => {
