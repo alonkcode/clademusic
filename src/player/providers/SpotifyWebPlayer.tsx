@@ -3,6 +3,7 @@ import { usePlayer } from '../PlayerContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getValidAccessToken } from '@/services/spotifyAuthService';
 import { SpotifyEmbedPreview } from './SpotifyEmbedPreview';
+import { isTestEnv } from '@/lib/env';
 
 declare global {
   interface Window {
@@ -81,9 +82,6 @@ interface SpotifyWebPlayerProps {
  * Falls back to the embed preview when SDK/auth/device isn't available.
  */
 export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayerProps) {
-  const isTestEnv =
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-    (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
   const { user } = useAuth();
   const {
     provider,
@@ -328,7 +326,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay }: SpotifyWebPlayer
     return () => {
       cancelled = true;
     };
-  }, [isMuted, isTestEnv, playRequestId, provider, providerTrackId, seekToSec, shouldAutoplay, uri, updatePlaybackState, user, clearSeek]);
+  }, [isMuted, playRequestId, provider, providerTrackId, seekToSec, shouldAutoplay, uri, updatePlaybackState, user, clearSeek]);
 
   useEffect(() => {
     if (provider !== 'spotify') return;

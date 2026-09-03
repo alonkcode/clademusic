@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MusicProvider } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { isTestEnv as IS_TEST } from '@/lib/env';
 
 type PlayAction = 'open_app' | 'open_web' | 'preview';
 
@@ -34,10 +35,6 @@ interface PlayEventData {
 // Only allow interaction types that the user_interactions check constraint accepts.
 // Known enum (see supabase): like | save | skip | more_harmonic | more_vibe | share
 const ALLOWED_INTERACTIONS = new Set(['like', 'save', 'skip', 'more_harmonic', 'more_vibe', 'share']);
-
-const IS_TEST =
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-  (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
 
 let interactionsDisabled = false;
 let interactionsWarned = false;

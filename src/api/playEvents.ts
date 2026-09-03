@@ -2,6 +2,7 @@
  * Play Events API
  * Simple wrapper for recording play events without requiring React hooks
  */
+import { isTestEnv as IS_TEST } from '@/lib/env';
 
 import { supabase } from '@/integrations/supabase/client';
 import { MusicProvider } from '@/types';
@@ -22,9 +23,6 @@ interface RecordPlayEventParams {
 type PlaybackEventType = 'intent' | 'link_out' | 'state' | 'qualified_play' | 'error';
 
 const ANON_ID_KEY = 'clade_anonymous_id_v1';
-const IS_TEST =
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') ||
-  (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
 
 function getOrCreateAnonymousId(): string {
   try {
