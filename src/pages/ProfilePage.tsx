@@ -31,7 +31,7 @@ import {
   Palette,
   Play,
 } from 'lucide-react';
-import { usePlayHistory, usePlayStats } from '@/hooks/api/usePlayEvents';
+import { usePlayHistory, usePlayStats, useTopArtists } from '@/hooks/api/usePlayEvents';
 import { useProfile, useUserProviders, useSetPreferredProvider } from '@/hooks/api/useProfile';
 import { useUserInteractionStats } from '@/hooks/api/useFeed';
 import { useConnectSpotify, useDisconnectSpotify } from '@/hooks/api/useSpotifyConnect';
@@ -56,7 +56,6 @@ import { MusicProvider } from '@/types';
 import { formatDistanceToNow } from 'date-fns';
 import { fadeInUp } from '@/lib/animations';
 import { formatRelativeTime } from '@/lib/formatters';
-import { ProviderBadge } from '@/components/ui/ProviderBadge';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -92,7 +91,6 @@ const moodEmojis: Record<string, string> = {
 export default function ProfilePage() {
   const { user, signOut, loading } = useAuth();
   const navigate = useNavigate();
-  const [providerFilter, setProviderFilter] = useState<MusicProvider | 'all'>('all');
   const [showProviderSelector, setShowProviderSelector] = useState(false);
   const [lastFmInput, setLastFmInput] = useState('');
   const [lastFmDialogOpen, setLastFmDialogOpen] = useState(false);
@@ -104,10 +102,8 @@ export default function ProfilePage() {
   const { data: userProviders = [], refetch: refetchProviders } = useUserProviders();
   const { data: playStats } = usePlayStats();
   const { data: interactionStats } = useUserInteractionStats(user?.id);
-  const { data: playHistory = [] } = usePlayHistory({
-    limit: 20,
-    provider: providerFilter === 'all' ? undefined : providerFilter,
-  });
+  const { data: playHistory = [] } = usePlayHistory({ limit: 20 });
+  const { data: topArtistsOnClade = [] } = useTopArtists(10);
   const setPreferredProvider = useSetPreferredProvider();
   
   // Spotify data
@@ -1100,7 +1096,14 @@ export default function ProfilePage() {
           </motion.div>
         )}
 
-        {/* Play History Section */}
+        {/* Recently Played on Clade - native listening history, visible
+            regardless of whether Spotify/Last.fm are connected (unlike the
+            sections above/below). Used to always render this exact markup
+            with zero results: it read straight off track_id (a raw
+            provider id like "spotify:track:xxx", not a real track), and
+            nothing ever wrote a play into the table it queried in the first
+            place - PlayerContext.tsx now logs a real play_history row via
+            recordPlayHistory() whenever a catalog track actually plays. */}
         {playHistory.length > 0 && (
           <motion.div
             variants={fadeInUp}
@@ -1112,7 +1115,7 @@ export default function ProfilePage() {
             <div className="flex items-center justify-between">
               <h3 className="font-bold flex items-center gap-2">
                 <Clock className="w-5 h-5" />
-                Play History
+                Recently Played
               </h3>
               {playStats && (
                 <span className="text-xs text-muted-foreground">
@@ -1121,79 +1124,81 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* Provider Filter */}
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              <button
-                onClick={() => setProviderFilter('all')}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                  providerFilter === 'all'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                }`}
-              >
-                All
-              </button>
-              {Object.entries(PROVIDER_INFO).map(([key, info]) => {
-                const hasProvider = userProviders.some(p => p.provider === key);
-                if (!hasProvider) return null;
-                
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setProviderFilter(key as MusicProvider)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex items-center gap-1 transition-colors ${
-                      providerFilter === key
-                        ? 'text-white'
-                        : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                    }`}
-                    style={providerFilter === key ? { backgroundColor: info.color } : {}}
-                  >
-                    <span>{info.icon}</span>
-                    {info.name}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Play History List */}
             <div className="space-y-2">
-              {playHistory.map((event) => {
-                if (!event.track_id) return null;
-                
-                // Parse track info from track_id (format: seed-1, spotify:track:xxx, etc.)
-                const trackTitle = event.track_id.includes('seed-') 
-                  ? 'Sample Track' 
-                  : event.track_id.split(':').pop()?.slice(0, 12) || 'Unknown Track';
+              {playHistory.map((event) => (
+                <motion.div
+                  key={event.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="p-3 glass rounded-xl flex gap-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                  onClick={() => navigateToTrack(navigate, event.track_id)}
+                >
+                  <div className="w-12 h-12 rounded-lg overflow-hidden bg-muted/50 flex-shrink-0">
+                    <TrackThumbnail
+                      track={event.track}
+                      className="w-full h-full object-cover"
+                      fallback={
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Music className="w-6 h-6 text-muted-foreground" />
+                        </div>
+                      }
+                    />
+                  </div>
 
-                return (
-                  <motion.div
-                    key={event.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="p-3 glass rounded-xl flex gap-3 hover:bg-muted/30 transition-colors cursor-pointer"
-                    onClick={() => navigateToTrack(navigate, event.track_id)}
-                  >
-                    {/* Artwork */}
-                    <div className="w-12 h-12 rounded-lg overflow-hidden bg-muted/50 flex-shrink-0">
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Music className="w-6 h-6 text-muted-foreground" />
-                      </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-medium text-sm truncate">{event.track.title}</h4>
+                    <div className="flex items-center gap-2 mt-1">
+                      {event.track.artist && (
+                        <span className="text-xs text-muted-foreground truncate">{event.track.artist}</span>
+                      )}
+                      <span className="text-xs text-muted-foreground/70 flex-shrink-0">
+                        {formatRelativeTime(event.played_at)}
+                      </span>
                     </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
-                    {/* Track Info */}
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-sm truncate">{trackTitle}</h4>
-                      <div className="flex items-center gap-2 mt-1">
-                        <ProviderBadge provider={event.provider as MusicProvider} size="sm" />
-                        <span className="text-xs text-muted-foreground">
-                          {formatRelativeTime(event.played_at)}
-                        </span>
-                      </div>
+        {/* Top Artists on Clade - aggregated from the same native history,
+            complementing (not replacing) the Spotify/Last.fm top-artists
+            sections, which need a connected account to show anything. */}
+        {topArtistsOnClade.length > 0 && (
+          <motion.div
+            variants={fadeInUp}
+            initial="initial"
+            animate="animate"
+            transition={{ delay: 0.21 }}
+            className="space-y-3"
+          >
+            <h3 className="font-bold flex items-center gap-2">
+              <TrendingUp className="w-5 h-5" />
+              Top Artists
+            </h3>
+            <div className="p-4 glass rounded-2xl">
+              <div className="space-y-2">
+                {topArtistsOnClade.map((artist, i) => (
+                  <div key={artist.name} className="flex items-center gap-3">
+                    <span className="w-5 text-muted-foreground text-sm">{i + 1}</span>
+                    <div className="w-8 h-8 rounded-full overflow-hidden bg-muted flex-shrink-0">
+                      {artist.coverUrl ? (
+                        <img src={artist.coverUrl} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <User className="w-3 h-3 text-muted-foreground" />
+                        </div>
+                      )}
                     </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                  </motion.div>
-                );
-              })}
+                    <span className="flex-1 text-sm truncate">{artist.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {artist.playCount} play{artist.playCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </motion.div>
         )}

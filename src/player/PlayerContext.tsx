@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
-import { recordPlayEvent } from '@/api/playEvents';
+import { recordPlayEvent, recordPlayHistory } from '@/api/playEvents';
 import { MusicProvider } from '@/types';
 import { getPreferredProvider } from '@/lib/preferences';
 import type { ProviderControls } from './providers/adapter';
@@ -678,6 +678,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         recordPlayEvent({ track_id: idToLog, provider, action: 'preview', context: 'player' }).catch((err) =>
           console.error('Failed to record play event', err)
         );
+        // Recently Played / Top Artists (ProfilePage) - a no-op for guests
+        // or a non-catalog track (see recordPlayHistory's own guards).
+        void recordPlayHistory(idToLog, 'player');
       }
     });
   }, [enqueuePlayerOp]);
@@ -806,6 +809,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }).catch((err) => {
           console.error('Failed to record play event', err);
         });
+        void recordPlayHistory(idToLog, payload.context ?? 'player');
       }
     });
   }, [enqueuePlayerOp]);
