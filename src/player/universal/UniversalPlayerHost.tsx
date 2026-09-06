@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { MusicProvider } from '@/types';
+import { usePlayer } from '../PlayerContext';
 import { buildEmbedSrc, buildProviderDeepLink } from './buildEmbedSrc';
 import { createDebouncedScheduler, sameTarget, type PlayTarget } from './switching';
 
@@ -29,6 +30,7 @@ export function focusUniversalPlayerFrame() {
 }
 
 export function UniversalPlayerHost({ request, className }: UniversalPlayerHostProps) {
+  const { registerProviderControls } = usePlayer();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const seqRef = useRef(0);
   const lastScheduledRef = useRef<PlayTarget>(null);
@@ -86,6 +88,40 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
       },
     });
   }, [request, target, deepLink]);
+
+  // Transport control for whichever provider is loaded in the embed. Without
+  // this, seekTo()/togglePlayPause() (e.g. clicking a chorus/verse chip) had
+  // nowhere to go for the embed path - there was no registered controller at
+  // all, so they silently did nothing. YouTube's embed accepts these once
+  // buildEmbedSrc adds enablejsapi=1; Spotify's plain iframe embed has no
+  // equivalent public control channel (Premium playback uses the separate
+  // Web Playback SDK instead, which registers its own real controls), so
+  // seeking there is a deliberate, disclosed no-op rather than a crash.
+  useEffect(() => {
+    if (!request) return;
+    const sendCommand = (command: string, extra?: Record<string, unknown>) => {
+      const frame = iframeRef.current;
+      if (!frame?.contentWindow) return;
+      frame.contentWindow.postMessage({ type: 'universal-player:command', payload: { command, ...extra } }, window.location.origin);
+    };
+    registerProviderControls(request.provider, {
+      play: (startSec) => {
+        if (typeof startSec === 'number') sendCommand('seek', { seconds: startSec });
+        sendCommand('play');
+      },
+      pause: () => sendCommand('pause'),
+      seekTo: (seconds: number) => sendCommand('seek', { seconds }),
+      setVolume: (volume: number) => sendCommand('setVolume', { volume }),
+      setMute: (muted: boolean) => sendCommand('setMute', { muted }),
+      teardown: () => {},
+    });
+    // Deliberately keyed on request?.provider, not the whole request object:
+    // request is a fresh object literal from the caller on every render, and
+    // sendCommand always reads the current provider frame through refs, not
+    // a captured id/src - re-registering on every unrelated parent re-render
+    // would be pure churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request?.provider, registerProviderControls]);
 
   const showFallback = Boolean(request && target && !target.src);
 

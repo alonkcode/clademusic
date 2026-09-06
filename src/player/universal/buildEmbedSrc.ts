@@ -60,6 +60,13 @@ export function buildEmbedSrc(provider: MusicProvider, id: string, options: Embe
       url.searchParams.set('rel', '0');
       url.searchParams.set('modestbranding', '1');
       if (startSec && startSec > 0) url.searchParams.set('start', String(startSec));
+      // Required for the player to accept postMessage commands (seek/play/
+      // pause) - without it, section-chip seeking and the transport controls
+      // silently do nothing once a YouTube track is already playing.
+      url.searchParams.set('enablejsapi', '1');
+      if (typeof window !== 'undefined') {
+        url.searchParams.set('origin', window.location.origin);
+      }
       return url.toString();
     }
     case 'apple_music': {

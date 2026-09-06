@@ -302,9 +302,16 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
             if (!playRes.ok && playRes.status !== 204) {
               const details = await playRes.json().catch(() => null);
               console.warn('[Spotify Web Player] play failed', playRes.status, details);
-              // 403 usually means insufficient scope or premium requirement.
+              // A 403 here is almost always the app's Spotify Developer
+              // Dashboard being in Development Mode, which restricts the API
+              // to an explicit allow-list of accounts regardless of whether
+              // the listener actually has Premium - surface that concretely
+              // rather than a bare status code, since "Using preview mode"
+              // alone gives the listener nothing they can act on.
               if (playRes.status === 403) {
-                setError('Spotify playback not permitted (403). Using preview mode.');
+                setError(
+                  'Spotify playback not permitted (403). Using preview mode. If this account should have full access, add it under the Spotify Developer Dashboard → your app → Users and Access.'
+                );
               }
             } else if (seekToSec != null) {
               // The start position was applied by the play call itself.

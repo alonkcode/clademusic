@@ -314,7 +314,11 @@ export default function SearchPage() {
         <ResponsiveContainer maxWidth="full">
           <div className="py-4 space-y-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+              {/* pl-14/16 clears BottomNav's floating hamburger button, which is
+                  fixed at top-left independently of this header - without it the
+                  "Search" title renders underneath that button and is largely
+                  hidden. Same clearance PageLayout and FeedPage already apply. */}
+              <div className="flex items-center gap-3 pl-14 sm:pl-16">
                 <h1 className="text-xl lg:text-2xl font-bold">Search</h1>
               </div>
               <ProfileCircle />
