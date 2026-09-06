@@ -1,14 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, Sliders, Radio, AudioLines, Loader2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useSectionSync } from '@/hooks/useSectionSync';
 import { useHarmonicLoop } from '@/hooks/useHarmonicLoop';
 import { useLiveChordDetection } from '@/hooks/useLiveChordDetection';
+import { useAuth } from '@/hooks/useAuth';
+import { useCredits, useSpendCredit } from '@/hooks/api/useCredits';
 import { chordDisplayName, parseRomanChord, pitchClassName, PITCH_CLASSES } from '@/lib/harmony/theory';
 import { ROMAN_NUMERALS } from '@/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import type { SongSection, SongSectionType } from '@/types';
+
+/** 1 session of live audio detection. Free tier's 50/month reads as "50
+ *  live-detection sessions, upgrade for more" - see docs/MONETIZATION.md. */
+const LIVE_DETECTION_COST = 1;
 
 interface HarmonicHUDProps {
   trackId: string;
@@ -57,6 +64,56 @@ export function HarmonicHUD({
 }: HarmonicHUDProps) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const live = useLiveChordDetection();
+  const { user } = useAuth();
+  const { data: creditBalance } = useCredits();
+  const spendCredit = useSpendCredit();
+  // Tracks whether THIS toggle-on has already been charged, so re-renders
+  // while status stays 'capturing' don't spend a second credit, and a
+  // cancelled OS share-picker (status never reaches 'capturing') never
+  // charges at all.
+  const chargedRef = useRef(false);
+
+  useEffect(() => {
+    if (live.status !== 'capturing') {
+      chargedRef.current = false;
+      return;
+    }
+    if (chargedRef.current || !user) return;
+    chargedRef.current = true;
+
+    spendCredit.mutate(
+      { amount: LIVE_DETECTION_COST, reason: 'live_chord_detection' },
+      {
+        onSuccess: (result) => {
+          if (!result.success) {
+            // Balance changed between the pre-check below and capture
+            // actually starting (e.g. spent in another tab) - stop rather
+            // than let a session run uncharged.
+            live.stop();
+            toast.error('Out of credits for live detection this period. Upgrade for more.');
+          }
+        },
+        onError: () => {
+          // Fails open: a billing hiccup shouldn't block a feature that
+          // already started for the user, and nothing was deducted since
+          // the RPC never completed.
+          console.error('Failed to record live-detection credit spend');
+        },
+      }
+    );
+  }, [live.status, user, spendCredit, live]);
+
+  const handleToggleLiveDetection = () => {
+    if (live.status === 'capturing') {
+      live.stop();
+      return;
+    }
+    if (user && creditBalance !== undefined && creditBalance < LIVE_DETECTION_COST) {
+      toast.error('Out of credits for live detection this period. Upgrade for more.');
+      return;
+    }
+    void live.start();
+  };
 
   // While actually listening to the audio, the sections detected from it are
   // what's really there - preferred over whatever (if anything) was passed
@@ -249,7 +306,7 @@ export function HarmonicHUD({
           {live.supported && (
             <button
               type="button"
-              onClick={live.status === 'capturing' ? live.stop : live.start}
+              onClick={handleToggleLiveDetection}
               aria-label={live.status === 'capturing' ? 'Stop live audio detection' : 'Detect chords from audio'}
               title="Detect chords from whatever audio you share (experimental)"
               className={cn(
