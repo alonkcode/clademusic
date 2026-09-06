@@ -58,6 +58,7 @@ ORDER=(
   20260204130000_playback_telemetry.sql
   20260828120000_harden_signup_trigger.sql
   20260828140000_harden_auto_playlists.sql
+  20260901120000_wire_credits_to_live_detection.sql
 )
 
 fix_sql() {
