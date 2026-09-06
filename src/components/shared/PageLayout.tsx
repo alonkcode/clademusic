@@ -35,18 +35,30 @@ export function PageLayout({
   mainClassName = '',
   fullWidth = false,
 }: PageLayoutProps) {
-  const headerPositionClass = fixedHeader 
-    ? 'fixed top-0 left-0 right-0' 
+  const headerPositionClass = fixedHeader
+    ? 'fixed top-0 left-0 right-0'
     : 'sticky top-0';
-  
+
   const containerWidth = fullWidth ? '' : 'max-w-7xl mx-auto';
-  const mainPadding = fixedHeader ? 'pt-16 pb-24' : 'pb-24';
+  // A fixed header takes real content clearance (it's out of document
+  // flow); a sticky one already occupies real space at the top, so it
+  // only needs a small breathing-room gap, not that same clearance on top
+  // of its own height. These used to both apply pt-16 *and* a separate
+  // py-4 top padding regardless of which header style was in play -
+  // stacking two paddings meant for two different reasons is what made
+  // fixedHeader pages open with a large, empty dead zone before any
+  // content (roughly double the header's own real height).
+  const mainPadding = fixedHeader ? 'pt-20 pb-24' : 'pt-4 pb-24';
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className={`z-40 glass-strong safe-top ${headerPositionClass}`}>
-        <div className={`px-4 py-4 ${containerWidth}`}>
+        {/* pl-14/16 (not px-4) clears BottomNav's own floating hamburger
+            button, fixed at top-left independently of this header - without
+            it the title/first header item renders directly under that
+            button and is largely hidden behind it. */}
+        <div className={`pl-14 sm:pl-16 pr-4 py-4 ${containerWidth}`}>
           {headerContent ? (
             headerContent
           ) : (
@@ -67,7 +79,7 @@ export function PageLayout({
       </header>
 
       {/* Main Content */}
-      <main className={`px-4 py-4 ${containerWidth} space-y-6 ${mainPadding} ${mainClassName}`}>
+      <main className={`px-4 ${containerWidth} space-y-6 ${mainPadding} ${mainClassName}`}>
         {children}
       </main>
 

@@ -317,7 +317,12 @@ export default function FeedPage() {
 
       {/* Feed content */}
       <main className="flex-1 pt-16 pb-24">
-        <ResponsiveContainer maxWidth="full" className="py-6">
+        {/* pt-16 above already clears the fixed header - stacking py-6's own
+            top padding on top of that (as this used to) added a second,
+            redundant gap before any real content, on top of the header's
+            own real height. pb-6 for breathing room above pb-24's player-bar
+            clearance is kept; just the top half was the dead space. */}
+        <ResponsiveContainer maxWidth="full" className="pt-2 pb-6">
           {/* One guest prompt, not three - dismissible, and it never pushes the feed */}
           {showAuthPrompt && !user && (
             <div className="mx-auto mb-4 w-full max-w-lg lg:max-w-2xl rounded-xl border border-border/60 bg-background/70 px-4 py-3 shadow-md backdrop-blur">
