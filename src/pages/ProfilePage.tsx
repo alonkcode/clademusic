@@ -8,7 +8,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
-import { navigateToTrack } from '@/lib/navigation';
+import { navigateToTrack, navigateToArtist } from '@/lib/navigation';
 import {
   User,
   LogOut,
@@ -1181,7 +1181,11 @@ export default function ProfilePage() {
             <div className="p-4 glass rounded-2xl">
               <div className="space-y-2">
                 {topArtistsOnClade.map((artist, i) => (
-                  <div key={artist.name} className="flex items-center gap-3">
+                  <div
+                    key={artist.name}
+                    className="flex items-center gap-3 -mx-1 px-1 py-0.5 rounded-lg cursor-pointer hover:bg-muted/30 transition-colors"
+                    onClick={() => navigateToArtist(navigate, artist.name, { name: artist.name, coverUrl: artist.coverUrl })}
+                  >
                     <span className="w-5 text-muted-foreground text-sm">{i + 1}</span>
                     <div className="w-8 h-8 rounded-full overflow-hidden bg-muted flex-shrink-0">
                       {artist.coverUrl ? (

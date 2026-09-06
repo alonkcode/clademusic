@@ -1,4 +1,4 @@
-import { Home, Search, User, ListMusic, MessageSquare, Menu, X } from 'lucide-react';
+import { Home, Search, User, ListMusic, MessageSquare, Menu } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -33,17 +33,18 @@ export function BottomNav() {
             <Menu className="w-5 h-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent forceMount side="left" className="w-72 p-0"> 
-          <SheetHeader className="px-4 py-3 border-b flex items-center justify-between">
+        <SheetContent forceMount side="left" className="w-72 p-0">
+          {/* SheetContent already renders its own close (X) button, top-right -
+              this used to render a second one here, right next to it, so the
+              sheet showed two close buttons at once. Every other Sheet in the
+              app (ShareSheet, CommentsSheet, ...) relies on just the built-in
+              one; matching that keeps the hamburger menu consistent with them
+              instead of being the one sheet with an extra control. */}
+          <SheetHeader className="px-4 py-3 border-b">
             <SheetTitle className="flex items-center gap-2">
               <CladeMark className="h-6 w-6" />
               Navigate
             </SheetTitle>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Close navigation">
-                <X className="w-5 h-5" />
-              </Button>
-            </SheetTrigger>
           </SheetHeader>
           <nav className="py-2">
             {navItems.map((item) => {

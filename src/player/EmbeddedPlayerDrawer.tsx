@@ -534,22 +534,17 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
         data-player="universal"
         className={`fixed inset-x-0 bottom-0 z-[110] border-t border-border/60 bg-gradient-to-t ${meta.color} shadow-[0_-18px_60px_-30px_rgba(0,0,0,0.75)] backdrop-blur-xl`}
       >
-        {/* Details panel: the rotating chord readout, sections, and - for a
-            video-capable provider - a small fixed-size "miniplayer" video,
-            never full width or full screen. Slides up above the bar; the
-            bar itself never moves. */}
-        <DetailsPanel
-          initial={isTestEnv ? undefined : false}
-          {...(isTestEnv
-            ? {}
-            : {
-                animate: { height: showVideo ? 'auto' : 0, opacity: showVideo ? 1 : 0 },
-                transition: { duration: 0.2, ease: 'easeOut' },
-              })}
-          className="overflow-hidden"
-          aria-hidden={!showVideo}
-        >
-          <div className="max-h-[70vh] overflow-y-auto border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
+        {/* Chord readout and section jump chips: always visible whenever a
+            track is loaded, not just when the video panel below is expanded.
+            These used to live inside the collapsible DetailsPanel (gated on
+            showVideo, which defaults closed) - since that panel is collapsed
+            most of the time, the "rotating chords" feature was effectively
+            hidden by default, and "jump to chorus/verse" wasn't reachable
+            without first opening a panel most listeners never open. Only the
+            video box itself (which genuinely benefits from being opt-in) stays
+            behind the expand toggle, below. */}
+        {!isIdle && (
+          <div className="max-h-[45vh] overflow-y-auto border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
             <HarmonicHUD
               trackId={canonicalTrackId ?? ''}
               progression={harmony.progression}
@@ -558,50 +553,6 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               bpm={harmony.bpm}
               sections={hudSections}
             />
-
-            {useSpotifySdk ? (
-              // Audio-only - Premium SDK playback has no picture to show,
-              // just real transport control via the docked bar.
-              <div className="mt-3">
-                <SpotifyWebPlayer
-                  providerTrackId={trackId}
-                  autoplay={autoplay}
-                  onFallback={(reason) => {
-                    setSpotifySdkFailed(true);
-                    toast({
-                      title: reason.toLowerCase().includes('premium')
-                        ? 'Spotify Premium required'
-                        : 'Falling back to Spotify preview',
-                      description: reason,
-                    });
-                  }}
-                />
-              </div>
-            ) : (
-              /* The miniplayer itself: a small, fixed-aspect video box, not a
-                 resizable/draggable panel - Spotify's bar has no equivalent,
-                 since it never plays video, but a YouTube track needs
-                 somewhere to actually show the picture. Also the fallback
-                 surface for Spotify when SDK playback isn't available
-                 (guest, non-Premium, or an SDK error). */
-              <div className="mt-3 flex justify-center">
-                <div className="relative w-full max-w-sm overflow-hidden rounded-xl bg-black/80 aspect-video">
-                  <UniversalPlayerHost
-                    request={
-                      provider && trackId
-                        ? {
-                            provider,
-                            id: trackId,
-                            title: resolvedTitle,
-                            artist: resolvedArtist,
-                            autoplay,
-                          }
-                        : null
-                    }
-                  />
-                </div>
-              </div>
-            )}
 
             {sections.length > 0 && (
               <div className="mt-3 flex items-center gap-2">
@@ -660,6 +611,67 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                     <Repeat className="h-4 w-4" />
                   </button>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Video panel: for a video-capable provider, a small fixed-size
+            "miniplayer", never full width or full screen. Slides up above the
+            bar on request; the bar itself never moves. */}
+        <DetailsPanel
+          initial={isTestEnv ? undefined : false}
+          {...(isTestEnv
+            ? {}
+            : {
+                animate: { height: showVideo ? 'auto' : 0, opacity: showVideo ? 1 : 0 },
+                transition: { duration: 0.2, ease: 'easeOut' },
+              })}
+          className="overflow-hidden"
+          aria-hidden={!showVideo}
+        >
+          <div className="max-h-[70vh] overflow-y-auto border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
+            {useSpotifySdk ? (
+              // Audio-only - Premium SDK playback has no picture to show,
+              // just real transport control via the docked bar.
+              <div className="mt-3">
+                <SpotifyWebPlayer
+                  providerTrackId={trackId}
+                  autoplay={autoplay}
+                  onFallback={(reason) => {
+                    setSpotifySdkFailed(true);
+                    toast({
+                      title: reason.toLowerCase().includes('premium')
+                        ? 'Spotify Premium required'
+                        : 'Falling back to Spotify preview',
+                      description: reason,
+                    });
+                  }}
+                />
+              </div>
+            ) : (
+              /* The miniplayer itself: a small, fixed-aspect video box, not a
+                 resizable/draggable panel - Spotify's bar has no equivalent,
+                 since it never plays video, but a YouTube track needs
+                 somewhere to actually show the picture. Also the fallback
+                 surface for Spotify when SDK playback isn't available
+                 (guest, non-Premium, or an SDK error). */
+              <div className="mt-3 flex justify-center">
+                <div className="relative w-full max-w-sm overflow-hidden rounded-xl bg-black/80 aspect-video">
+                  <UniversalPlayerHost
+                    request={
+                      provider && trackId
+                        ? {
+                            provider,
+                            id: trackId,
+                            title: resolvedTitle,
+                            artist: resolvedArtist,
+                            autoplay,
+                          }
+                        : null
+                    }
+                  />
+                </div>
               </div>
             )}
           </div>

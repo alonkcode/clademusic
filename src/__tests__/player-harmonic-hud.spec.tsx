@@ -107,19 +107,28 @@ function renderPlayer() {
 }
 
 describe('EmbeddedPlayerDrawer chord readout', () => {
-  it('does not show the chord readout in the default compact bar', () => {
+  // HarmonicHUD used to live inside the same collapsible panel as the video
+  // miniplayer (gated on "expand", which defaults closed) - that made the
+  // "rotating chords" feature invisible by default on every page, since
+  // almost nobody expands the player just to see chords. It now renders
+  // unconditionally alongside the compact bar; only the video box itself
+  // stays behind the expand toggle.
+  it('shows the rotating chord readout in the default compact bar', () => {
     renderPlayer();
 
-    expect(screen.queryByRole('tablist', { name: /song sections/i })).not.toBeInTheDocument();
+    // The progression row renders each chord as a roman-numeral badge (the
+    // active one also appears as the current-chord subtitle, hence AllBy).
+    const progression = ['I', 'V', 'vi', 'IV'];
+    for (const numeral of progression) {
+      expect(screen.getAllByText(numeral).length).toBeGreaterThan(0);
+    }
   });
 
-  it('shows the rotating chord readout once expanded', () => {
+  it('still shows the chord readout after expanding the video panel', () => {
     renderPlayer();
 
     fireEvent.click(screen.getByLabelText(/show video and expand player/i));
 
-    // The progression row renders each chord as a roman-numeral badge (the
-    // active one also appears as the current-chord subtitle, hence AllBy).
     const progression = ['I', 'V', 'vi', 'IV'];
     for (const numeral of progression) {
       expect(screen.getAllByText(numeral).length).toBeGreaterThan(0);

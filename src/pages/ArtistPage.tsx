@@ -10,8 +10,8 @@
  * - Live comment feed with pinned comment
  */
 
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ArrowLeft, 
@@ -80,11 +80,26 @@ function formatFollowers(count: number): string {
 export default function ArtistPage() {
   const { artistId } = useParams<{ artistId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isFollowing, setIsFollowing] = useState(false);
   const [activeTab, setActiveTab] = useState('popular');
 
-  // In a real app, fetch artist data based on artistId
-  const artist = mockArtist;
+  // There's no real per-artist data source wired up yet (top tracks, albums,
+  // bio, follower counts are all still the same mock throughout) - fetching
+  // that is a separate, larger piece of work. Until then, at least show the
+  // artist actually clicked rather than always "Kendrick Lamar": a caller
+  // that knows the real name/art (e.g. Profile's Top Artists list) can pass
+  // it via navigate state, otherwise fall back to the URL param itself.
+  const navState = location.state as { name?: string; coverUrl?: string | null } | null;
+  const artist = useMemo(() => {
+    const name = navState?.name ?? (artistId ? decodeURIComponent(artistId) : mockArtist.name);
+    return {
+      ...mockArtist,
+      id: artistId ?? mockArtist.id,
+      name,
+      image_url: navState?.coverUrl ?? mockArtist.image_url,
+    };
+  }, [artistId, navState]);
 
   return (
     <div className="min-h-screen bg-background flex">
