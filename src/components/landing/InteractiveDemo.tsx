@@ -33,8 +33,13 @@ export function InteractiveDemo() {
 
   const selectedTrackData = tracks[selectedTrack];
 
+  // overflow-hidden below: the two columns animate in from x: -50 / x: 50.
+  // Until each scrolls into view it sits translated 50px sideways, and the
+  // right-hand one pushed the document's scrollWidth 26px past the viewport -
+  // giving the whole landing page a horizontal scrollbar on desktop. The hero
+  // section already clips itself the same way.
   return (
-    <section id="features" className="relative py-24 bg-gradient-to-b from-[#0F0F1A] to-[#1A1A2E]">
+    <section id="features" className="relative overflow-hidden py-24 bg-gradient-to-b from-[#0F0F1A] to-[#1A1A2E]">
       <div className="container mx-auto px-6">
         {/* Section Header */}
         <motion.div

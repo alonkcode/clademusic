@@ -14,10 +14,19 @@ export function navigateToTrack(navigate: NavigateFunction, trackId: string) {
 }
 
 /**
- * Navigate to artist page with proper ID encoding
+ * Navigate to artist page with proper ID encoding.
+ *
+ * ArtistPage has no real per-artist data source wired up yet, so it can only
+ * show what it's told - pass along whatever the caller already has (name,
+ * cover art) via router state so the page shows the right artist instead of
+ * its hardcoded placeholder.
  */
-export function navigateToArtist(navigate: NavigateFunction, artistId: string) {
-  navigate(`/artist/${encodeURIComponent(artistId)}`);
+export function navigateToArtist(
+  navigate: NavigateFunction,
+  artistId: string,
+  state?: { name?: string; coverUrl?: string | null }
+) {
+  navigate(`/artist/${encodeURIComponent(artistId)}`, state ? { state } : undefined);
 }
 
 /**

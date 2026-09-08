@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { QuickStreamButtons } from '@/components/QuickStreamButtons';
 
 export default function E2EUniversalPlayerPage() {
@@ -41,6 +42,14 @@ export default function E2EUniversalPlayerPage() {
           />
         </div>
       </div>
+
+      {/* A real client-side route change (not a page reload) - regression
+          coverage for "navigating stops the player": the global player lives
+          above <Routes> in App.tsx, so swapping which route is active here
+          must not touch it. */}
+      <Link to="/compare" className="inline-block text-sm underline" data-e2e-nav-away>
+        Go to Compare page
+      </Link>
     </div>
   );
 }
