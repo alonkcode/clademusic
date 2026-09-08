@@ -21,6 +21,9 @@ type SpotifyPlayerInstance = {
   setVolume: (volume: number) => Promise<void>;
   addListener: (event: string, cb: (data: any) => void) => boolean;
   removeListener: (event: string, cb?: (data: any) => void) => boolean;
+  /** Unlocks audio after the browser's autoplay policy blocks a /play call
+   *  with no preceding user gesture. Newer SDK versions only. */
+  activateElement?: () => Promise<void>;
 };
 
 const SDK_URL = 'https://sdk.scdn.co/spotify-player.js';
@@ -103,6 +106,14 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
 
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  // True once the SDK itself has reported that the browser's autoplay policy
+  // blocked the automatic /play call - a hard platform limit, not a bug:
+  // browsers deliberately refuse to start audio with zero preceding user
+  // interaction on the page, and a JS-synthesized click doesn't count as one
+  // either, specifically to prevent working around exactly this. Waiting for
+  // the next REAL interaction and resuming from it then is the actual fix,
+  // not pretending true unattended autoplay is achievable.
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const playerRef = useRef<SpotifyPlayerInstance | null>(null);
   const deviceIdRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -176,11 +187,36 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     if (provider !== 'spotify' || !providerTrackId) return;
     setError(null);
     setReady(false);
+    setAutoplayBlocked(false);
     updatePlaybackState({
       durationMs: 0,
       isPlaying: shouldAutoplay,
     });
   }, [provider, providerTrackId, shouldAutoplay, updatePlaybackState]);
+
+  // Once the browser has blocked the automatic /play call, resume from the
+  // very next real interaction anywhere on the page rather than requiring
+  // the listener to specifically find and press the transport bar's play
+  // button - activateElement() is the SDK's own documented unlock for this
+  // (see https://developer.spotify.com/documentation/web-playback-sdk),
+  // separate from and in addition to the actual resume() call.
+  useEffect(() => {
+    if (!autoplayBlocked) return;
+
+    const resume = () => {
+      setAutoplayBlocked(false);
+      const player = playerRef.current;
+      void player?.activateElement?.();
+      void player?.resume();
+    };
+
+    window.addEventListener('pointerdown', resume, { once: true, capture: true });
+    window.addEventListener('keydown', resume, { once: true, capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', resume, { capture: true });
+      window.removeEventListener('keydown', resume, { capture: true });
+    };
+  }, [autoplayBlocked]);
 
   useEffect(() => {
     if (provider !== 'spotify' || !providerTrackId) return;
@@ -251,6 +287,15 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
             console.error('[Spotify Web Player] playback error', e);
             // Don’t hard-fail; allow fallback/polling to drive UI.
             setError((prev) => prev ?? 'Spotify playback error. Using preview mode.');
+          });
+
+          // Not an error - the browser's own autoplay policy refused the
+          // /play call below because it didn't originate from a fresh user
+          // gesture (e.g. the track was opened by a deep link or navigation,
+          // not a click). See the resume-on-next-interaction listener set up
+          // where this fires, further down.
+          instance.addListener('autoplay_failed', () => {
+            setAutoplayBlocked(true);
           });
 
           const ok = await instance.connect();
@@ -392,7 +437,11 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
   // Keep a tiny status line for debuggability.
   return (
     <div className="w-full">
-      {!ready && <div className="text-[11px] text-white/50">Starting Spotify playback…</div>}
+      {autoplayBlocked ? (
+        <div className="text-[11px] text-white/70">Tap anywhere to start playback (your browser blocked autoplay).</div>
+      ) : (
+        !ready && <div className="text-[11px] text-white/50">Starting Spotify playback…</div>
+      )}
     </div>
   );
 }
