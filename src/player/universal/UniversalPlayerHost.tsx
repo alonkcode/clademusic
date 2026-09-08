@@ -30,7 +30,7 @@ export function focusUniversalPlayerFrame() {
 }
 
 export function UniversalPlayerHost({ request, className }: UniversalPlayerHostProps) {
-  const { registerProviderControls } = usePlayer();
+  const { registerProviderControls, updatePlaybackState } = usePlayer();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const seqRef = useRef(0);
   const lastScheduledRef = useRef<PlayTarget>(null);
@@ -122,6 +122,34 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
     // would be pure churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.provider, registerProviderControls]);
+
+  // Real state coming back UP from the embed - universal-player.html relays
+  // YouTube's own postMessage position/duration/playing-state here (see its
+  // "YouTube state relay" comment). Without this, positionMs/durationMs in
+  // PlayerContext never moved for any track played through this iframe: the
+  // seekbar's apparent motion came entirely from the app's own optimistic
+  // RAF extrapolation (useAnimatedSeekbar), which had nothing real to
+  // correct against, so duration stayed frozen at 0:00 and the harmonic
+  // chord readout never advanced past whatever chord it started on. Guarded
+  // by event.source, not just origin: the iframe is same-origin (it's our
+  // own static file) but its embedded YouTube child is not the source of
+  // same-origin app messages either, so this only reacts to its own relay.
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object' || data.type !== 'universal-player:state') return;
+      const payload = data.payload ?? {};
+      updatePlaybackState({
+        positionMs: typeof payload.positionMs === 'number' ? payload.positionMs : undefined,
+        durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined,
+        isPlaying: typeof payload.isPlaying === 'boolean' ? payload.isPlaying : undefined,
+      });
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [updatePlaybackState]);
 
   const showFallback = Boolean(request && target && !target.src);
 

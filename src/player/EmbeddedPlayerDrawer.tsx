@@ -477,7 +477,14 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 aria-label="Seek"
               />
             </div>
-            <span className="w-9 shrink-0 text-left text-[10px] tabular-nums md:w-10 md:text-xs" aria-label="Total duration">{formatTime(durationSec)}</span>
+            {/* "--:--" rather than "0:00" whenever duration is genuinely
+                unknown - a guest/non-Premium Spotify preview has no public
+                API to report one at all (a hard platform limit, not a bug),
+                and a real 0:00 next to a track that's visibly playing reads
+                as broken rather than as "still loading". */}
+            <span className="w-9 shrink-0 text-left text-[10px] tabular-nums md:w-10 md:text-xs" aria-label="Total duration">
+              {hasDuration ? formatTime(durationSec) : '--:--'}
+            </span>
           </div>
 
           {/* Secondary controls - collapse on narrow viewports rather than
