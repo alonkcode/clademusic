@@ -27,9 +27,28 @@ export function useActiveSection({
   seekToMs,
   cadenceType,
 }: UseActiveSectionOptions) {
+  // The LAST section whose start has already passed - not "the section whose
+  // [start_ms, end_ms) window contains this position". Real analyzed section
+  // boundaries aren't always perfectly contiguous (a small gap or overlap
+  // between one section's end and the next's start is common), and with an
+  // overlap, Array.find()'s first-match semantics picked the PRECEDING
+  // section instead of the one actually being sought: clicking section #3's
+  // chip landed inside section #2's still-open window, so #2 lit up instead.
+  // Scanning for the most recently started section degrades gracefully
+  // either way, and matches the same, already-correct approach HarmonicHUD's
+  // useSectionSync uses for its own live section index. `sections` is sorted
+  // by start_ms (see usePlayerHarmony), so this can stop at the first one
+  // that hasn't started yet.
   const activeSection = useMemo(() => {
-    if (!sections.length) return null;
-    return sections.find((s) => positionMs >= s.start_ms && positionMs < s.end_ms) ?? null;
+    let current: TrackSection | null = null;
+    for (const section of sections) {
+      if (positionMs >= section.start_ms) {
+        current = section;
+      } else {
+        break;
+      }
+    }
+    return current;
   }, [positionMs, sections]);
 
   const loopSection = useMemo(() => {
