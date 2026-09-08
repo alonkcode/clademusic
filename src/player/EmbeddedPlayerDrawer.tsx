@@ -1,72 +1,26 @@
-import { useMemo, useEffect, useRef, useState, useCallback } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { usePlayer } from './PlayerContext';
 import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Repeat } from 'lucide-react';
 import { QueueSheet } from './QueueSheet';
-import { SpotifyIcon, YouTubeIcon, AppleMusicIcon } from '@/components/QuickStreamButtons';
 import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
 import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
-import { useTrackSections } from '@/hooks/api/useTrackSections';
 import { getSectionDisplayLabel } from '@/lib/sections';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
-import { useTrack } from '@/hooks/api/useTracks';
-import { useHarmonicFingerprint } from '@/hooks/api/useHarmonicFingerprint';
 import { UniversalPlayerHost } from '@/player/universal/UniversalPlayerHost';
 import { SpotifyWebPlayer } from '@/player/providers/SpotifyWebPlayer';
 import { HarmonicHUD } from '@/components/HarmonicHUD';
-import type { SongSection } from '@/types';
 import { buildProviderDeepLink } from '@/player/universal/buildEmbedSrc';
 import { isTestEnv } from '@/lib/env';
 import { toast } from '@/hooks/use-toast';
-
-const providerMeta = {
-  spotify: { label: 'Spotify', badge: '🎧', color: 'bg-black/90', Icon: SpotifyIcon },
-  youtube: { label: 'YouTube', badge: '▶', color: 'bg-black/90', Icon: YouTubeIcon },
-  apple_music: { label: 'Apple Music', badge: '', color: 'bg-neutral-900/90', Icon: AppleMusicIcon },
-} as const;
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const isUuid = (value: string | null | undefined) => Boolean(value && UUID_RE.test(value));
-
-const getCadenceLabel = (cadence: string | null | undefined) => {
-  if (!cadence) return null;
-  if (cadence === 'none') return null;
-  return cadence.replace(/_/g, ' ');
-};
-
-const describeSectionWhy = (params: {
-  sectionLabel: string;
-  cadenceType?: string | null;
-  isLooping?: boolean;
-}) => {
-  const { sectionLabel, cadenceType, isLooping } = params;
-  const base: Record<string, string> = {
-    intro: 'Sets the tonal center and groove.',
-    verse: 'Builds tension and sets up the hook.',
-    'pre-chorus': 'Ramps into the release.',
-    chorus: 'Main hook — usually the most stable resolution.',
-    bridge: 'Contrast section — often shifts harmonic color.',
-    breakdown: 'Pulls back texture to build anticipation.',
-    drop: 'Peak energy release.',
-    outro: 'Closure and release.',
-  };
-
-  const cadence: Record<string, string> = {
-    authentic: 'Strong resolution (authentic cadence).',
-    plagal: 'Warm resolution (plagal cadence).',
-    deceptive: 'Fake-out resolution (deceptive cadence).',
-    half: 'Unresolved — hangs on dominant (half cadence).',
-    loop: 'Circular loop — no final cadence.',
-    modal: 'Modal harmony — color over functional resolution.',
-  };
-
-  const parts: string[] = [];
-  if (isLooping) parts.push('Looping enabled.');
-  parts.push(base[sectionLabel] ?? 'Section context.');
-  if (cadenceType && cadence[cadenceType]) parts.push(cadence[cadenceType]);
-  return parts.join(' ');
-};
+import { providerMeta, formatTime } from './embeddedPlayer/constants';
+import { useAnimatedSeekbar } from './embeddedPlayer/useAnimatedSeekbar';
+import { usePlayerHarmony } from './embeddedPlayer/usePlayerHarmony';
+import { useActiveSection } from './embeddedPlayer/useActiveSection';
+import { usePlayerLayout } from './embeddedPlayer/usePlayerLayout';
+import { useTransportControls } from './embeddedPlayer/useTransportControls';
+import { useDevPlayerInvariants } from './embeddedPlayer/useDevInvariants';
 
 type EmbeddedPlayerDrawerProps = {
   onNext?: () => void;
@@ -74,86 +28,6 @@ type EmbeddedPlayerDrawerProps = {
   canNext?: boolean;
   canPrev?: boolean;
 };
-
-/**
- * Hook to animate the seekbar smoothly between provider updates.
- * Syncs to authoritative positionMs on each update while animating locally via RAF.
- */
-function useAnimatedSeekbar(
-  positionMs: number,
-  durationMs: number,
-  isPlaying: boolean
-): number {
-  const [displayMs, setDisplayMs] = useState(positionMs);
-  const rafIdRef = useRef<number | null>(null);
-  const lastFrameTimeRef = useRef<number>(performance.now());
-  const lastAuthorityMsRef = useRef<number>(positionMs);
-  const durationRef = useRef<number>(durationMs);
-
-  // Re-anchor on the provider's position whenever the bar has drifted away
-  // from it. Comparing the new reading against the PREVIOUS READING instead of
-  // against what is drawn meant a stalled provider - a YouTube ad, a buffering
-  // stall - reported the same position every tick, the comparison saw no
-  // change, and the local animation ran away from the real playhead with
-  // nothing to pull it back.
-  useEffect(() => {
-    setDisplayMs((prev) => (Math.abs(positionMs - prev) > 250 ? positionMs : prev));
-    lastAuthorityMsRef.current = positionMs;
-    lastFrameTimeRef.current = performance.now();
-  }, [positionMs]);
-
-  // Clamp display to duration changes to avoid drift beyond track end.
-  useEffect(() => {
-    durationRef.current = durationMs;
-    if (durationMs > 0) {
-      setDisplayMs((prev) => Math.min(prev, durationMs));
-    }
-  }, [durationMs]);
-
-  // When playback stops, snap to authoritative position to stay in sync.
-  useEffect(() => {
-    if (!isPlaying) {
-      setDisplayMs(positionMs);
-    }
-  }, [isPlaying, positionMs]);
-
-  // Animate forward during playback using RAF
-  useEffect(() => {
-    if (isTestEnv) return;
-    if (!isPlaying) {
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-      return;
-    }
-
-    const animate = (now: number) => {
-      const elapsed = now - lastFrameTimeRef.current;
-      lastFrameTimeRef.current = now;
-
-      setDisplayMs((prev) => {
-        const next = prev + elapsed;
-        const limit = durationRef.current;
-        return limit > 0 ? Math.min(next, limit) : next;
-      });
-
-      rafIdRef.current = requestAnimationFrame(animate);
-    };
-
-    lastFrameTimeRef.current = performance.now();
-    rafIdRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-    };
-  }, [isPlaying, durationMs]);
-
-  return displayMs;
-}
 
 export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: EmbeddedPlayerDrawerProps) {
   const {
@@ -197,72 +71,20 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const { data: isSpotifyConnected } = useSpotifyConnected();
   const connectSpotify = useConnectSpotify();
 
-  const analysisTrackId = !isTestEnv && isUuid(canonicalTrackId) ? canonicalTrackId : undefined;
-  const sectionsQuery = useTrackSections(analysisTrackId);
-  const sections = useMemo(() => {
-    const raw = sectionsQuery.data;
-    if (!Array.isArray(raw)) return [];
-    return [...raw].sort((a, b) => a.start_ms - b.start_ms);
-  }, [sectionsQuery.data]);
-
-  const trackQuery = useTrack(analysisTrackId, !!analysisTrackId);
-  const fingerprintQuery = useHarmonicFingerprint(analysisTrackId);
-  const harmony = useMemo(() => {
-    const track = trackQuery.data ?? null;
-    const fingerprint = fingerprintQuery.data ?? null;
-
-    const detectedKey = (fingerprint as any)?.detected_key ?? (track as any)?.detected_key ?? null;
-    const detectedMode = (fingerprint as any)?.detected_mode ?? (track as any)?.detected_mode ?? null;
-    const cadenceType = (fingerprint as any)?.cadence_type ?? (track as any)?.cadence_type ?? null;
-    const confidenceScore =
-      typeof (fingerprint as any)?.confidence_score === 'number'
-        ? (fingerprint as any).confidence_score
-        : typeof (track as any)?.confidence_score === 'number'
-          ? (track as any).confidence_score
-          : null;
-
-    const fromTrack: string[] = Array.isArray((track as any)?.progression_roman) ? (track as any).progression_roman : [];
-    const fromFingerprint: string[] = Array.isArray((fingerprint as any)?.roman_progression)
-      ? (fingerprint as any).roman_progression.map((c: any) => c?.numeral).filter(Boolean)
-      : [];
-
-    const progression = fromTrack.length ? fromTrack : fromFingerprint;
-
-    return {
-      detectedKey,
-      detectedMode,
-      cadenceType,
-      confidenceScore,
-      progression,
-      bpm: typeof track?.tempo === 'number' ? track.tempo : undefined,
-    };
-  }, [fingerprintQuery.data, trackQuery.data]);
-
-  // HarmonicHUD - the rotating chord readout - already existed and already
-  // does exactly this (chords that advance with real playback position), but
-  // only ever got mounted inside the feed's TrackCard. The player itself
-  // stays mounted across every route, so that was the whole reason chords
-  // never showed up anywhere except the feed. sections needs converting: HUD
-  // takes seconds (SongSection), this component's own sections are
-  // milliseconds (TrackSection, from track_sections).
-  const hudSections: SongSection[] = useMemo(
-    () => sections.map((s) => ({ type: s.label, start_time: s.start_ms / 1000, end_time: s.end_ms / 1000 })),
-    [sections]
-  );
+  const { sections, harmony, hudSections } = usePlayerHarmony(canonicalTrackId);
 
   const safeQueue = Array.isArray(queue) ? queue : [];
   const safeQueueIndex = typeof queueIndex === 'number' ? queueIndex : -1;
-  const cinemaRef = useRef<HTMLDivElement | null>(null);
   const autoplay = isPlaying;
   const canSeekInEmbed = true; // Enable seekbar - commit seek immediately to sync positionMs and provider
   const [queueOpen, setQueueOpen] = useState(false);
   const [scrubSec, setScrubSec] = useState<number | null>(null);
+
   // Docked to the bottom edge, full width, like Spotify's own desktop
   // player - always there while a track is loaded, never dragged or
   // resized around the screen. "Show video" reveals a compact panel above
   // the bar (the "miniplayer") rather than taking over the screen.
-  const [showVideo, setShowVideo] = useState(false);
-  const layoutStorageKey = 'player_layout_v2';
+  const { cinemaRef, showVideo, setShowVideo, toggleFullscreen } = usePlayerLayout({ isCinema, enterCinema, exitCinema });
 
   // Real Spotify playback (Web Playback SDK - actual full tracks, actual
   // play/pause/seek/volume control, driven by the user's own connected
@@ -311,69 +133,22 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   // stored level so unmuting restores it.
   const volumePercent = Math.round((isMuted ? 0 : safeVolume) * 100);
   const isIdle = !isOpen || !provider || !trackId;
-  // A queue of >1 does not mean a next track exists - at the last index there
-  // is nothing to advance to, which left the button enabled but inert.
-  const hasQueueNext =
-    (safeQueueIndex >= 0 && safeQueueIndex < safeQueue.length - 1) ||
-    (safeQueueIndex === -1 && safeQueue.length > 0);
-  const effectiveCanNext = canNext ?? (!isIdle && (hasQueueNext || Boolean(onNext)));
-  // Previous is available whenever it can do something: step back, restart the
-  // current track, or defer to the host page.
-  const effectiveCanPrev = canPrev ?? !isIdle;
   const authoritativePositionMs = safeMs(positionMs);
 
-  const activeSection = useMemo(() => {
-    if (!sections.length) return null;
-    return sections.find((s) => authoritativePositionMs >= s.start_ms && authoritativePositionMs < s.end_ms) ?? null;
-  }, [authoritativePositionMs, sections]);
-
-  const loopSection = useMemo(() => {
-    if (!loopSectionId) return null;
-    return sections.find((s) => s.id === loopSectionId) ?? null;
-  }, [loopSectionId, sections]);
-
-  useEffect(() => {
-    if (typeof setCurrentSection !== 'function') return;
-    const nextId = activeSection?.id ?? null;
-    if (nextId !== currentSectionId) {
-      setCurrentSection(nextId);
-    }
-  }, [activeSection?.id, currentSectionId, setCurrentSection]);
-
-  const lastLoopSeekAtRef = useRef<number>(0);
-  useEffect(() => {
-    if (!loopSection) return;
-    const ms = authoritativePositionMs;
-    const thresholdMs = 200;
-    if (ms >= loopSection.end_ms - thresholdMs) {
-      const now = performance.now();
-      if (now - lastLoopSeekAtRef.current > 800) {
-        lastLoopSeekAtRef.current = now;
-        seekToMs(loopSection.start_ms);
-      }
-    }
-  }, [authoritativePositionMs, loopSection, seekToMs]);
+  const { activeSection, sectionWhy } = useActiveSection({
+    sections,
+    positionMs: authoritativePositionMs,
+    currentSectionId,
+    setCurrentSection,
+    loopSectionId,
+    seekToMs,
+    cadenceType: harmony.cadenceType,
+  });
 
   const meta = useMemo(() => {
     const fallback = { label: 'Now Playing', badge: '♪', color: 'bg-neutral-900/90', Icon: null as React.ComponentType<{ className?: string }> | null };
     return provider ? providerMeta[provider as keyof typeof providerMeta] ?? fallback : fallback;
   }, [provider]);
-
-  const sectionWhy = useMemo(() => {
-    if (!activeSection) return null;
-    return describeSectionWhy({
-      sectionLabel: activeSection.label,
-      cadenceType: harmony.cadenceType,
-      isLooping: loopSectionId === activeSection.id,
-    });
-  }, [activeSection, harmony.cadenceType, loopSectionId]);
-
-  // Format time as MM:SS
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   const handleReconnectSpotify = useCallback(() => {
     if (!user) {
@@ -383,133 +158,24 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     void connectSpotify.mutateAsync();
   }, [connectSpotify, navigate, user]);
 
-  const toggleFullscreen = useCallback(() => {
-    const el = cinemaRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen?.();
-      exitCinema();
-    } else {
-      el.requestFullscreen?.()
-        .then(() => enterCinema())
-        .catch(() => {});
-    }
-  }, [enterCinema, exitCinema]);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const active = !!document.fullscreenElement;
-      if (!active) {
-        exitCinema();
-      } else {
-        enterCinema();
-      }
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [enterCinema, exitCinema]);
-
-  // Hydrate/persist just whether the details panel was left open - there is
-  // no position/size state left to remember now that the bar is always
-  // docked full-width to the bottom.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = localStorage.getItem(layoutStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<{ showVideo: boolean }>;
-      if (typeof parsed.showVideo === 'boolean') setShowVideo(parsed.showVideo);
-    } catch (err) {
-      console.warn('Failed to hydrate player layout', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem(layoutStorageKey, JSON.stringify({ showVideo }));
-    } catch (err) {
-      console.warn('Failed to persist player layout', err);
-    }
-  }, [showVideo]);
-
   useEffect(() => {
     setScrubSec(null);
   }, [provider, trackId]);
 
-  useEffect(() => {
-    if (!isCinema) return;
-    const node = cinemaRef.current;
-    if (!node) return;
-    if (document.fullscreenElement) return;
-    node.requestFullscreen?.().catch(() => {
-      exitCinema();
-    });
-  }, [isCinema, exitCinema]);
+  useDevPlayerInvariants(isOpen, resolvedTitle);
 
-  // Dev-only assertion: never allow more than one universal player mounted.
-  // Skip in tests (React 18 StrictMode can mount/unmount twice in jsdom harness).
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (isTestEnv) return;
-    if (process.env.NODE_ENV === 'production') return;
-    const players = document.querySelectorAll('[data-player="universal"]');
-    if (players.length > 1) {
-      // Prefer not to crash the whole app in dev; log loudly.
-      // This typically indicates the player host was mounted twice due to layout/route wiring.
-      console.error('Invariant violated: more than one universal player mounted.');
-    }
-  }, []);
-
-  // Dev guard: ensure only one iframe/provider instance and metadata present
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (isTestEnv) return;
-    if (process.env.NODE_ENV === 'production') return;
-    const frames = document.querySelectorAll('iframe[src*="spotify"], iframe[src*="youtube"]');
-    if (frames.length > 1) {
-      console.error('Invariant violated: multiple provider iframes detected.');
-    }
-    if (isOpen && !resolvedTitle) {
-      console.error('Invariant violated: player rendered without title.');
-    }
-  }, [isOpen, resolvedTitle]);
-
-  const handlePrev = useCallback(() => {
-    if (isIdle) return;
-    if (positionMs > 3000) {
-      seekToMs(0);
-      return;
-    }
-    if (safeQueueIndex > 0 && safeQueue.length) {
-      playFromQueue(safeQueueIndex - 1);
-      return;
-    }
-    if (safeQueueIndex === -1 && safeQueue.length > 0) {
-      playFromQueue(0);
-      return;
-    }
-    if (onPrev) {
-      onPrev();
-      return;
-    }
-    seekToMs(0);
-  }, [isIdle, positionMs, safeQueueIndex, safeQueue.length, playFromQueue, seekToMs, onPrev]);
-
-  const handleNext = useCallback(() => {
-    if (isIdle) return;
-    if (safeQueueIndex >= 0 && safeQueueIndex < safeQueue.length - 1) {
-      playFromQueue(safeQueueIndex + 1);
-      return;
-    }
-    if (safeQueueIndex === -1 && safeQueue.length > 0) {
-      playFromQueue(0);
-      return;
-    }
-    if (onNext) {
-      onNext();
-    }
-  }, [isIdle, safeQueueIndex, safeQueue.length, playFromQueue, onNext]);
+  const { handlePrev, handleNext, effectiveCanNext, effectiveCanPrev } = useTransportControls({
+    isIdle,
+    positionMs,
+    queueIndex: safeQueueIndex,
+    queueLength: safeQueue.length,
+    playFromQueue,
+    seekToMs,
+    onPrev,
+    onNext,
+    canNext,
+    canPrev,
+  });
 
   // NOT an early return on isIdle: UniversalPlayerHost mounts a single,
   // persistent <iframe id="universal-player"> that every provider switch
@@ -640,10 +306,17 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   autoplay={autoplay}
                   onFallback={(reason) => {
                     setSpotifySdkFailed(true);
+                    const lower = reason.toLowerCase();
                     toast({
-                      title: reason.toLowerCase().includes('premium')
-                        ? 'Spotify Premium required'
-                        : 'Falling back to Spotify preview',
+                      title: lower.includes('403') || lower.includes('developer dashboard')
+                        ? 'Spotify app in Development Mode'
+                        : lower.includes('premium')
+                          ? 'Spotify Premium required'
+                          : 'Falling back to Spotify preview',
+                      // This toast stays until dismissed (see use-toast.ts's
+                      // TOAST_REMOVE_DELAY) specifically so actionable detail
+                      // like the 403/dev-mode guidance below doesn't flash
+                      // past before it can be read.
                       description: reason,
                     });
                   }}
