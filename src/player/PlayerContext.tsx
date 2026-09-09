@@ -242,7 +242,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // to the user's current setting without depending on render timing.
   const volumeRef = useRef<number>(DEFAULT_VOLUME);
   const mutedRef = useRef<boolean>(false);
+  // Coalescing state for setVolumeLevel - see the comment there.
+  const pendingVolumeRef = useRef<number | null>(null);
+  const volumeFrameRef = useRef<number | null>(null);
   const opChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(
+    () => () => {
+      if (volumeFrameRef.current !== null) cancelAnimationFrame(volumeFrameRef.current);
+    },
+    []
+  );
 
   const enqueuePlayerOp = useCallback((name: string, op: () => Promise<void>) => {
     opChainRef.current = opChainRef.current
@@ -339,6 +349,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // is never a control that appears to do nothing.
     const nextMuted = clamped === 0;
 
+    const muteChanged = mutedRef.current !== nextMuted;
     volumeRef.current = clamped;
     mutedRef.current = nextMuted;
     setState((prev) => ({ ...prev, volume: clamped, isMuted: nextMuted }));
@@ -347,11 +358,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // closure: a stale closure would send the volume to the previous provider
     // after a switch.
     const activeProvider = activeProviderRef.current;
-    if (activeProvider) {
-      const controls = providerControlsRef.current[activeProvider];
-      controls?.setVolume?.(clamped);
-      controls?.setMute?.(nextMuted);
-    }
+    if (!activeProvider) return;
+    const controls = providerControlsRef.current[activeProvider];
+
+    // Dragging the slider fires `input` on every pixel - 60-100 times a
+    // second - and this used to send BOTH setVolume and setMute on every one
+    // of them. For the embed path each of those is a postMessage hop into the
+    // iframe and on to YouTube's widget API, so a single drag buried the
+    // player in a few hundred commands, and the infoDelivery replies it
+    // pushed back carried stale currentTime values that yanked the seekbar
+    // backwards (see useAnimatedSeekbar for the guard on the receiving end).
+    // Mute is a discrete state, so it only needs sending when it flips, and
+    // the volume itself only needs to be right once per frame - nobody can
+    // hear an intermediate value that is replaced 16ms later.
+    if (muteChanged) controls?.setMute?.(nextMuted);
+
+    pendingVolumeRef.current = clamped;
+    if (volumeFrameRef.current !== null) return;
+    volumeFrameRef.current = requestAnimationFrame(() => {
+      volumeFrameRef.current = null;
+      const pending = pendingVolumeRef.current;
+      if (pending === null) return;
+      pendingVolumeRef.current = null;
+      const provider = activeProviderRef.current;
+      if (!provider) return;
+      providerControlsRef.current[provider]?.setVolume?.(pending);
+    });
   }, []);
 
   const toggleMute = useCallback(() => {
