@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlayer } from '../PlayerContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getValidAccessToken } from '@/services/spotifyAuthService';
@@ -118,6 +118,10 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
   const deviceIdRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const lastTrackIdRef = useRef<string | null>(null);
+  // Which `${playRequestId}:${trackId}` has already been handed to
+  // `PUT /me/player/play`, so a re-run of the setup effect never replays a
+  // track the listener is already partway through.
+  const startedPlayKeyRef = useRef<string | null>(null);
   const volumeRef = useRef<number>(volume);
 
   useEffect(() => {
@@ -139,6 +143,26 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
 
   const shouldAutoplay = useMemo(() => autoplay ?? autoplaySpotify ?? true, [autoplay, autoplaySpotify]);
   const uri = useMemo(() => (providerTrackId ? `spotify:track:${providerTrackId}` : null), [providerTrackId]);
+
+  // Live transport values, mirrored into refs so the setup effect below can
+  // READ them without being RE-RUN by them. The caller passes
+  // autoplay={isPlaying} and the 500ms poll further down writes the SDK's
+  // real paused-state back into that same isPlaying, so every one of these
+  // changes several times a second during ordinary playback. Having them as
+  // effect dependencies meant a full re-setup - transfer playback, then
+  // `PUT /me/player/play` at position_ms - on every such change, which is
+  // what restarted the track from 0:00 over and over. Whether the listener
+  // is currently playing, muted, or has just sought is not a reason to load
+  // a track again; the registered ProviderControls handle all three on the
+  // already-connected player.
+  const shouldAutoplayRef = useRef(shouldAutoplay);
+  const seekToSecRef = useRef(seekToSec);
+  const isMutedRef = useRef(isMuted);
+  useEffect(() => {
+    shouldAutoplayRef.current = shouldAutoplay;
+    seekToSecRef.current = seekToSec;
+    isMutedRef.current = isMuted;
+  }, [shouldAutoplay, seekToSec, isMuted]);
 
   // Register controls even if we end up falling back; PlayerContext expects these for seek/volume.
   useEffect(() => {
@@ -183,6 +207,13 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     });
   }, [provider, registerProviderControls]);
 
+  // Keyed on the track alone. With shouldAutoplay in the dependency list this
+  // ran on every play/pause and on every poll tick that changed isPlaying:
+  // each run called setReady(false), and the SDK's `ready` event only fires
+  // once per device, so nothing ever set it back - "Starting Spotify
+  // playback…" latched on permanently even though playback was connected.
+  // The same runs also reset durationMs to 0, collapsing the seekbar until
+  // the next poll refilled it 500ms later.
   useEffect(() => {
     if (provider !== 'spotify' || !providerTrackId) return;
     setError(null);
@@ -190,9 +221,9 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     setAutoplayBlocked(false);
     updatePlaybackState({
       durationMs: 0,
-      isPlaying: shouldAutoplay,
+      isPlaying: shouldAutoplayRef.current,
     });
-  }, [provider, providerTrackId, shouldAutoplay, updatePlaybackState]);
+  }, [provider, providerTrackId, updatePlaybackState]);
 
   // Once the browser has blocked the automatic /play call, resume from the
   // very next real interaction anywhere on the page rather than requiring
@@ -217,6 +248,57 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
       window.removeEventListener('keydown', resume, { capture: true });
     };
   }, [autoplayBlocked]);
+
+  // Starts the CURRENT play request on the connected device, at most once.
+  // Two callers funnel through it: the setup effect below (the ordinary path,
+  // where a track is opened already playing) and the deferred effect after it
+  // (the listener pressed play before the device was ready, or the track was
+  // opened paused). Both share startedPlayKeyRef, so a track the listener is
+  // already partway through is never yanked back to its start.
+  const startPlaybackOnce = useCallback(
+    async (token: string, deviceId: string) => {
+      if (!uri || !providerTrackId) return;
+      const playKey = `${playRequestId}:${providerTrackId}`;
+      if (startedPlayKeyRef.current === playKey) return;
+      startedPlayKeyRef.current = playKey;
+      lastTrackIdRef.current = providerTrackId;
+
+      // Start where the caller asked - tapping a chorus should land on the
+      // chorus, not at 0:00 with a seek racing the SDK's connect.
+      const seekAtStartSec = seekToSecRef.current;
+      const startMs = seekAtStartSec != null ? Math.max(0, Math.round(seekAtStartSec * 1000)) : 0;
+      const playRes = await spotifyApiFetch(token, `/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ uris: [uri], position_ms: startMs }),
+      });
+
+      if (!playRes.ok && playRes.status !== 204) {
+        const details = await playRes.json().catch(() => null);
+        console.warn('[Spotify Web Player] play failed', playRes.status, details);
+        // Release the key so a later attempt can retry: this request never
+        // actually started, so treating it as started would strand the track.
+        startedPlayKeyRef.current = null;
+        // A 403 here is almost always the app's Spotify Developer Dashboard
+        // being in Development Mode, which restricts the API to an explicit
+        // allow-list of accounts regardless of whether the listener actually
+        // has Premium - surface that concretely rather than a bare status
+        // code, since "Using preview mode" alone gives the listener nothing
+        // they can act on.
+        if (playRes.status === 403) {
+          setError(
+            'Spotify playback not permitted (403). Using preview mode. If this account should have full access, add it under the Spotify Developer Dashboard → your app → Users and Access.'
+          );
+        }
+        return;
+      }
+
+      if (seekAtStartSec != null) {
+        // The start position was applied by the play call itself.
+        clearSeek();
+      }
+    },
+    [uri, providerTrackId, playRequestId, clearSeek]
+  );
 
   useEffect(() => {
     if (provider !== 'spotify' || !providerTrackId) return;
@@ -251,7 +333,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
 
           const instance: SpotifyPlayerInstance = new PlayerCtor({
             name: 'Clade Player',
-            volume: isMuted ? 0 : volumeRef.current,
+            volume: isMutedRef.current ? 0 : volumeRef.current,
             getOAuthToken: async (cb: (t: string) => void) => {
               const next = await getToken();
               if (next) cb(next);
@@ -317,52 +399,37 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
         };
 
         const deviceId = await waitForDevice();
+        if (cancelled) return;
         if (!deviceId) {
           setError('Spotify device not ready. Using preview mode.');
           return;
         }
+        // The SDK's own `ready` event fires once per player instance, and the
+        // player is only constructed for the FIRST track (see `if
+        // (!playerRef.current)` above). Every later track therefore had its
+        // ready flag cleared by the reset effect with no event left to raise
+        // it again, latching "Starting Spotify playback…" on for the rest of
+        // the session while playback was in fact fine. Having a live device
+        // id in hand is the same fact that event reports, so report it here.
+        setReady(true);
 
         // Transfer playback to this device (required before play calls work reliably).
         const transfer = await spotifyApiFetch(token, '/me/player', {
           method: 'PUT',
           body: JSON.stringify({ device_ids: [deviceId], play: false }),
         });
+        if (cancelled) return;
         if (!transfer.ok && transfer.status !== 204) {
           const details = await transfer.json().catch(() => null);
           console.warn('[Spotify Web Player] transfer failed', transfer.status, details);
         }
 
-        // Play the requested track. Keyed on the play request rather than the
-        // track id alone, so asking for the same track again restarts it.
-        if (uri && shouldAutoplay) {
-          lastTrackIdRef.current = providerTrackId;
-          // Start where the caller asked - tapping a chorus should land on the
-          // chorus, not at 0:00 with a seek racing the SDK's connect.
-          const startMs = seekToSec != null ? Math.max(0, Math.round(seekToSec * 1000)) : 0;
-          {
-            const playRes = await spotifyApiFetch(token, `/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
-              method: 'PUT',
-              body: JSON.stringify({ uris: [uri], position_ms: startMs }),
-            });
-            if (!playRes.ok && playRes.status !== 204) {
-              const details = await playRes.json().catch(() => null);
-              console.warn('[Spotify Web Player] play failed', playRes.status, details);
-              // A 403 here is almost always the app's Spotify Developer
-              // Dashboard being in Development Mode, which restricts the API
-              // to an explicit allow-list of accounts regardless of whether
-              // the listener actually has Premium - surface that concretely
-              // rather than a bare status code, since "Using preview mode"
-              // alone gives the listener nothing they can act on.
-              if (playRes.status === 403) {
-                setError(
-                  'Spotify playback not permitted (403). Using preview mode. If this account should have full access, add it under the Spotify Developer Dashboard → your app → Users and Access.'
-                );
-              }
-            } else if (seekToSec != null) {
-              // The start position was applied by the play call itself.
-              clearSeek();
-            }
-          }
+        // Play the requested track, if the listener actually wants it playing
+        // right now. startPlaybackOnce is what keeps a re-run of this effect
+        // from replaying a track that is already partway through.
+        if (shouldAutoplayRef.current) {
+          await startPlaybackOnce(token, deviceId);
+          if (cancelled) return;
         }
 
         // Poll playback state for seekbar sync.
@@ -397,7 +464,39 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     return () => {
       cancelled = true;
     };
-  }, [isMuted, playRequestId, provider, providerTrackId, seekToSec, shouldAutoplay, uri, updatePlaybackState, user, clearSeek]);
+    // Deliberately narrow: only a different track, a new play request, a
+    // different signed-in user, or a provider switch is a reason to tear down
+    // and set the SDK up again. Mute/seek/isPlaying are read from the refs
+    // above instead - see the comment where they're declared. `user` is keyed
+    // by id rather than by object identity so a background token refresh,
+    // which hands back an equal-but-new User object, doesn't restart playback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playRequestId, provider, providerTrackId, uri, user?.id, updatePlaybackState, startPlaybackOnce]);
+
+  // A play press that arrived before the device was ready, and the case of a
+  // track opened paused. ProviderControls.play() calls player.resume(), which
+  // does nothing on a device that has never been handed this track, and the
+  // setup effect above deliberately no longer re-runs when shouldAutoplay
+  // flips (that re-run WAS the restart loop). So the first real start for a
+  // given play request lands here instead - once, behind the same
+  // startedPlayKeyRef, and only while the listener still wants it playing.
+  useEffect(() => {
+    if (provider !== 'spotify' || !providerTrackId || !uri || !user) return;
+    if (isTestEnv) return;
+    if (!shouldAutoplay || !ready) return;
+    const deviceId = deviceIdRef.current;
+    if (!deviceId) return;
+
+    let cancelled = false;
+    void (async () => {
+      const token = await getValidAccessToken(user.id);
+      if (cancelled || !token) return;
+      await startPlaybackOnce(token, deviceId);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, providerTrackId, uri, user, shouldAutoplay, ready, startPlaybackOnce]);
 
   useEffect(() => {
     if (provider !== 'spotify') return;
