@@ -111,7 +111,16 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const resolvedTitle = trackTitle ?? lastKnownTitle ?? '';
   const resolvedArtist = trackArtist ?? lastKnownArtist ?? '';
   const safeMs = (value: number) => (Number.isFinite(value) ? Math.max(0, value) : 0);
-  const durationMsSafe = safeMs(durationMs);
+  // The live embed itself never reports a duration at all for YouTube or a
+  // guest/non-Premium Spotify preview (no public API surface for it - see
+  // universal-player.html) - previously that meant hasDuration below stayed
+  // permanently false for those, which not only showed "--:--" but disabled
+  // the seekbar outright and pinned its value at 0 regardless of real
+  // position, for the entire duration of every such track. The catalog's
+  // own known length doesn't depend on which embed is playing it, so it's
+  // used as a fallback whenever the live value is unavailable - real data,
+  // just sourced differently, and a functioning seekbar beats a disabled one.
+  const durationMsSafe = safeMs(durationMs) || safeMs(harmony.catalogDurationMs ?? 0);
 
   // Use animated seekbar for smooth visual updates
   const animatedPositionMs = useAnimatedSeekbar(safeMs(positionMs), durationMsSafe, isPlaying);

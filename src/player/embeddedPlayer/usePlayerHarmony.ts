@@ -16,6 +16,10 @@ export interface PlayerHarmony {
   /** Bars in one cycle of `progression` - lets the chord-rotation heuristic
    *  derive how many beats each chord actually holds instead of assuming 4. */
   loopLengthBars: number | undefined;
+  /** The catalog's own known duration - independent of whatever (if
+   *  anything) the live embed itself reports. See its use in
+   *  EmbeddedPlayerDrawer for why that distinction matters. */
+  catalogDurationMs: number | undefined;
 }
 
 /**
@@ -64,6 +68,7 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
       progression,
       bpm: typeof track?.tempo === 'number' ? track.tempo : undefined,
       loopLengthBars: typeof track?.loop_length_bars === 'number' ? track.loop_length_bars : undefined,
+      catalogDurationMs: typeof (track as any)?.duration_ms === 'number' ? (track as any).duration_ms : undefined,
     };
   }, [fingerprintQuery.data, trackQuery.data]);
 
