@@ -46,7 +46,14 @@ export function TrackCard({
   const playStartTimeRef = useRef<number | null>(null);
   const recordActivity = useRecordListeningActivity();
   const recordPlay = useRecordPlay();
-  const { openPlayer } = usePlayer();
+  const { openPlayer, canonicalTrackId: dockedTrackId } = usePlayer();
+  // The docked player (EmbeddedPlayerDrawer) is fixed to the bottom of every
+  // route and shows its own HarmonicHUD for whatever track is loaded into
+  // it, live-synced to real playback - strictly more useful than this
+  // card's own static progression teaser for that one specific track. Once
+  // both existed, whichever card happened to be the one currently playing
+  // showed the exact same chord progression twice on screen at once.
+  const isDockedTrack = dockedTrackId === track.id;
   const { data: comments } = useTrackComments(track.id);
   const commentCount = comments?.length || 0;
   const coverUrl = useTrackCoverArt(track);
@@ -367,8 +374,10 @@ export function TrackCard({
           />
         </motion.div>
 
-        {/* Harmony card */}
-        {track.progression_roman && track.progression_roman.length > 0 && (
+        {/* Harmony card - suppressed for whichever track is loaded in the
+            docked player, since that already shows the same progression
+            (see isDockedTrack above). */}
+        {track.progression_roman && track.progression_roman.length > 0 && !isDockedTrack && (
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
