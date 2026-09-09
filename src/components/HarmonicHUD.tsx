@@ -160,8 +160,19 @@ export function HarmonicHUD({
 
   const orderedSections = [...(effectiveSections ?? [])].sort((a, b) => a.start_time - b.start_time);
 
+  // Deliberately not glass-strong (hsl(240 10% 8% / 0.85)) like the rest of
+  // the app's panels: this one sits directly over the video/player surface,
+  // and at 85% opacity it read as a solid slab covering what is playing. Same
+  // blur for legibility, but the fill is under half opaque so the artwork
+  // behind stays visible through it.
   return (
-    <div className={cn('relative w-full min-w-0 rounded-2xl glass-strong overflow-hidden', className)}>
+    <div
+      className={cn(
+        'relative w-full min-w-0 overflow-hidden rounded-2xl border border-white/10',
+        'glass-faint',
+        className
+      )}
+    >
       {/* Stanza selector. Named, thumb-sized and horizontal: picking one here
           changes the chords below, and it stays in step with the section chips
           above the card through the shared selection context. */}
@@ -204,7 +215,7 @@ export function HarmonicHUD({
       {/* Dominant center readout. When live audio detection is capturing, its
           result overrides the analyzed display - the whole point is to show
           what's genuinely being heard right now. */}
-      <div className="flex flex-col items-center justify-center py-4 sm:py-5 px-4 sm:px-5">
+      <div className="flex flex-col items-center justify-center py-2 sm:py-2.5 px-3 sm:px-4">
         <AnimatePresence mode="wait">
           {live.status === 'capturing' ? (
             <motion.div
@@ -217,7 +228,7 @@ export function HarmonicHUD({
             >
               <span
                 className="block font-extrabold leading-none tracking-tight"
-                style={{ fontSize: 'clamp(2.25rem, 11vw, 3.5rem)' }}
+                style={{ fontSize: 'clamp(1.5rem, 7vw, 2.25rem)' }}
               >
                 {live.chord
                   ? `${pitchClassName(live.chord.root)}${live.chord.quality === 'minor' ? 'm' : ''}`
@@ -240,7 +251,7 @@ export function HarmonicHUD({
               <span
                 className="block font-extrabold leading-none tracking-tight"
                 style={{
-                  fontSize: 'clamp(2.25rem, 11vw, 3.5rem)',
+                  fontSize: 'clamp(1.5rem, 7vw, 2.25rem)',
                   color: current ? `hsl(var(${CHORD_VAR[current.base] ?? '--chord-i'}))` : undefined,
                 }}
               >

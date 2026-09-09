@@ -158,6 +158,16 @@
     border: 1px solid hsl(0 0% 100% / 0.15);
   }
 
+  /* Same treatment as .glass-strong, but the fill is under half opaque so
+     whatever sits behind stays visible through it. For panels that overlay
+     playing content (the chord readout sits directly over the video), where
+     .glass-strong reads as a solid slab covering it. */
+  .glass-faint {
+    background: hsl(240 10% 8% / 0.45);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid hsl(0 0% 100% / 0.1);
+  }
+
   /* Gradient text */
   .gradient-text {
     background: var(--gradient-harmony);
