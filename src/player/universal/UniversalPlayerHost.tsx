@@ -184,19 +184,17 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
         </div>
       )}
 
-      {request?.provider === 'spotify' && request?.id && (
-        <div className="mt-2 text-[11px] text-white/55">
-          If Spotify only plays a preview, open in Spotify to confirm sign-in, then retry:{' '}
-          <a
-            href={buildProviderDeepLink('spotify', request.id)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline underline-offset-2 hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-          >
-            Open in Spotify
-          </a>
-        </div>
-      )}
+      {/* A "confirm sign-in" hint used to render here unconditionally for
+          every Spotify request through this fallback path - regardless of
+          whether anything was actually wrong, and with no awareness of the
+          app's own auth/connection state, so it showed identically for
+          guests, signed-out users, and already-connected accounts alike.
+          Removed rather than gated: this component has no real signal that
+          playback is actually preview-only (that's a fact about the loaded
+          iframe's own internal state, not observable from here), so there
+          was no condition to attach that wouldn't just be "always" again.
+          The genuine failure case (no embed at all) already has its own
+          message just above, in showFallback. */}
     </div>
   );
 }
