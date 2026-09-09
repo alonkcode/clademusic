@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Home, Search, User, ListMusic, MessageSquare, Menu } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -19,15 +20,27 @@ const navItems = [
 
 export function BottomNav() {
   const location = useLocation();
+  const [open, setOpen] = useState(false);
 
   return (
     <div className="fixed top-0 left-0 z-[70] p-3 md:p-4">
-      <Sheet>
+      <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
-            className="h-10 w-10 rounded-full border border-border/60 bg-background/80 backdrop-blur"
+            // The sheet's own header (CladeMark + "Navigate") renders directly
+            // over this exact spot once open, but its logo is an unfilled,
+            // thin-stroke SVG - mostly transparent pixels - so this button
+            // stayed fully visible AND clickable right through it, looking
+            // like a second, confusing hamburger icon sitting inside the
+            // menu itself. It's still a real, focusable button underneath
+            // (screen readers/tab order unaffected); just not painted or
+            // hit-testable while what it opens is already open.
+            className={cn(
+              'h-10 w-10 rounded-full border border-border/60 bg-background/80 backdrop-blur transition-opacity',
+              open && 'opacity-0 pointer-events-none'
+            )}
             aria-label="Open navigation"
           >
             <Menu className="w-5 h-5" />
