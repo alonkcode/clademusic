@@ -8,10 +8,15 @@
 import type { TrackSection, SongSectionType } from '@/types';
 
 /**
- * Convert section start time from milliseconds to seconds (for player APIs)
+ * Convert section start time from milliseconds to seconds (for player APIs).
+ * Not floored: a real analyzed boundary is rarely an exact whole second, and
+ * truncating it seeks to a point just before the section actually starts -
+ * enough to land back inside the previous section's own window once the
+ * player reports the new position, which is what made every section chip
+ * but the first (already an exact 0:00) highlight the one before it.
  */
 export function sectionStartSeconds(section: TrackSection): number {
-  return Math.floor(section.start_ms / 1000);
+  return section.start_ms / 1000;
 }
 
 /**

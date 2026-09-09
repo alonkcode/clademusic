@@ -256,7 +256,10 @@ export default function TrackDetailPage() {
   }
 
   function handleSectionClick(section: TrackSection) {
-    const startSeconds = Math.floor(section.start_ms / 1000);
+    // Not floored - see sectionStartSeconds in lib/sections.ts for why that
+    // truncation is exactly what caused section chips to highlight the one
+    // before whatever was actually clicked.
+    const startSeconds = section.start_ms / 1000;
     
     // Always play sections on YouTube
     if (track?.youtube_id) {
@@ -512,7 +515,7 @@ export default function TrackDetailPage() {
                                     provider: 'youtube',
                                     providerTrackId: (videoSources && videoSources[0]?.videoId) || track.youtube_id!,
                                     autoplay: true,
-                                    startSec: Math.floor(section.start_ms / 1000),
+                                    startSec: section.start_ms / 1000,
                                     context: 'section-snippet',
                                     title: track.title,
                                     artist: track.artist,

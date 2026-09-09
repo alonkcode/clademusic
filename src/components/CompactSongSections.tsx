@@ -76,7 +76,14 @@ export function CompactSongSections({
     // controls always describe the same part of the song.
     selection?.select(index);
 
-    const startSeconds = Math.floor(section.start_ms / 1000);
+    // Not Math.floor()'d: a real analyzed boundary is rarely an exact whole
+    // second (e.g. 21437ms), and truncating it down to 21s seeks to a point
+    // BEFORE the section actually starts - just enough earlier that the
+    // section-highlight logic below (and useActiveSection's, for the docked
+    // player) puts the position back inside the PREVIOUS section's window,
+    // so every section chip but the first (already at a whole-number 0:00)
+    // highlighted the one before whatever was actually clicked.
+    const startSeconds = section.start_ms / 1000;
 
     // Is this track the one already playing, and where? Compare on normalised
     // ids: the player may hold a URI or a URL where the track row holds a bare
@@ -125,8 +132,14 @@ export function CompactSongSections({
         const colorClass = SECTION_COLORS[section.label] || 'bg-muted/20 text-muted-foreground border-muted/30';
         
         // Highlight active section: explicit currentSectionId match OR
-        // fallback to position-based highlighting when currentSectionId is null
-        const isLastSection = index === sections.length - 1;
+        // fallback to position-based highlighting when currentSectionId is
+        // null. The fallback scans for the LAST section whose start has
+        // already passed rather than checking positionMs against this one
+        // section's own [start_ms, end_ms) window - real analyzed
+        // boundaries aren't always perfectly contiguous, and an exact
+        // per-section window check picks the wrong section wherever two
+        // overlap even slightly (see useActiveSection.ts for the same fix
+        // applied to the docked player's own section chips).
         // positionMs/currentSectionId belong to whatever the global player has
         // loaded, not necessarily this card's track - comparing them against
         // this card's own section timestamps without checking that first is
@@ -137,7 +150,7 @@ export function CompactSongSections({
         const isPlayingThisSection = isThisTrackLive && (
           currentSectionId === section.id ||
           (currentSectionId === null && positionMs >= section.start_ms &&
-           (isLastSection ? positionMs <= section.end_ms : positionMs < section.end_ms))
+           (index === sections.length - 1 || positionMs < sections[index + 1].start_ms))
         );
         const isActive = isThisTrackLive
           ? isPlayingThisSection
