@@ -49,7 +49,10 @@ export function TrackSections({ trackId }: TrackSectionsProps) {
     setLoading(true);
     try {
       const data = await getTrackSections(trackId);
-      setSections(data);
+      // Defensively sorted rather than trusted as already ordered (matches
+      // usePlayerHarmony's own re-sort of the same underlying data) - the
+      // "last section that started" highlight check below depends on it.
+      setSections([...data].sort((a, b) => a.start_ms - b.start_ms));
     } catch (err) {
       console.error('Failed to load track sections', err);
     } finally {
@@ -66,11 +69,18 @@ export function TrackSections({ trackId }: TrackSectionsProps) {
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
         {sections.map((section, index) => {
           // Highlight active section: explicit currentSectionId match OR
-          // fallback to position-based highlighting when currentSectionId is null
-          const isLastSection = index === sections.length - 1;
-          const active = currentSectionId === section.id || 
-            (currentSectionId === null && positionMs >= section.start_ms && 
-             (isLastSection ? positionMs <= section.end_ms : positionMs < section.end_ms));
+          // fallback to position-based highlighting when currentSectionId is
+          // null. The fallback scans for the LAST section whose start has
+          // already passed, rather than checking positionMs against this
+          // one section's own [start_ms, end_ms) window - real analyzed
+          // boundaries aren't always perfectly contiguous, and an exact
+          // per-section window check picks the wrong section wherever two
+          // overlap even slightly (see useActiveSection.ts for the same fix
+          // applied to the docked player's own section chips).
+          const active = currentSectionId === section.id ||
+            (currentSectionId === null &&
+              positionMs >= section.start_ms &&
+              (index === sections.length - 1 || positionMs < sections[index + 1].start_ms));
 
           return (
             <button
