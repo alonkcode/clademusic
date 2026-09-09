@@ -10,8 +10,14 @@ export interface UseSectionSyncOptions {
   sections?: SongSection[];
   detectedMode?: 'major' | 'minor' | 'unknown';
   bpm?: number;
-  /** Beats per chord in the base loop. Matches useHarmonicLoop's default. */
+  /** Beats per chord in the base loop. Matches useHarmonicLoop's default.
+   *  Ignored whenever loopLengthBars is available - see there. */
   beatsPerChord?: number;
+  /** Bars in one full cycle of `progression`, e.g. 4 chords over a 4-bar
+   *  loop = 1 bar (4 beats in 4/4) per chord, but an 8-bar loop with the
+   *  same 4 chords means each one actually holds for 2 bars (8 beats) - a
+   *  fixed beatsPerChord guess can't tell those apart. */
+  loopLengthBars?: number;
 }
 
 export interface UseSectionSyncResult {
@@ -51,6 +57,7 @@ export function useSectionSync({
   detectedMode,
   bpm,
   beatsPerChord = 4,
+  loopLengthBars,
 }: UseSectionSyncOptions): UseSectionSyncResult {
   const { canonicalTrackId, isPlaying, positionMs, seekTo } = usePlayer();
   // The section chips above the card and this readout must agree, so the
@@ -90,18 +97,43 @@ export function useSectionSync({
 
   const activeSection = orderedSections[activeSectionIndex] ?? null;
 
+  // A section that was actually analyzed/curated with its own chords takes
+  // priority over the generic songwriting-convention variant below - that
+  // variant exists ONLY because "Clade's analysis pipeline stores one
+  // progression per track today" (see sectionVariant's own docstring); a
+  // section that already has real per-section chords isn't in that boat.
   const sectionProgression = useMemo(() => {
+    if (activeSection?.chords && activeSection.chords.length > 0) return activeSection.chords;
     if (!activeSection) return progression;
     return sectionVariant(progression, activeSection.type, detectedMode === 'minor' ? 'minor' : 'major');
   }, [progression, activeSection, detectedMode]);
 
   const liveChordIndex = useMemo(() => {
     if (!isLiveSynced || !activeSection || sectionProgression.length === 0) return 0;
-    const secondsPerChord = (60 / (bpm || DEFAULT_BPM)) * beatsPerChord;
-    const elapsed = positionMs / 1000 - activeSection.start_time;
-    const idx = Math.floor(Math.max(elapsed, 0) / secondsPerChord) % sectionProgression.length;
-    return idx;
-  }, [isLiveSynced, activeSection, sectionProgression, bpm, beatsPerChord, positionMs]);
+    const elapsedMs = positionMs - activeSection.start_time * 1000;
+
+    // Real per-chord timestamps, when this section was actually analyzed
+    // with them - the last one whose timestamp has passed. Exact, not a
+    // guess, and the only path that can never drift out of sync.
+    const timings = activeSection.chord_timings;
+    if (timings && timings.length === sectionProgression.length) {
+      for (let i = timings.length - 1; i >= 0; i--) {
+        if (elapsedMs >= timings[i]) return i;
+      }
+      return 0;
+    }
+
+    // No per-chord timing for this section: fall back to a fixed
+    // beats-per-chord guess, at least sized correctly when the track's own
+    // loop_length_bars is known - the progression cycles loopLengthBars
+    // worth of bars across its own length, e.g. 4 chords over an 8-bar loop
+    // means each one holds for 2 bars (8 beats), not the flat default of 4.
+    const effectiveBeatsPerChord =
+      loopLengthBars && progression.length > 0 ? (loopLengthBars * 4) / progression.length : beatsPerChord;
+    const secondsPerChord = (60 / (bpm || DEFAULT_BPM)) * effectiveBeatsPerChord;
+    const elapsed = elapsedMs / 1000;
+    return Math.floor(Math.max(elapsed, 0) / secondsPerChord) % sectionProgression.length;
+  }, [isLiveSynced, activeSection, sectionProgression, bpm, beatsPerChord, loopLengthBars, progression.length, positionMs]);
 
   const selectSection = (index: number) => {
     const clamped = Math.max(0, Math.min(index, orderedSections.length - 1));

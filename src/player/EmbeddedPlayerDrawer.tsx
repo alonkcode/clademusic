@@ -217,6 +217,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               detectedKey={harmony.detectedKey ?? undefined}
               detectedMode={harmony.detectedMode ?? undefined}
               bpm={harmony.bpm}
+              loopLengthBars={harmony.loopLengthBars}
               sections={hudSections}
             />
 

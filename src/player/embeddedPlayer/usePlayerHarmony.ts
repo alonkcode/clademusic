@@ -13,6 +13,9 @@ export interface PlayerHarmony {
   confidenceScore: number | null;
   progression: string[];
   bpm: number | undefined;
+  /** Bars in one cycle of `progression` - lets the chord-rotation heuristic
+   *  derive how many beats each chord actually holds instead of assuming 4. */
+  loopLengthBars: number | undefined;
 }
 
 /**
@@ -60,6 +63,7 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
       confidenceScore,
       progression,
       bpm: typeof track?.tempo === 'number' ? track.tempo : undefined,
+      loopLengthBars: typeof track?.loop_length_bars === 'number' ? track.loop_length_bars : undefined,
     };
   }, [fingerprintQuery.data, trackQuery.data]);
 
@@ -69,9 +73,20 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
   // stays mounted across every route, so that was the whole reason chords
   // never showed up anywhere except the feed. sections needs converting: HUD
   // takes seconds (SongSection), this component's own sections are
-  // milliseconds (TrackSection, from track_sections).
+  // milliseconds (TrackSection, from track_sections). chords/chord_timings
+  // (a section's own real, per-chord-analyzed progression, when curated)
+  // are carried over too - dropping them here silently forced every section
+  // onto the generic bpm/beats-per-chord guess in useSectionSync even for a
+  // track that actually had real per-chord timing.
   const hudSections: SongSection[] = useMemo(
-    () => sections.map((s) => ({ type: s.label, start_time: s.start_ms / 1000, end_time: s.end_ms / 1000 })),
+    () =>
+      sections.map((s) => ({
+        type: s.label,
+        start_time: s.start_ms / 1000,
+        end_time: s.end_ms / 1000,
+        chords: s.chords,
+        chord_timings: s.chord_timings,
+      })),
     [sections]
   );
 

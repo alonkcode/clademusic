@@ -390,6 +390,7 @@ export function TrackCard({
               cadenceType={track.cadence_type}
               confidenceScore={track.confidence_score}
               bpm={track.tempo}
+              loopLengthBars={track.loop_length_bars}
               trackId={track.id}
               sections={track.sections}
               matchReason="Same vi–IV–I–V loop with similar energy"
