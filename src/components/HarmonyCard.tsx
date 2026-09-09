@@ -12,6 +12,8 @@ interface HarmonyCardProps {
   matchReason?: string;
   /** Track tempo in BPM - the loop plays at the song's own pace when known. */
   bpm?: number;
+  /** Bars in one full cycle of `progression` - see useSectionSync. */
+  loopLengthBars?: number;
   /** Needed to detect when this exact track is the one actually playing. */
   trackId?: string;
   /** Section timestamps - enables the section rail and per-section variants. */
@@ -34,6 +36,7 @@ export function HarmonyCard({
   confidenceScore,
   matchReason,
   bpm,
+  loopLengthBars,
   trackId,
   sections,
 }: HarmonyCardProps) {
@@ -65,6 +68,7 @@ export function HarmonyCard({
         detectedKey={detectedKey}
         detectedMode={detectedMode}
         bpm={bpm}
+        loopLengthBars={loopLengthBars}
         sections={sections}
       />
 

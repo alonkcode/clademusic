@@ -23,6 +23,8 @@ interface HarmonicHUDProps {
   detectedKey?: string;
   detectedMode?: 'major' | 'minor' | 'unknown';
   bpm?: number;
+  /** Bars in one full cycle of `progression` - see useSectionSync. */
+  loopLengthBars?: number;
   sections?: SongSection[];
   className?: string;
 }
@@ -59,6 +61,7 @@ export function HarmonicHUD({
   detectedKey,
   detectedMode,
   bpm,
+  loopLengthBars,
   sections,
   className,
 }: HarmonicHUDProps) {
@@ -136,6 +139,7 @@ export function HarmonicHUD({
     sections: effectiveSections,
     detectedMode,
     bpm,
+    loopLengthBars,
   });
 
   const loop = useHarmonicLoop({
