@@ -7,6 +7,7 @@ export const additionalHistoricalTracks: Track[] = [
   // 1. The Carter Family - "Can the Circle Be Unbroken" (1927) - Foundation of country music
   {
     id: 'additional-1',
+    youtube_id: 'YJfQTKbx8vY',
     external_id: 'historical:Can the Circle Be Unbroken:The Carter Family',
     title: 'Can the Circle Be Unbroken',
     artist: 'The Carter Family',

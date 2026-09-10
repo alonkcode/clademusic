@@ -1189,6 +1189,7 @@ const rawSeedTracks: SeedTrack[] = [
   // === Common Ancestors: Foundational Tracks (1920s-1970s) ===
   {
     id: 'seed-ancestor-1',
+    youtube_id: 'nvLuCm2kSDE',
     external_id: 'historical:track:1',
     provider: 'youtube',
     title: 'Crazy Blues',
@@ -1213,6 +1214,7 @@ const rawSeedTracks: SeedTrack[] = [
   },
   {
     id: 'seed-ancestor-2',
+    youtube_id: 'XkOSCQyRJsE',
     external_id: 'historical:track:2',
     provider: 'youtube',
     title: 'West End Blues',
@@ -1237,6 +1239,7 @@ const rawSeedTracks: SeedTrack[] = [
   },
   {
     id: 'seed-ancestor-3',
+    youtube_id: '649wWWkW_1o',
     external_id: 'historical:track:3',
     provider: 'youtube',
     title: 'Strange Fruit',
@@ -1261,6 +1264,7 @@ const rawSeedTracks: SeedTrack[] = [
   },
   {
     id: 'seed-ancestor-4',
+    youtube_id: '54R4ak69ItE',
     external_id: 'historical:track:4',
     provider: 'spotify',
     title: 'Rocket 88',
@@ -1332,6 +1336,7 @@ const rawSeedTracks: SeedTrack[] = [
   },
   {
     id: 'seed-ancestor-7',
+    youtube_id: 'QXw6YZltKJk',
     external_id: 'historical:track:7',
     provider: 'youtube',
     title: 'Funky Drummer',
@@ -1380,6 +1385,7 @@ const rawSeedTracks: SeedTrack[] = [
   },
   {
     id: 'seed-ancestor-9',
+    youtube_id: '-Udnb6F1A0g',
     external_id: 'historical:track:9',
     provider: 'youtube',
     title: 'Apache',
@@ -1404,6 +1410,7 @@ const rawSeedTracks: SeedTrack[] = [
   },
   {
     id: 'seed-ancestor-10',
+    youtube_id: 'wVycUX1y0XE',
     external_id: 'historical:track:10',
     provider: 'youtube',
     title: 'Impeach the President',
