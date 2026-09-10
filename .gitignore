@@ -11,6 +11,10 @@ dist
 dist-ssr
 *.local
 
+# Bun writes the new lockfile to .lockb-<hash>.tmp and renames it into place;
+# an interrupted install leaves the scratch file behind.
+.lockb-*.tmp
+
 # Environment variables
 .env
 .env.local
