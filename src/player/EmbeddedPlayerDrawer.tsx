@@ -20,6 +20,7 @@ import { usePlayerHarmony } from './embeddedPlayer/usePlayerHarmony';
 import { useActiveSection } from './embeddedPlayer/useActiveSection';
 import { usePlayerLayout } from './embeddedPlayer/usePlayerLayout';
 import { useTransportControls } from './embeddedPlayer/useTransportControls';
+import { BeatIndicator } from './embeddedPlayer/BeatIndicator';
 import { useDevPlayerInvariants } from './embeddedPlayer/useDevInvariants';
 
 type EmbeddedPlayerDrawerProps = {
@@ -340,7 +341,13 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                  surface for Spotify when SDK playback isn't available
                  (guest, non-Premium, or an SDK error). */
               <div className="mt-3 flex justify-center">
-                <div className="relative w-full max-w-sm overflow-hidden rounded-xl bg-black/80 aspect-video">
+                {/* No fixed aspect-video / black fill here any more: this box
+                    wrapped every provider, so a Spotify track (an audio widget
+                    ~152px tall) and an idle player with nothing loaded both got
+                    a full 16:9 black rectangle. UniversalPlayerHost now sizes
+                    itself to whatever it is actually showing, and collapses to
+                    nothing when idle. */}
+                <div className="relative w-full max-w-sm overflow-hidden rounded-xl">
                   <UniversalPlayerHost
                     request={
                       provider && trackId
@@ -415,6 +422,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               <SkipForward className="h-4 w-4" />
             </button>
           </div>
+
+          {/* Tempo, as a dot flashing on each beat next to the number. Sits
+              with the transport rather than in the details panel so the beat
+              is visible while the panel is collapsed, which is most of the
+              time. Renders nothing at all for a track with no analyzed
+              tempo. Hidden below sm: the bar is already tight there, and the
+              seekbar has a hard minimum width it must not lose. */}
+          <BeatIndicator
+            bpm={harmony.bpm}
+            positionMs={authoritativePositionMs}
+            isPlaying={isPlaying}
+            className="hidden sm:flex"
+          />
 
           {/* Seekbar - takes the remaining space, like Spotify's own bar.
               min-w-[130px] is a real floor (time label + seek track + time
