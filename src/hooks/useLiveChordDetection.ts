@@ -7,6 +7,13 @@ import {
   type DetectedChord,
 } from '@/lib/harmony/chordDetection';
 import { detectSections, type ChromaFrame, type DetectedSection } from '@/lib/harmony/sectionDetection';
+import {
+  ChordTimeline,
+  sectionProgressions as buildSectionProgressions,
+  type ChordSpan,
+  type SectionProgression,
+} from '@/lib/harmony/chordTimeline';
+import { estimateKey, type KeyEstimate } from '@/lib/harmony/keyEstimation';
 import { usePlayer } from '@/player/PlayerContext';
 
 export type LiveDetectionStatus = 'idle' | 'requesting' | 'capturing' | 'unsupported' | 'error';
@@ -15,13 +22,25 @@ export interface UseLiveChordDetectionResult {
   status: LiveDetectionStatus;
   /** null on 'unsupported'/'error', or set once feature-detection has run. */
   supported: boolean | null;
+  /** What is sounding right now - transient, cleared when capture ends. */
   chord: DetectedChord | null;
   errorMessage: string | null;
   /** Section boundaries found so far in this capture - grows and refines as
    *  more audio comes in; empty until enough has accumulated to say anything. */
   detectedSections: DetectedSection[];
+  /** Every chord heard, with the time it was held for. Unlike `chord` this
+   *  accumulates rather than being overwritten, so it survives the capture. */
+  chordSpans: ChordSpan[];
+  /** Each detected section paired with the chords heard inside it, and the
+   *  loop they reduce to - the verse and the chorus get their own. */
+  sectionProgressions: SectionProgression[];
+  /** Tonic and mode inferred from the chords heard, which is what lets the
+   *  absolute triads the detector produces be written as Roman numerals. */
+  detectedKey: KeyEstimate | null;
   start: () => Promise<void>;
   stop: () => void;
+  /** Throw away the accumulated analysis. Stopping a capture keeps it. */
+  reset: () => void;
 }
 
 const FFT_SIZE = 8192; // higher resolution than the default 2048, for cleaner low-note bins
@@ -29,6 +48,9 @@ const TICK_MS = 120;
 /** Re-running the self-similarity segmentation on every 120ms chord tick
  *  would be wasted work - boundaries don't need to update that often. */
 const SECTION_RECOMPUTE_MS = 3000;
+/** Ceiling on the self-similarity matrix's side length - see recomputeAnalysis.
+ *  300 keeps it under 100k cells (a few hundred KB) however long the capture. */
+const MAX_SECTION_BUCKETS = 300;
 
 /**
  * Detects the chord in whatever audio the browser lets the user share -
@@ -52,11 +74,15 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   const [chord, setChord] = useState<DetectedChord | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [detectedSections, setDetectedSections] = useState<DetectedSection[]>([]);
+  const [chordSpans, setChordSpans] = useState<ChordSpan[]>([]);
+  const [sectionProgressions, setSectionProgressions] = useState<SectionProgression[]>([]);
+  const [detectedKey, setDetectedKey] = useState<KeyEstimate | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const smootherRef = useRef(new ChordSmoother());
+  const timelineRef = useRef(new ChordTimeline());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chromaHistoryRef = useRef<ChromaFrame[]>([]);
@@ -77,6 +103,62 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
     typeof navigator !== 'undefined' &&
     typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
+  /** Re-derive everything downstream of the raw frames captured so far. */
+  const recomputeAnalysis = useCallback(() => {
+    const frames = chromaHistoryRef.current;
+
+    // Section detection builds a full self-similarity matrix over its
+    // aggregated buckets, so its cost and its allocation are both quadratic
+    // in the number of buckets - and it runs again every few seconds. At the
+    // default one-second bucket a four-minute song is a 240x240 matrix, which
+    // is nothing, but an hour-long capture would be 3600x3600: roughly 13
+    // million cosine similarities and a hundred megabytes, rebuilt
+    // repeatedly, which would take the tab down.
+    //
+    // Widening the bucket as the capture grows keeps that bounded no matter
+    // how long someone listens. It costs boundary resolution on very long
+    // captures only - a six-second bucket on a half-hour recording is still
+    // far finer than the eight-second minimum section length.
+    let earliest = Infinity;
+    let latest = -Infinity;
+    for (const f of frames) {
+      if (f.timeSec < earliest) earliest = f.timeSec;
+      if (f.timeSec > latest) latest = f.timeSec;
+    }
+    const spannedSec = frames.length > 0 ? Math.max(0, latest - earliest) : 0;
+    const bucketSec = Math.max(1, Math.ceil(spannedSec / MAX_SECTION_BUCKETS));
+
+    const sections = detectSections(frames, { bucketSec });
+    const spans = timelineRef.current.toSpans();
+    setDetectedSections(sections);
+    setChordSpans(spans);
+    setSectionProgressions(buildSectionProgressions(sections, spans));
+    // Estimated from the whole capture rather than per section: a song's key
+    // is a property of the song, and the more of it that has been heard the
+    // better the estimate gets.
+    setDetectedKey(estimateKey(spans));
+  }, []);
+
+  const reset = useCallback(() => {
+    timelineRef.current.reset();
+    chromaHistoryRef.current = [];
+    setChord(null);
+    setDetectedSections([]);
+    setChordSpans([]);
+    setSectionProgressions([]);
+    setDetectedKey(null);
+  }, []);
+
+  /**
+   * Ends the capture and keeps the result.
+   *
+   * Stopping used to wipe the sections and the chord along with the stream, so
+   * the moment a song finished - or the listener clicked Stop - everything
+   * just detected was gone. The analysis is the point of having listened;
+   * only the live "sounding right now" chord and the raw frames are genuinely
+   * transient. The final recompute runs first, so the last few seconds before
+   * the stop are included rather than lost to the 3s recompute cadence.
+   */
   const stop = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
@@ -86,17 +168,21 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
       clearInterval(sectionIntervalRef.current);
       sectionIntervalRef.current = null;
     }
+    if (chromaHistoryRef.current.length > 0) recomputeAnalysis();
+
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     void audioCtxRef.current?.close();
     audioCtxRef.current = null;
     analyserRef.current = null;
     smootherRef.current.reset();
+    // Raw chroma frames are only ever an input to the recompute above, and
+    // there are thousands of them by the end of a song - the derived result
+    // is what's worth keeping.
     chromaHistoryRef.current = [];
     setChord(null);
-    setDetectedSections([]);
     setStatus('idle');
-  }, []);
+  }, [recomputeAnalysis]);
 
   const start = useCallback(async () => {
     if (!supported) {
@@ -146,7 +232,10 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
       // Linear magnitudes: dB output would need a costly conversion per bin
       // per tick for no benefit here, since only relative energy matters.
       const linear = new Float32Array(analyser.frequencyBinCount);
-      chromaHistoryRef.current = [];
+      // A new capture starts from nothing: the previous one's result is kept
+      // until this point precisely so it survives a stop, but merging two
+      // songs' chords into one timeline would be nonsense.
+      reset();
       captureStartedAtRef.current = performance.now();
 
       intervalRef.current = setInterval(() => {
@@ -171,12 +260,14 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
           ? positionMs / 1000
           : (performance.now() - captureStartedAtRef.current) / 1000;
         chromaHistoryRef.current.push({ chroma, timeSec });
+        // The same estimate that drives the live readout, kept this time:
+        // ChordTimeline extends the current span while the chord holds and
+        // closes it when it changes, which is what turns a stream of
+        // instants into a progression with real timestamps.
+        timelineRef.current.push(smoothed, timeSec);
       }, TICK_MS);
 
-      sectionIntervalRef.current = setInterval(() => {
-        const sections = detectSections(chromaHistoryRef.current);
-        setDetectedSections(sections);
-      }, SECTION_RECOMPUTE_MS);
+      sectionIntervalRef.current = setInterval(recomputeAnalysis, SECTION_RECOMPUTE_MS);
 
       setStatus('capturing');
 
@@ -193,9 +284,21 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
           : `Could not start audio capture: ${message}`
       );
     }
-  }, [supported, stop]);
+  }, [supported, stop, reset, recomputeAnalysis]);
 
   useEffect(() => stop, [stop]); // release the stream/context on unmount
 
-  return { status, supported, chord, errorMessage, detectedSections, start, stop };
+  return {
+    status,
+    supported,
+    chord,
+    errorMessage,
+    detectedSections,
+    chordSpans,
+    sectionProgressions,
+    detectedKey,
+    start,
+    stop,
+    reset,
+  };
 }
