@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, Sliders, Radio, AudioLines, Loader2, X } from 'lucide-react';
+import { Play, Pause, Sliders, Radio, AudioLines, Loader2, X, Save, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useSectionSync } from '@/hooks/useSectionSync';
@@ -9,6 +9,9 @@ import { useLiveChordDetection } from '@/hooks/useLiveChordDetection';
 import { useAuth } from '@/hooks/useAuth';
 import { useCredits, useSpendCredit } from '@/hooks/api/useCredits';
 import { chordDisplayName, parseRomanChord, pitchClassName, PITCH_CLASSES } from '@/lib/harmony/theory';
+import { toRomanProgression } from '@/lib/harmony/keyEstimation';
+import { buildDetectionRunPayload, submitDetectionRun } from '@/api/detectionRuns';
+import { isUuid } from '@/player/embeddedPlayer/constants';
 import { ROMAN_NUMERALS } from '@/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import type { SongSection, SongSectionType } from '@/types';
@@ -106,6 +109,16 @@ export function HarmonicHUD({
     );
   }, [live.status, user, spendCredit, live]);
 
+  // Which track the retained analysis below actually describes. Detection
+  // results outlive the capture now, but the HUD stays mounted across track
+  // changes, so without this the verse/chorus markers heard in one song would
+  // be shown over the next one.
+  const [analyzedTrackId, setAnalyzedTrackId] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  // Held for the lifetime of one capture so that retrying a save that may or
+  // may not have landed reuses the same key and cannot create a second run.
+  const idempotencyKeyRef = useRef<string | null>(null);
+
   const handleToggleLiveDetection = () => {
     if (live.status === 'capturing') {
       live.stop();
@@ -115,29 +128,105 @@ export function HarmonicHUD({
       toast.error('Out of credits for live detection this period. Upgrade for more.');
       return;
     }
+    // The synthesised preview loop plays through this same tab, so leaving it
+    // running would make it part of what gets captured - the detector would
+    // be listening to Clade's own guess at the progression instead of the
+    // song. Disabling the button was not enough: a loop already playing when
+    // detection starts just kept going.
+    if (loop.isPlaying) loop.stop();
+    setAnalyzedTrackId(trackId);
+    setSaveState('idle');
+    idempotencyKeyRef.current =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     void live.start();
   };
 
-  // While actually listening to the audio, the sections detected from it are
-  // what's really there - preferred over whatever (if anything) was passed
-  // in. Falls back to the passed-in sections until enough capture has
-  // accumulated to say something, and again once capture stops.
-  const liveSections: SongSection[] | undefined =
-    live.status === 'capturing' && live.detectedSections.length > 0
-      ? live.detectedSections.map((s) => ({
-          type: s.type,
-          label: s.label,
-          start_time: s.startSec,
-          end_time: s.endSec,
-        }))
-      : undefined;
+  const handleSaveAnalysis = async () => {
+    const payload = buildDetectionRunPayload({
+      trackId,
+      sectionProgressions: live.sectionProgressions,
+      detectedKey: live.detectedKey,
+      idempotencyKey: idempotencyKeyRef.current ?? undefined,
+    });
+    if (!payload) {
+      toast.error('Nothing to save yet - let it listen for a bit longer.');
+      return;
+    }
+
+    setSaveState('saving');
+    try {
+      const result = await submitDetectionRun(payload);
+      setSaveState('saved');
+      toast.success(
+        result.deduplicated
+          ? 'This analysis was already saved.'
+          : `Saved ${payload.sections.length} sections for review.`
+      );
+    } catch (err) {
+      setSaveState('idle');
+      toast.error(err instanceof Error ? err.message : 'Could not save this analysis.');
+    }
+  };
+
+  // The sections heard in the audio are what's really there, so they take
+  // priority over whatever (if anything) was passed in - and they now outlast
+  // the capture, which is the whole point of having listened to the song.
+  // Falls back to the passed-in sections until enough audio has accumulated
+  // to say anything.
+  const showLiveAnalysis =
+    live.sectionProgressions.length > 0 && (live.status === 'capturing' || analyzedTrackId === trackId);
+
+  // The key the numerals below are relative to. A live capture knows the key
+  // it just heard; the prop is whatever the catalog had on file, which for an
+  // unanalyzed track is nothing at all.
+  const liveKey = showLiveAnalysis ? live.detectedKey : null;
+  const effectiveMode: 'major' | 'minor' = liveKey?.mode ?? (detectedMode === 'minor' ? 'minor' : 'major');
+
+  // Memoised because this is O(every chord detected) and the player drawer
+  // above re-renders on every animation frame while playing. Rebuilding it
+  // per render meant converting hundreds of chords to numerals sixty times a
+  // second, and handing useSectionSync a new array identity each time, which
+  // invalidated its own memos too.
+  const liveSections: SongSection[] | undefined = useMemo(() => {
+    if (!showLiveAnalysis) return undefined;
+    return live.sectionProgressions.map((sp) => ({
+      type: sp.section.type,
+      label: sp.section.label,
+      start_time: sp.section.startSec,
+      end_time: sp.section.endSec,
+      // Real per-chord timing, which is what lets useSectionSync stop dead
+      // reckoning from a default BPM and follow the chords exactly. Only
+      // once a key is known, since the numerals are relative to it.
+      ...(liveKey && sp.chords.length > 0
+        ? {
+            chords: toRomanProgression(sp.chords, liveKey),
+            chord_timings: sp.chords.map((c) =>
+              Math.max(0, Math.round((c.startSec - sp.section.startSec) * 1000))
+            ),
+          }
+        : {}),
+    }));
+  }, [showLiveAnalysis, live.sectionProgressions, liveKey]);
   const effectiveSections = liveSections ?? sections;
+
+  // A finished capture of THIS track, with a key to write numerals against,
+  // attached to a real catalog row and a real account. A feed card built from
+  // seed data has no uuid to reference, so there is nothing to save it to.
+  const canSaveAnalysis =
+    live.status !== 'capturing' &&
+    analyzedTrackId === trackId &&
+    live.sectionProgressions.length > 0 &&
+    live.detectedKey !== null &&
+    isUuid(trackId) &&
+    Boolean(user);
 
   const sync = useSectionSync({
     trackId,
     progression,
     sections: effectiveSections,
-    detectedMode,
+    detectedMode: effectiveMode,
     bpm,
     loopLengthBars,
   });
@@ -145,15 +234,24 @@ export function HarmonicHUD({
   const loop = useHarmonicLoop({
     progression: sync.progression,
     detectedKey,
-    mode: detectedMode,
+    mode: effectiveMode,
     bpm,
   });
+
+  // Adopt the key that was actually heard. Without this the numerals above are
+  // relative to the detected tonic but rendered against the catalog's one, so
+  // every chord name in the readout would be transposed by the difference.
+  const liveTonic = liveKey?.tonic ?? null;
+  const setLoopTonic = loop.setTonic;
+  useEffect(() => {
+    if (liveTonic !== null) setLoopTonic(liveTonic);
+  }, [liveTonic, setLoopTonic]);
 
   if (progression.length === 0) return null;
 
   const activeIndex = sync.isLiveSynced ? sync.liveChordIndex : loop.activeStep;
   const chords = sync.progression
-    .map((symbol) => parseRomanChord(symbol, detectedMode === 'minor' ? 'minor' : 'major'))
+    .map((symbol) => parseRomanChord(symbol, effectiveMode))
     .filter((c): c is NonNullable<typeof c> => c !== null);
   const current = chords[Math.max(activeIndex, 0)] ?? chords[0];
   const tonic = loop.tonic;
@@ -218,8 +316,14 @@ export function HarmonicHUD({
       <div className="flex flex-col items-center justify-center py-2 sm:py-2.5 px-3 sm:px-4">
         <AnimatePresence mode="wait">
           {live.status === 'capturing' ? (
+            // Keyed on the MODE, not on the chord. Keying it on the chord
+            // meant every detected change - several a second, plus a flip to
+            // "no chord" whenever the signal dipped - remounted this whole
+            // block through AnimatePresence, replaying the spring on the
+            // "live estimate from audio" label and its icon endlessly. The
+            // readout below updates in place instead.
             <motion.div
-              key={`live-${live.chord?.root}-${live.chord?.quality}`}
+              key="live"
               initial={{ opacity: 0, scale: 0.85, y: 6 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9 }}
@@ -341,6 +445,40 @@ export function HarmonicHUD({
                 <AudioLines className="w-3.5 h-3.5" />
               )}
               {live.status === 'capturing' ? 'Stop' : 'Listen'}
+            </button>
+          )}
+
+          {/* Contributing what was just heard. Deliberately explicit rather
+              than saving automatically on stop: the listener sees the
+              sections and chords first, and a run only becomes canonical
+              after review anyway, so there is no reason to submit anything
+              they have not looked at. Needs a real catalog track to attach
+              to, and a signed-in account to attribute it to. */}
+          {canSaveAnalysis && (
+            <button
+              type="button"
+              onClick={() => void handleSaveAnalysis()}
+              disabled={saveState !== 'idle'}
+              aria-label="Save this analysis"
+              title="Save the sections and chords just detected"
+              className={cn(
+                'inline-flex items-center justify-center gap-1.5 rounded-full transition-colors shrink-0',
+                'h-8 px-2.5 text-[11px] font-medium',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                'disabled:cursor-not-allowed',
+                saveState === 'saved'
+                  ? 'bg-emerald-500/20 text-emerald-400 disabled:opacity-100'
+                  : 'bg-primary/15 text-primary hover:bg-primary/25 disabled:opacity-50'
+              )}
+            >
+              {saveState === 'saving' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : saveState === 'saved' ? (
+                <Check className="w-3.5 h-3.5" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              {saveState === 'saving' ? 'Saving' : saveState === 'saved' ? 'Saved' : 'Save'}
             </button>
           )}
 
