@@ -25,7 +25,9 @@ dist-ssr
 .env.production
 .env.production.local
 .env*.local
-.env.example
+
+# .env.example is deliberately NOT ignored - it holds only placeholders and is
+# the template the README and docs/getting-started.md tell you to copy.
 
 # Editor directories and files
 .vscode/*
