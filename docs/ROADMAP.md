@@ -459,7 +459,7 @@ This roadmap consolidates all pending tasks, user requests, and feature backlog 
 **Status**: Ongoing
 
 - [ ] Unit tests for all services (Vitest)
-- [ ] E2E tests for critical flows (Cypress)
+- [x] E2E tests for critical flows (Playwright)
 - [ ] Component testing with Storybook
 - [ ] API documentation (OpenAPI/Swagger)
 - [ ] Code coverage >80%

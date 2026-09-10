@@ -20,7 +20,7 @@ bun run typecheck
 ```bash
 bun run test                    # vitest, whole suite
 npx vitest run <path>           # a single file
-bun run test:e2e:smoke          # cypress smoke
+bun run test:e2e:smoke          # playwright route smoke
 ```
 
 ## Toolchain

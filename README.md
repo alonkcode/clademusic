@@ -132,8 +132,7 @@ supabase/
 ├── migrations/          # Ordered schema migrations
 └── bundle-fixes/        # Compatibility patches for generated SQL bundles
 
-tests/                   # Playwright specs (universal player invariants)
-cypress/                 # Cypress smoke + sanity E2E
+tests/                   # Playwright specs (player invariants + route smoke)
 docs/                    # Architecture, setup, and process documentation
 scripts/                 # Seeding, SQL bundling, asset generation, QA tooling
 ```
@@ -152,7 +151,7 @@ scripts/                 # Seeding, SQL bundling, asset generation, QA tooling
 | **Backend** | Supabase — Postgres, Auth, Realtime, Edge Functions (Deno) |
 | **Charts** | Recharts |
 | **Music theory** | Custom harmonic engine + Web Audio |
-| **Testing** | Vitest (unit/component), Playwright (player invariants), Cypress (E2E) |
+| **Testing** | Vitest (unit/component), Playwright (browser E2E) |
 
 ## 📱 Routes
 
@@ -192,21 +191,20 @@ bun run preview      # serve the production build
 bun run test              # Vitest (src/**/*.{test,spec}.{ts,tsx})
 bun run test:watch        # Vitest in watch mode
 
-bun run test:pw           # Playwright specs in tests/ (starts its own server on :4173)
+bun run test:e2e          # Playwright, all specs in tests/
+bun run test:e2e:smoke    # Playwright, route smoke only (tests/app-routes.spec.ts)
 bun run test:pw:install   # one-time: install the Chromium browser
-
-bun run test:e2e:smoke:auto    # Cypress smoke, dev server started automatically
-bun run test:e2e:sanity:auto   # Cypress sanity suite, same
-bun run cypress:open           # interactive Cypress runner
+bun run test:pw:ui        # interactive Playwright runner
 ```
 
 > Run `bun run test`, not `bun test` — the bare form invokes Bun's own test
 > runner instead of Vitest and will not pick up the jsdom setup.
 
-The three suites cover different ground: Vitest owns `src/` (and explicitly
-excludes `tests/`), Playwright owns the universal-player invariants in `tests/`,
-and Cypress drives the app end to end against a dev server on
-`127.0.0.1:8090` under `/clademusic`.
+Two suites cover different ground. Vitest owns `src/` (and explicitly excludes
+`tests/`). Playwright owns everything that needs a real browser: the
+universal-player invariants and the route smoke coverage, both in `tests/`. It
+starts its own dev server on `:4173` via the `webServer` block in
+`playwright.config.ts`, so no separate server step is needed.
 
 ## 📦 Deployment
 
