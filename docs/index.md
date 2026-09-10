@@ -46,6 +46,7 @@ Clade is a TikTok-style music discovery platform that analyzes songs by **harmon
 - [Release Process](RELEASE_PROCESS.md) — How versions/releases work
 - [Code Review Checklist](CODE_REVIEW.md) — What to verify for every PR
 - [Known Issues](KNOWN_ISSUES.md) — Operational notes + open bugs
+- [Archive](archive/README.md) — Superseded reports and setup guides, kept for history
 
 ---
 

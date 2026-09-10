@@ -18,9 +18,9 @@ This document summarizes ALL tasks from our conversation history, confirming com
 - Mobile-optimized positioning
 
 **Files:**
-- [src/player/EmbeddedPlayerDrawer.tsx](src/player/EmbeddedPlayerDrawer.tsx)
-- [src/player/providers/YouTubePlayer.tsx](src/player/providers/YouTubePlayer.tsx)
-- [src/player/providers/SpotifyEmbedPreview.tsx](src/player/providers/SpotifyEmbedPreview.tsx)
+- [src/player/EmbeddedPlayerDrawer.tsx](../../src/player/EmbeddedPlayerDrawer.tsx)
+- [src/player/providers/YouTubePlayer.tsx](../../src/player/providers/YouTubePlayer.tsx)
+- [src/player/providers/SpotifyEmbedPreview.tsx](../../src/player/providers/SpotifyEmbedPreview.tsx)
 
 ---
 
@@ -37,7 +37,7 @@ This document summarizes ALL tasks from our conversation history, confirming com
 - Minimize button visible on all devices
 
 **Files:**
-- [src/player/EmbeddedPlayerDrawer.tsx](src/player/EmbeddedPlayerDrawer.tsx)
+- [src/player/EmbeddedPlayerDrawer.tsx](../../src/player/EmbeddedPlayerDrawer.tsx)
 - [MOBILE_UX_IMPROVEMENTS.md](MOBILE_UX_IMPROVEMENTS.md)
 
 ---
@@ -60,8 +60,8 @@ This document summarizes ALL tasks from our conversation history, confirming com
   - Non-blocking (pointer-events-none)
 
 **Files:**
-- [src/components/TikTokStyleButtons.tsx](src/components/TikTokStyleButtons.tsx)
-- [src/components/ScrollingComments.tsx](src/components/ScrollingComments.tsx)
+- [src/components/TikTokStyleButtons.tsx](../../src/components/TikTokStyleButtons.tsx)
+- [src/components/ScrollingComments.tsx](../../src/components/ScrollingComments.tsx)
 
 ---
 
@@ -94,10 +94,10 @@ This document summarizes ALL tasks from our conversation history, confirming com
   - Sidebar with popular forums
 
 **Files:**
-- [supabase/migrations/20260122_reddit_forum.sql](supabase/migrations/20260122_reddit_forum.sql)
-- [src/pages/ForumHomePage.tsx](src/pages/ForumHomePage.tsx)
-- [src/App.tsx](src/App.tsx) - Added forum routes
-- [src/components/BottomNav.tsx](src/components/BottomNav.tsx) - Added Forums nav
+- [supabase/migrations/20260122_reddit_forum.sql](../../supabase/migrations/20260122_reddit_forum.sql)
+- [src/pages/ForumHomePage.tsx](../../src/pages/ForumHomePage.tsx)
+- [src/App.tsx](../../src/App.tsx) - Added forum routes
+- [src/components/BottomNav.tsx](../../src/components/BottomNav.tsx) - Added Forums nav
 
 ---
 
@@ -123,7 +123,7 @@ This document summarizes ALL tasks from our conversation history, confirming com
 - Estimated runtime: 16-20 hours for full 1M
 
 **Files:**
-- [scripts/generate-fake-users.ts](scripts/generate-fake-users.ts)
+- [scripts/generate-fake-users.ts](../../scripts/generate-fake-users.ts)
 
 ---
 
@@ -145,7 +145,7 @@ This document summarizes ALL tasks from our conversation history, confirming com
 - Detailed QA report with metrics
 
 **Files:**
-- [src/test/comprehensive-qa.test.tsx](src/test/comprehensive-qa.test.tsx)
+- [src/test/comprehensive-qa.test.tsx](../../src/test/comprehensive-qa.test.tsx)
 - [QA_REPORT.md](QA_REPORT.md)
 
 ---
@@ -203,7 +203,7 @@ This document summarizes ALL tasks from our conversation history, confirming com
 - Handle 10K posts/hour, 100K votes/hour
 
 **Files:**
-- [supabase/migrations/20260122_performance_optimization.sql](supabase/migrations/20260122_performance_optimization.sql)
+- [supabase/migrations/20260122_performance_optimization.sql](../../supabase/migrations/20260122_performance_optimization.sql)
 
 ---
 
@@ -246,8 +246,8 @@ This document summarizes ALL tasks from our conversation history, confirming com
   - Playlist followers
 
 **Files:**
-- [supabase/migrations/20260122_unified_interactions.sql](supabase/migrations/20260122_unified_interactions.sql)
-- [src/hooks/useInteractions.ts](src/hooks/useInteractions.ts) - Reusable React hooks
+- [supabase/migrations/20260122_unified_interactions.sql](../../supabase/migrations/20260122_unified_interactions.sql)
+- [src/hooks/useInteractions.ts](../../src/hooks/useInteractions.ts) - Reusable React hooks
 
 ---
 
@@ -279,7 +279,7 @@ This document summarizes ALL tasks from our conversation history, confirming com
   - Log auth events for debugging
 
 **Files:**
-- [src/hooks/useAuth.tsx](src/hooks/useAuth.tsx) - Enhanced AuthProvider
+- [src/hooks/useAuth.tsx](../../src/hooks/useAuth.tsx) - Enhanced AuthProvider
 
 ---
 
@@ -362,8 +362,8 @@ This document summarizes ALL tasks from our conversation history, confirming com
   - API endpoint validation
 
 **Files:**
-- [src/lib/security.ts](src/lib/security.ts) - Security utilities
-- [src/test/pentest.test.ts](src/test/pentest.test.ts) - Penetration tests
+- [src/lib/security.ts](../../src/lib/security.ts) - Security utilities
+- [src/test/pentest.test.ts](../../src/test/pentest.test.ts) - Penetration tests
 
 ---
 
@@ -415,8 +415,8 @@ This document summarizes ALL tasks from our conversation history, confirming com
 All interaction functions (toggle_like, toggle_harmony_save, etc.) are reusable with consistent patterns.
 
 **Files:**
-- [src/hooks/useInteractions.ts](src/hooks/useInteractions.ts)
-- [src/hooks/useDryHooks.ts](src/hooks/useDryHooks.ts)
+- [src/hooks/useInteractions.ts](../../src/hooks/useInteractions.ts)
+- [src/hooks/useDryHooks.ts](../../src/hooks/useDryHooks.ts)
 
 ---
 
