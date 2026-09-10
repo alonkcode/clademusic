@@ -27,8 +27,22 @@
 -- with RLS bypassed for the lookup, so the policy no longer re-enters the
 -- table it is protecting.
 --
--- Safe to run on an already-provisioned project. It only replaces policies
--- and adds constraints/functions; no data is deleted.
+-- Safe to run on an already-provisioned project, with ONE exception worth
+-- reading before you do. Almost everything here replaces policies or adds
+-- constraints and functions, and the whole file is one transaction, so any
+-- failure rolls all of it back. But it does contain a single DELETE: rows in
+-- playlist_tracks whose track_id matches no row in tracks are removed,
+-- because Postgres will not add the foreign key while they exist. Those rows
+-- are already broken - a playlist entry for a track the catalogue does not
+-- have - but they are still data. Run 11a-preflight-check.sql first; it is
+-- read-only and tells you exactly how many rows that is. If it reports 0,
+-- this file changes no data at all.
+--
+-- Note also that playlist_tracks.track_id is text in this database while
+-- tracks.id is uuid. The FK is only added if every value is a well-formed
+-- uuid (the column is converted first); otherwise that one constraint is
+-- skipped with a warning rather than failing the run, and /playlist/:id
+-- stays broken until it is addressed separately.
 
 BEGIN;
 
@@ -280,14 +294,20 @@ BEGIN
     RETURN;
   END IF;
 
+  -- Both sides cast to text deliberately. By this point track_id has been
+  -- converted to uuid above, so a direct comparison would work - but if that
+  -- conversion is ever reordered or skipped, a uuid = text comparison fails
+  -- outright with 42883 rather than returning an answer, and this runs on a
+  -- database where track_id really is text. Casting costs nothing and cannot
+  -- be broken by that.
   SELECT count(*) INTO v_orphans
   FROM public.playlist_tracks pt
-  LEFT JOIN public.tracks t ON t.id = pt.track_id
+  LEFT JOIN public.tracks t ON t.id::text = pt.track_id::text
   WHERE t.id IS NULL;
 
   IF v_orphans > 0 THEN
     DELETE FROM public.playlist_tracks pt
-    WHERE NOT EXISTS (SELECT 1 FROM public.tracks t WHERE t.id = pt.track_id);
+    WHERE NOT EXISTS (SELECT 1 FROM public.tracks t WHERE t.id::text = pt.track_id::text);
     RAISE NOTICE 'removed % playlist_tracks rows pointing at tracks that no longer exist', v_orphans;
   END IF;
 
