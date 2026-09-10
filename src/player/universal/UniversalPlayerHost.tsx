@@ -193,10 +193,24 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
 
   const showFallback = Boolean(request && target && !target.src);
 
+  // Nothing loaded yet. The iframe still has to stay mounted - it is a
+  // singleton reused across every provider switch, and CI asserts it exists
+  // from page load - but it must not paint anything: an empty 16:9 black
+  // rectangle sitting on the page before playback is what read as "half a
+  // screen black".
+  const idle = !request || !target?.src;
+
+  // Only YouTube actually has a picture. Spotify's embed is an audio widget
+  // roughly 152px tall; forcing 16:9 on it framed it in tall black letterbox
+  // bars above and below the controls, which is the other half of the same
+  // complaint.
+  const isVideo = request?.provider === 'youtube';
+  const frameBox = isVideo ? 'w-full aspect-video' : 'w-full h-[152px]';
+
   return (
-    <div className={className}>
-      <div className="relative w-full overflow-hidden rounded-lg bg-black/40 border border-white/10">
-        <div className="w-full aspect-video">
+    <div className={[className, idle ? 'h-0 overflow-hidden opacity-0 pointer-events-none' : ''].filter(Boolean).join(' ')}>
+      <div className={['relative w-full overflow-hidden rounded-lg border border-white/10', isVideo ? 'bg-black/40' : ''].filter(Boolean).join(' ')}>
+        <div className={frameBox}>
           <iframe
             ref={iframeRef}
             id={IFRAME_ID}
