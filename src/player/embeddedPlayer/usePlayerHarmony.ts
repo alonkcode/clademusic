@@ -5,6 +5,7 @@ import { useHarmonicFingerprint } from '@/hooks/api/useHarmonicFingerprint';
 import { isTestEnv } from '@/lib/env';
 import { isUuid } from './constants';
 import type { SongSection } from '@/types';
+import { estimateTempoFromSections } from '@/lib/harmony/tempoFromAnalysis';
 
 export interface PlayerHarmony {
   detectedKey: string | null;
@@ -13,6 +14,9 @@ export interface PlayerHarmony {
   confidenceScore: number | null;
   progression: string[];
   bpm: number | undefined;
+  /** True when `bpm` was inferred from the section/chord grid rather than read
+   *  from the catalog. Callers should present it as approximate. */
+  bpmIsEstimated: boolean;
   /** Bars in one cycle of `progression` - lets the chord-rotation heuristic
    *  derive how many beats each chord actually holds instead of assuming 4. */
   loopLengthBars: number | undefined;
@@ -39,6 +43,19 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
 
   const trackQuery = useTrack(analysisTrackId, !!analysisTrackId);
   const fingerprintQuery = useHarmonicFingerprint(analysisTrackId);
+
+  // tracks.tempo is nullable and, in practice, almost always null: nothing in
+  // the app writes it (the seed omits it, and audioAnalysis returns a mock
+  // that feeds fingerprints rather than the tracks row). Rather than leave the
+  // beat indicator permanently blank, fall back to inferring the tempo from
+  // the chord/section grid that IS stored. Only computed when the catalog has
+  // no real value - a stored tempo is always preferred over an inferred one.
+  const estimatedBpm = useMemo(() => {
+    const known = trackQuery.data?.tempo;
+    if (typeof known === 'number' && Number.isFinite(known) && known > 0) return null;
+    return estimateTempoFromSections(sections);
+  }, [sections, trackQuery.data?.tempo]);
+
   const harmony: PlayerHarmony = useMemo(() => {
     const track = trackQuery.data ?? null;
     const fingerprint = fingerprintQuery.data ?? null;
@@ -66,11 +83,16 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
       cadenceType,
       confidenceScore,
       progression,
-      bpm: typeof track?.tempo === 'number' ? track.tempo : undefined,
+      bpm:
+        typeof track?.tempo === 'number' && Number.isFinite(track.tempo) && track.tempo > 0
+          ? track.tempo
+          : (estimatedBpm?.bpm ?? undefined),
+      bpmIsEstimated: !(typeof track?.tempo === 'number' && Number.isFinite(track.tempo) && track.tempo > 0)
+        && estimatedBpm != null,
       loopLengthBars: typeof track?.loop_length_bars === 'number' ? track.loop_length_bars : undefined,
       catalogDurationMs: typeof (track as any)?.duration_ms === 'number' ? (track as any).duration_ms : undefined,
     };
-  }, [fingerprintQuery.data, trackQuery.data]);
+  }, [fingerprintQuery.data, trackQuery.data, estimatedBpm]);
 
   // HarmonicHUD - the rotating chord readout - already existed and already
   // does exactly this (chords that advance with real playback position), but

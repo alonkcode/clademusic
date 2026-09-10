@@ -24,6 +24,21 @@ describe('BeatIndicator', () => {
     }
   });
 
+  // The "~" and the number are separate text nodes in one span, so these
+  // assert on the rendered text as a whole rather than on a node reading "~".
+  it('marks an inferred tempo as approximate rather than stating it as fact', () => {
+    const { container } = render(<BeatIndicator bpm={128} positionMs={0} isPlaying isEstimated />);
+    expect(container.textContent).toContain('~128');
+    expect(container.querySelector('[title]')?.getAttribute('title')).toMatch(/Estimated tempo/i);
+  });
+
+  it('shows a catalog tempo without the approximation marker', () => {
+    const { container } = render(<BeatIndicator bpm={128} positionMs={0} isPlaying />);
+    expect(container.textContent).toContain('128');
+    expect(container.textContent).not.toContain('~');
+    expect(container.querySelector('[title]')?.getAttribute('title')).toBe('Tempo: 128 beats per minute');
+  });
+
   it('still shows the tempo while paused - only the flashing stops', () => {
     render(<BeatIndicator bpm={90} positionMs={0} isPlaying={false} />);
     expect(screen.getByText('90')).toBeInTheDocument();

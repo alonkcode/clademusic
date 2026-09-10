@@ -13,6 +13,11 @@ type BeatIndicatorProps = {
   /** The provider's own reported position - NOT a smoothed/animated one. */
   positionMs: number;
   isPlaying: boolean;
+  /** When the tempo was inferred from the chord/section grid rather than read
+   *  from the catalog, it is shown with a "~" - it can legitimately land on
+   *  half or double the true tempo, and presenting that as a fact would be
+   *  the readout lying about how much it knows. */
+  isEstimated?: boolean;
   className?: string;
 };
 
@@ -29,7 +34,7 @@ type BeatIndicatorProps = {
  * the audio through seeks, pauses and buffering stalls instead of free-running
  * from mount and sliding out of phase with the music.
  */
-export function BeatIndicator({ bpm, positionMs, isPlaying, className }: BeatIndicatorProps) {
+export function BeatIndicator({ bpm, positionMs, isPlaying, isEstimated = false, className }: BeatIndicatorProps) {
   const dotRef = useRef<HTMLSpanElement | null>(null);
   // Last authoritative position, and the clock reading when it landed - the
   // two together let the loop extrapolate between provider updates, which
@@ -91,7 +96,11 @@ export function BeatIndicator({ bpm, positionMs, isPlaying, className }: BeatInd
   return (
     <div
       className={`flex shrink-0 items-center gap-1.5 ${className ?? ''}`}
-      title={`Tempo: ${rounded} beats per minute`}
+      title={
+        isEstimated
+          ? `Estimated tempo: about ${rounded} beats per minute, inferred from the chord and section timings (it can land on half or double the real tempo)`
+          : `Tempo: ${rounded} beats per minute`
+      }
     >
       <span
         ref={dotRef}
@@ -100,6 +109,7 @@ export function BeatIndicator({ bpm, positionMs, isPlaying, className }: BeatInd
         style={{ opacity: REST_OPACITY, transform: `scale(${REST_SCALE})` }}
       />
       <span className="text-[10px] font-semibold leading-none tabular-nums text-muted-foreground md:text-xs">
+        {isEstimated ? '~' : ''}
         {rounded}
         <span className="ml-0.5 font-normal opacity-70">BPM</span>
       </span>

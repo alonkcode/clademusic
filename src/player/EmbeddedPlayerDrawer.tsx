@@ -433,6 +433,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             bpm={harmony.bpm}
             positionMs={authoritativePositionMs}
             isPlaying={isPlaying}
+            isEstimated={harmony.bpmIsEstimated}
             className="hidden sm:flex"
           />
 
