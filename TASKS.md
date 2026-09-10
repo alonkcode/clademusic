@@ -20,10 +20,10 @@ The app was repointed at a **new, empty** Supabase project
 **403** on this project ref. Either log in as the owning account or use the SQL
 Editor route. See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md).
 
-**Unresolved:** three project refs exist in the repo's history —
-`jlmddkchldgcjmdpvibm` (current), `fteefcvikpowcewuqqez` (`supabase/config.toml`
-+ `scripts/seed.js` fallback) and a `gbmz…` ref formerly in `.env`. Decide which
-holds real data before seeding. `config.toml` still points at the old ref.
+**Resolved (Sep 10, 2026):** `jlmddkchldgcjmdpvibm` is the real project. The
+stale `fteefcvikpowcewuqqez` ref has been replaced in `supabase/config.toml`
+and the `scripts/seed.js` fallback; the `gbmz…` ref formerly in `.env` is gone.
+All three places now agree with `.env`.
 
 ## ✅ Completed Features
 
