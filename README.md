@@ -2,224 +2,276 @@
 
 **Find Your Harmony**
 
-A TikTok-style music discovery platform that helps you find songs based on **harmonic progressions**, not genre. Connect with listeners who share your taste through the universal language of chord progressions.
+A TikTok-style music discovery platform that finds songs by **harmonic progression**, not genre. Tracks are analyzed and matched on their chord structure — progression shape, cadence, loop length, modal color — so "sounds like this" means something concrete instead of a genre tag.
 
 ![React](https://img.shields.io/badge/React-18-blue?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5-purple?logo=vite)
 ![Supabase](https://img.shields.io/badge/Supabase-Backend-green?logo=supabase)
 ![TailwindCSS](https://img.shields.io/badge/Tailwind-CSS-cyan?logo=tailwindcss)
+![Bun](https://img.shields.io/badge/Bun-required-black?logo=bun)
+
+Live: **https://kaospan.github.io/clademusic/**
 
 ## ✨ Features
 
-### 🎶 Harmonic Analysis & Discovery
-- **Relative theory-based analysis** — Songs analyzed by Roman numeral progressions (I-V-vi-IV), not absolute chords
-- **Hybrid analysis pipeline** — Instant cached results + async ML processing for new tracks
-- **Confidence scoring** — All analyses labeled with confidence levels (High/Medium/Low/Provisional)
-- **Smart similarity matching** — Find tracks by harmonic structure: progression shape (50%), cadence type (20%), loop length (15%), modal color (10%)
-- **Cost-efficient at scale** — Aggressive caching (90-day TTL), ISRC deduplication, batch processing
-- **Section-aware navigation** — Jump to specific song sections (verse, chorus, bridge) with one tap
+### 🎶 Harmonic analysis & discovery
+- **Relative theory first** — progressions stored as Roman numerals (`I-V-vi-IV`), never absolute chords; keys are derived only for display
+- **Hybrid pipeline** — cache-first lookup, async job queue for new tracks, provisional results so the UI never blocks
+- **Confidence scoring** — every analysis carries a High/Medium/Low/Provisional label
+- **Similarity engine** — progression shape (50%), cadence (20%), loop length (15%), modal color (10%), tempo (5%)
+- **Live chord detection** — chords read off captured tab audio in real time (`src/lib/harmony/chordDetection.ts`)
+- **Automatic section detection** — verse/chorus/bridge/intro/outro segmentation via self-similarity + Foote novelty (`src/lib/harmony/sectionDetection.ts`)
+- **Harmonic loop playback** — hear a progression looped in any key through the Web Audio engine (`src/lib/harmony/LoopEngine.ts`)
 
-### 🎧 Multi-Platform Streaming
-- **YouTube & Spotify** — Seamless playback with embedded players
-- **Quick stream buttons** — One-tap access to Apple Music, Deezer, SoundCloud
-- **Provider badges** — Visual indicators for available platforms
-- **Docked player** — Fixed bottom bar (like Spotify's desktop player) with a compact video miniplayer, not a floating/draggable panel
+### 🎧 Playback
+- **Docked bottom bar** — fixed, full-width player like Spotify's desktop client; expanding it slides a details panel (chord readout, section chips, video miniplayer) up above the bar
+- **YouTube & Spotify** — embedded playback, with Spotify Web Playback for premium accounts and an embed preview otherwise
+- **Section navigation** — tap a chip to jump straight to a verse, chorus, or bridge
+- **Quick stream links** — one tap out to Apple Music, Deezer, SoundCloud
 
-### 👥 Social Features
-- **Following system** — Track friends and discover their music taste
-- **Live comments** — Real-time discussion on tracks
-- **Nearby listeners** — See who's listening to similar music around you
-- **Play history** — Complete listening history with clickable tracks
+### 👥 Social
+- Following feed, live comments, track comments, emoji reactions
+- Nearby listeners, live chat, playlists, and a Reddit-style forum
+- Play history and a taste-DNA profile
 
-### 🔗 Track Connections
-- **Sample detection** — Find original samples and tracks that sample this song
-- **Cover versions** — Discover different interpretations
-- **Remix relationships** — Track the remix tree
+### 🔗 Track connections
+Sample detection, cover versions, and remix lineage, with a network view per track.
 
-### 📊 Rich Metadata
-- **Song credits** — Songwriter, producer, label, release date
-- **BPM & Key** — Detected tempo and harmonic key with confidence scores
-- **Genre tags** — Multiple genre classifications
-- **Chord progressions** — Visual chord badges with Roman numeral display
+### 💳 Accounts & billing
+Supabase auth (email/password + reset), optional TOTP two-factor, Spotify OAuth linking, premium plans with checkout/webhook edge functions, and a role-protected admin dashboard.
 
-### 🎨 Responsive Desktop UI
-- **Widescreen layouts** — Professional multi-column desktop interface
-- **Adaptive breakpoints** — Optimized for sm/md/lg/xl/2xl screens (640px-1536px+)
-- **Desktop sidebars** — Track metadata, keyboard shortcuts, progress indicators
-- **Mobile-first design** — Seamless experience across all devices
-
-## 🚀 Quick Start
+## 🚀 Quick start
 
 ### Prerequisites
-- Bun (required)
+- **[Bun](https://bun.sh) 1.0+** — required. A `preinstall` guard (`scripts/abort-if-not-bun.cjs`) aborts `npm install` / `yarn install`; only `bun install` works.
 - Git
 
-### Installation
-
 ```bash
-# Clone the repository
 git clone https://github.com/kaospan/clademusic.git
 cd clademusic
-
-# Install dependencies
 bun install
-
-# Start the development server
+cp .env.example .env.local   # then fill in your keys
 bun run dev
 ```
 
-The app will be available at `http://localhost:8080/clademusic/`
+Open **http://localhost:8080/clademusic/** — the dev server runs on port 8080 and the app is served under the `/clademusic/` base path.
 
-### Environment Variables
+> Without Supabase credentials the app still boots: the client falls back to a
+> disabled stub that returns errors instead of throwing, so the UI renders but
+> anything that reads or writes data stays empty.
 
-Create a `.env.local` file in the project root:
+### Environment variables
 
-```env
-# Supabase
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+Copy `.env.example` to `.env.local`. Only `VITE_`-prefixed variables reach the browser.
 
-# Spotify OAuth (optional)
-VITE_SPOTIFY_CLIENT_ID=your_spotify_client_id
-VITE_SPOTIFY_REDIRECT_URI=http://localhost:8080/clademusic/spotify-callback
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `VITE_SUPABASE_URL` | yes | Supabase project URL |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | yes | Supabase client key |
+| `VITE_SUPABASE_ANON_KEY` | — | Legacy fallback, used only when the publishable key is unset |
+| `VITE_SPOTIFY_CLIENT_ID` | optional | Spotify OAuth / Web Playback |
+| `VITE_SPOTIFY_REDIRECT_URI` | optional | `http://localhost:8080/clademusic/spotify-callback` in dev |
+| `VITE_YOUTUBE_API_KEY` | optional | YouTube search |
+| `VITE_LASTFM_API_KEY` | optional | Last.fm metadata and history import |
+| `VITE_BASE_PATH` | optional | Overrides the deploy base path (see [Deployment](#-deployment)) |
 
-# Production (GitHub Pages)
-# VITE_SPOTIFY_REDIRECT_URI=https://kaospan.github.io/clademusic/spotify-callback
+### Database
+
+The schema lives in `supabase/migrations/`. Provision a project either with the
+CLI (`supabase link` + `supabase db push`) or by pasting the generated, ordered
+SQL parts from `bash scripts/build-sql-editor-parts.sh` into the Supabase SQL
+editor — full walkthrough in [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md).
+
+```bash
+bun run seed          # populate sample tracks, provider links, connections
+bun run seed:reset    # wipe seeded rows first
 ```
 
-## 🏗️ Project Structure
+Seeding reads `SUPABASE_SERVICE_KEY` (or `VITE_SUPABASE_PUBLISHABLE_KEY`) from the environment.
+
+## 🏗️ Project structure
 
 ```
 src/
-├── components/          # Reusable UI components
-│   ├── layout/          # ResponsiveLayout, DesktopColumns, DesktopSidebar
-│   ├── shared/          # Layout, EmptyState, LoadingSpinner
-│   ├── ui/              # shadcn/ui primitives + ProviderBadge, GlassCard
-│   └── AnalysisStatusBadge.tsx  # Harmonic confidence indicators
-├── hooks/               # React hooks
-│   └── api/             # Data fetching hooks (React Query)
-├── lib/                 # Utilities & helpers
-│   ├── animations.ts    # Framer Motion variants
-│   ├── constants.ts     # App-wide constants
-│   ├── formatters.ts    # formatBPM, formatRelativeTime, capitalize
-│   ├── providers.ts     # Music provider utilities
-│   └── sections.ts      # Section timestamp utilities
-├── pages/               # Route pages (responsive layouts)
-├── player/              # Embedded player components
-├── services/            # Business logic layer
-│   ├── harmonicAnalysis.ts    # Hybrid analysis pipeline
-│   ├── similarityEngine.ts    # Track matching algorithm
-│   └── lastfmService.ts       # External API integrations
-├── types/               # TypeScript types
-│   ├── harmony.ts       # Harmonic analysis types
-│   └── index.ts         # Core Track, User types
-└── contexts/            # React Context providers
-  ├── QueueContext.tsx         # Playback queue management
-  └── YouTubePlayerContext.tsx # Player iframe helpers
+├── api/                 # Thin data-access wrappers (playEvents, tasteDNA, trackSections)
+├── chat/                # Local bot chat
+├── components/
+│   ├── landing/         # Hero, features grid, pricing preview, interactive demo
+│   ├── layout/          # ResponsiveLayout
+│   ├── shared/          # PageLayout, ErrorBoundary, EmptyState, LoadingSpinner, brand marks
+│   ├── ui/              # shadcn/ui primitives + GlassCard, ChartErrorBoundary
+│   └── *.tsx            # Feature components (HarmonicHUD, TrackCard, SongSections, ...)
+├── data/                # Seed and historical track datasets
+├── hooks/
+│   ├── api/             # React Query data hooks
+│   └── *.ts             # useAuth, useHarmonicAnalysis, useLiveChordDetection, useSectionSync
+├── integrations/
+│   └── supabase/        # Generated client + database types
+├── lib/
+│   ├── connectors/      # Provider connectors (spotify, youtube, stubs)
+│   ├── harmony/         # Theory engine: chordDetection, sectionDetection,
+│   │                    #   progressionSearch, sectionVariant, theory, LoopEngine
+│   └── *.ts             # animations, constants, env, formatters, providers, sections, security
+├── pages/               # Route components (lazy-loaded in App.tsx)
+├── player/
+│   ├── controller/      # Player interfaces
+│   ├── embeddedPlayer/  # Seekbar, transport, layout, harmony, active-section hooks
+│   ├── providers/       # YouTube / Spotify adapters and embeds
+│   ├── universal/       # UniversalPlayerHost, embed-src builder, provider switching
+│   ├── PlayerContext.tsx
+│   └── EmbeddedPlayerDrawer.tsx
+├── services/            # harmonicAnalysis, similarityEngine, recommendation, billing,
+│                        #   spotify*, youtubeSearch, lastfm, trackService
+├── types/               # harmony.ts, index.ts
+├── test/                # Vitest setup + integration-style suites
+└── __tests__/           # Player and section regression specs
+
+supabase/
+├── functions/           # Edge functions: harmonic-analysis, billing-*, search-*, 2FA, email
+├── migrations/          # Ordered schema migrations
+└── bundle-fixes/        # Compatibility patches for generated SQL bundles
+
+tests/                   # Playwright specs (universal player invariants)
+cypress/                 # Cypress smoke + sanity E2E
+docs/                    # Architecture, setup, and process documentation
+scripts/                 # Seeding, SQL bundling, asset generation, QA tooling
 ```
 
-## 🛠️ Tech Stack
+## 🛠️ Tech stack
 
 | Category | Technology |
 |----------|------------|
-| **Framework** | React 18 + TypeScript (Strict Mode) |
-| **Build Tool** | Vite 5.4.19 |
-| **Styling** | Tailwind CSS + shadcn/ui + Responsive Breakpoints |
-| **Animations** | Framer Motion |
-| **State Management** | TanStack Query (React Query) + Context API |
-| **Backend** | Supabase (Auth, Postgres, Edge Functions) |
-| **Music Theory** | Custom Harmonic Analysis Engine |
-| **Audio Analysis** | ML-ready pipeline (Essentia.js integration pending) |
-| **Testing** | Vitest + Cypress (E2E) |
+| **Framework** | React 18 + TypeScript (strict) |
+| **Build** | Vite 5 |
+| **Package manager** | Bun (enforced) |
+| **Styling** | Tailwind CSS + shadcn/ui (Radix primitives) |
+| **Animation** | Framer Motion |
+| **State** | TanStack Query + React Context |
+| **Routing** | React Router 6 |
+| **Backend** | Supabase — Postgres, Auth, Realtime, Edge Functions (Deno) |
+| **Charts** | Recharts |
+| **Music theory** | Custom harmonic engine + Web Audio |
+| **Testing** | Vitest (unit/component), Playwright (player invariants), Cypress (E2E) |
 
-## 📱 Key Pages
+## 📱 Routes
 
 | Route | Description |
 |-------|-------------|
-| `/` | **Landing** — Intro + onboarding entry point |
-| `/feed` | **Feed** — TikTok-style track discovery with desktop sidebar, progress tracking, and keyboard shortcuts |
-| `/search` | **Search** — Find songs by name/artist or chord progression patterns (e.g., "I-V-vi-IV") |
-| `/following` | **Following** — Activity feed from people you follow with play events |
-| `/profile` | **Profile** — Your taste DNA, connected services, complete play history with clickable tracks |
-| `/connections/:trackId` | **Connections** — Track relationships (samples, covers, remixes) with network visualization |
-| `/compare` | **Compare** — Side-by-side harmonic analysis comparison tool |
-| `/track/:id` | **Track Detail** — Full metadata, credits, sections, similar tracks by harmony |
+| `/` | Landing page |
+| `/feed` | TikTok-style track discovery |
+| `/search` | Search by name, artist, or progression (e.g. `I-V-vi-IV`) |
+| `/compare` | Side-by-side harmonic comparison |
+| `/track/:trackId` | Metadata, credits, sections, harmonically similar tracks |
+| `/album/:albumId`, `/artist/:artistId` | Album and artist pages |
+| `/connections/:trackId` | Samples, covers, remix lineage |
+| `/playlists`, `/playlist/:playlistId` | Playlists |
+| `/forum`, `/forum/:forumName`, `/forum/post/:postId` | Community forum |
+| `/following` | Activity from people you follow |
+| `/profile` | Taste DNA, connected services, play history |
+| `/auth`, `/login`, `/signup`, `/reset-password` | Authentication |
+| `/spotify-callback` | Spotify OAuth return |
+| `/survey` | Music taste onboarding |
+| `/pricing`, `/billing` | Plans and subscription management |
+| `/terms`, `/privacy` | Legal |
+| `/admin`, `/admin/performance` | Admin dashboards (role-protected) |
 
 ## 🔧 Development
 
 ```bash
-# Run development server with hot reload
-bun dev
-
-# Type checking
-bun run typecheck
-
-# Run tests
-bun test
-
-# Build for production
-bun run build
-
-# Preview production build
-bun run preview
+bun run dev          # dev server at http://localhost:8080/clademusic/
+bun run lint         # ESLint
+bun run typecheck    # tsc --noEmit
+bun run build        # production build to dist/
+bun run preview      # serve the production build
 ```
+
+### Testing
+
+```bash
+bun run test              # Vitest (src/**/*.{test,spec}.{ts,tsx})
+bun run test:watch        # Vitest in watch mode
+
+bun run test:pw           # Playwright specs in tests/ (starts its own server on :4173)
+bun run test:pw:install   # one-time: install the Chromium browser
+
+bun run test:e2e:smoke:auto    # Cypress smoke, dev server started automatically
+bun run test:e2e:sanity:auto   # Cypress sanity suite, same
+bun run cypress:open           # interactive Cypress runner
+```
+
+> Run `bun run test`, not `bun test` — the bare form invokes Bun's own test
+> runner instead of Vitest and will not pick up the jsdom setup.
+
+The three suites cover different ground: Vitest owns `src/` (and explicitly
+excludes `tests/`), Playwright owns the universal-player invariants in `tests/`,
+and Cypress drives the app end to end against a dev server on
+`127.0.0.1:8090` under `/clademusic`.
 
 ## 📦 Deployment
 
+The base path is resolved in `vite.config.ts`: `VITE_BASE_PATH` when set,
+otherwise `/` on Vercel and `/clademusic/` everywhere else.
 
-### Deploying to GitHub Pages
+### GitHub Pages (default)
 
-This repo deploys automatically on push to `main` using GitHub Actions (`.github/workflows/deploy.yml`).
+Pushes to `main` deploy automatically via `.github/workflows/deploy.yml` — set
+**Settings → Pages → Source → GitHub Actions**. The workflow lints, typechecks,
+runs Vitest and Playwright, builds, and publishes `dist/`.
 
-**Recommended (GitHub Actions):**
-- GitHub: **Settings → Pages → Source → GitHub Actions**
-- Push to `main` (Deploy workflow publishes `dist/`)
+Manual deploy, if you need one:
 
-**Manual deploy (optional):** ensure your `package.json` includes:
+```bash
+bun run deploy    # builds, writes dist/.nojekyll, pushes to the gh-pages branch
+```
 
-   ```json
-   "homepage": "https://kaospan.github.io/clademusic/",
-   "scripts": {
-     "predeploy": "bun run build && echo . > dist/.nojekyll",
-     "deploy": "bun run build && gh-pages -d dist"
-   }
-   ```
+For the manual route, point **Settings → Pages → Source** at the `gh-pages`
+branch. The `.nojekyll` file keeps Pages from running Jekyll over the build
+output.
 
-2. Install the `gh-pages` package if you haven't already:
+### Vercel
 
-   ```bash
-   bun add -D gh-pages
-   # or: bun install --save-dev gh-pages
-   ```
+`vercel.json` sets the framework, `bun run build`, an SPA rewrite to
+`index.html`, and immutable caching for `/assets/*`. Vercel builds set `VERCEL`,
+so the base path becomes `/` automatically.
 
-3. Deploy:
+Supply the `VITE_*` variables as build-time environment variables on whichever
+host you use — Vite inlines them at build time, so they must be present when the
+build runs, not at runtime.
 
-   ```bash
-   bun run deploy
-   # or: bun run deploy
-   ```
+## 🤖 CI
 
-4. Go to your GitHub repository settings → Pages, and set the source to the `gh-pages` branch (manual deploy only). Your site will be live at:
+| Workflow | Trigger | Does |
+|----------|---------|------|
+| `ci.yml` | push to `main`/`develop`, PRs to `main` | lint, typecheck, Playwright + Vitest, build artifact |
+| `pr.yml` | PRs | path-filtered quality checks for `src/` and `supabase/` changes |
+| `deploy.yml` | push to `main`, PRs, manual | full test suite, then production deploy |
+| `qa-hourly.yml` | hourly cron, manual | scheduled smoke/sanity/performance runs |
 
-   https://kaospan.github.io/clademusic/
+## 📚 Documentation
 
-**Note:** The build output is in the `dist/` folder. The `.nojekyll` file disables Jekyll processing for static assets.
+Start at [docs/index.md](docs/index.md). Highlights:
+
+- [Harmonic Analysis Architecture](docs/HARMONIC_ANALYSIS_ARCHITECTURE.md) — the core system design
+- [Player Architecture](docs/PLAYER_ARCHITECTURE.md) — docked bar, provider switching, universal host
+- [Database Setup](docs/DATABASE_SETUP.md) — provisioning Supabase from empty
+- [Development](docs/development.md) · [Testing](docs/testing.md) · [Deployment](docs/deployment.md)
+- [Known Issues](docs/KNOWN_ISSUES.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)
 
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+3. Make your change, then run `bun run lint`, `bun run typecheck`, and `bun run test`
+4. Commit and push
+5. Open a Pull Request — see [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) for what reviewers check
 
 ## 📄 License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
+
 ---
 
 <p align="center">
   Made with 🎵 by <a href="https://github.com/kaospan">kaospan</a>
 </p>
-
