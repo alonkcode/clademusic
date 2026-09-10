@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useState, useCallback } from 'react';
+import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { usePlayer } from './PlayerContext';
 import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Repeat } from 'lucide-react';
@@ -32,6 +32,7 @@ type EmbeddedPlayerDrawerProps = {
 
 export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: EmbeddedPlayerDrawerProps) {
   const {
+    playRequestId,
     provider,
     trackId,
     canonicalTrackId,
@@ -144,6 +145,26 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const volumePercent = Math.round((isMuted ? 0 : safeVolume) * 100);
   const isIdle = !isOpen || !provider || !trackId;
   const authoritativePositionMs = safeMs(positionMs);
+
+  // Where the embed should start when it loads, so handing a track from one
+  // provider to another (the Spotify/YouTube quicklinks) resumes where the
+  // listener actually was instead of restarting at 0:00. openPlayer writes
+  // the handoff position into positionMs before this renders, so reading it
+  // at that moment is the right value.
+  //
+  // Snapshotted per track/provider/play request, deliberately NOT tracked
+  // live: this ends up inside the iframe's src, and UniversalPlayerHost
+  // reloads the frame whenever that src changes. A value that moved with
+  // playback would rewrite the src several times a second and restart the
+  // embed continuously - so it is read through a ref, and only re-read when
+  // the thing being played actually changes.
+  const positionAtLoadRef = useRef(0);
+  positionAtLoadRef.current = authoritativePositionMs;
+  const embedStartSec = useMemo(() => {
+    const sec = Math.floor(positionAtLoadRef.current / 1000);
+    return sec > 0 ? sec : undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, trackId, playRequestId]);
 
   const { activeSection, sectionWhy } = useActiveSection({
     sections,
@@ -357,6 +378,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                             title: resolvedTitle,
                             artist: resolvedArtist,
                             autoplay,
+                            startSec: embedStartSec,
                           }
                         : null
                     }

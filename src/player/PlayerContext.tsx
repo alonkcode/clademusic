@@ -487,6 +487,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // A playback clock.
+  //
+  // positionMs only ever moved when a provider pushed it through
+  // updatePlaybackState, and the embed path pushes nothing: the guest Spotify
+  // embed has no public API to report through at all, and YouTube only relays
+  // while its own state messages happen to be flowing. So for most embed
+  // playback position sat at 0 for the entire track. The seekbar hid that -
+  // it extrapolates locally for smoothness - but everything that reads the
+  // real value saw 0, which is why handing a track from one provider to
+  // another restarted it at 0:00: the handoff passes startSec from here.
+  //
+  // Providers that DO report re-baseline this on every message, so the clock
+  // only ever fills the gaps between reports rather than competing with them.
+  // Ticking at 250ms keeps each step inside useAnimatedSeekbar's re-anchor
+  // tolerance, so filling those gaps cannot make the bar stutter.
+  useEffect(() => {
+    if (!state.isPlaying || !state.provider || !state.trackId) return;
+    let last = Date.now();
+    const id = window.setInterval(() => {
+      const now = Date.now();
+      const delta = now - last;
+      last = now;
+      if (delta <= 0) return;
+      setState((prev) => {
+        if (!prev.isPlaying) return prev;
+        const limit = prev.durationMs > 0 ? prev.durationMs : Number.POSITIVE_INFINITY;
+        const nextPosition = Math.min(prev.positionMs + delta, limit);
+        if (nextPosition === prev.positionMs) return prev;
+        positionMsRef.current = nextPosition;
+        return { ...prev, positionMs: nextPosition };
+      });
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [state.isPlaying, state.provider, state.trackId]);
+
   const setMinimized = useCallback((value: boolean) => {
     setState((prev) => ({ ...prev, isMinimized: value }));
   }, []);
