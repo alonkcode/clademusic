@@ -84,7 +84,13 @@ export function QuickStreamButtons({
 
   const hasSpotify = Boolean(spotifyTrackId);
   const hasYouTube = Boolean(youtubeTrackId);
-  const unavailable = !hasSpotify && !hasYouTube;
+  // The YouTube button doesn't need a known id to be useful: handleYouTubeClick
+  // already falls back to searching by title/artist when youtubeTrackId is
+  // empty (e.g. a Last.fm scrobble that isn't in the catalog). So "nothing to
+  // show" should only fire when there's truly no way to play anything at all -
+  // no direct link AND no name to search by - not just when no id is cached.
+  const canFindYouTube = hasYouTube || Boolean(trackArtist || trackTitle);
+  const unavailable = !hasSpotify && !canFindYouTube;
 
   // Check if this is the currently playing track
   const isCurrentTrack = currentTrackId === canonicalTrackId

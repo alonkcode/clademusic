@@ -79,12 +79,36 @@ export default function FeedPage() {
 
   // Merge in priority order: scrobbles (newest), base feed, personalized recs; dedupe by provider id or title+artist
   const tracks: Track[] = useMemo(() => {
-    const seen = new Set<string>();
-    const all = [...lastfmRecent, ...baseFeed, ...personalizedRecs];
-    const deduped = all.filter((t) => {
+    const nameArtistKey = (t: Track) => {
       const title = (t.title || (t as any).name || '').toLowerCase().trim();
       const artist = (t.artist || t.artists?.[0] || '').toLowerCase().trim();
-      const key = (t.spotify_id || t.youtube_id || `${title}|${artist}`) || t.id;
+      return `${title}|${artist}`;
+    };
+
+    // A Last.fm scrobble is only a title + artist - no provider ids, no
+    // sections, no harmony. So its feed card had nothing for the quick-link
+    // buttons to play and nothing for the section chips to seek to. When the
+    // same song is in the catalog (or the Spotify recs), fold that row's
+    // playable data onto the scrobble so the card behaves like any other.
+    const catalogByNameArtist = new Map<string, Track>();
+    for (const t of [...baseFeed, ...personalizedRecs]) {
+      const k = nameArtistKey(t);
+      if (k !== '|' && !catalogByNameArtist.has(k)) catalogByNameArtist.set(k, t);
+    }
+    const hydratedLastfm = lastfmRecent.map((t) => {
+      const match = catalogByNameArtist.get(nameArtistKey(t));
+      if (!match) return t;
+      // Catalog row wins for the canonical id and everything playback needs
+      // (provider ids, sections, harmony, duration) so section-seek and the
+      // already-played ordering below both recognise it; the scrobble keeps
+      // its own cover art / album only where the catalog has none.
+      return { ...t, ...match, cover_url: match.cover_url || t.cover_url, album: match.album || t.album };
+    });
+
+    const seen = new Set<string>();
+    const all = [...hydratedLastfm, ...baseFeed, ...personalizedRecs];
+    const deduped = all.filter((t) => {
+      const key = (t.spotify_id || t.youtube_id || nameArtistKey(t)) || t.id;
       if (!key) return false;
       if (seen.has(key)) return false;
       seen.add(key);

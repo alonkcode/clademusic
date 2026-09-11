@@ -4,6 +4,7 @@ import { TrackSection } from '@/types';
 import { usePlayer } from '@/player/PlayerContext';
 import type { MusicProvider } from '@/types';
 import { useSectionSelection } from '@/hooks/useSectionSelection';
+import { searchYouTubeVideos } from '@/services/youtubeSearchService';
 import { cn } from '@/lib/utils';
 import { formatTime } from '@/lib/timeFormat';
 
@@ -71,7 +72,7 @@ export function CompactSongSections({
 
   const selection = useSectionSelection();
 
-  const handleSectionClick = (section: TrackSection, index: number) => {
+  const handleSectionClick = async (section: TrackSection, index: number) => {
     // Move the harmonic readout below the card to this stanza too, so both
     // controls always describe the same part of the song.
     selection?.select(index);
@@ -109,8 +110,26 @@ export function CompactSongSections({
     // is exactly what kept sending section taps to YouTube by default.
     const openProvider: MusicProvider | null =
       spotifyOpen && spotifyId ? 'spotify' : youtubeOpen && youtubeId ? 'youtube' : null;
-    const provider = openProvider ?? (spotifyId ? 'spotify' : youtubeId ? 'youtube' : null);
-    const providerTrackId = provider === 'spotify' ? spotifyId : youtubeId;
+    let provider = openProvider ?? (spotifyId ? 'spotify' : youtubeId ? 'youtube' : null);
+    let providerTrackId = provider === 'spotify' ? spotifyId : provider === 'youtube' ? youtubeId : null;
+
+    // A feed card built from a Last.fm scrobble carries no provider id at all,
+    // so a section tap had nothing to open. Look the song up on YouTube by
+    // name, the same fallback QuickStreamButtons' YouTube button uses, so the
+    // tap still starts it at this section's timestamp.
+    if (!providerTrackId && (trackTitle || trackArtist)) {
+      try {
+        const results = await searchYouTubeVideos(trackArtist || '', trackTitle || '');
+        const found = results[0]?.videoId;
+        if (found) {
+          provider = 'youtube';
+          providerTrackId = found;
+        }
+      } catch (err) {
+        console.warn('YouTube lookup for section jump failed', err);
+      }
+    }
+
     if (!provider || !providerTrackId) return;
 
     openPlayer({
