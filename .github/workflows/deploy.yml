@@ -169,8 +169,33 @@ jobs:
         with:
           version: latest
 
+      # Named one by one, deliberately. `supabase functions deploy` with no
+      # argument ships every directory under supabase/functions, so this job's
+      # blast radius silently widened whenever anyone added one - and half of
+      # them need secrets that are not set on the project, which does not fail
+      # the deploy: they go live and then fail at runtime. A live billing
+      # webhook that cannot verify a Stripe signature is worse than an absent
+      # one, so only functions whose required secrets actually exist are here.
+      #
+      # To enable one of the rest, set its secrets and add it to the list:
+      #   billing-checkout  STRIPE_SECRET_KEY STRIPE_PRICE_STARTER_ID STRIPE_PRICE_PRO_ID
+      #   billing-webhook   STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET
+      #   search-spotify    SPOTIFY_CLIENT_ID SPOTIFY_CLIENT_SECRET
+      #   send-email        RESEND_API_KEY RESEND_FROM
+      #   test-runs         CI_TEST_REPORT_TOKEN
       - name: Deploy Edge Functions
         run: |
-          supabase functions deploy --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          set -euo pipefail
+          for fn in \
+            ingest-detection \
+            harmonic-analysis \
+            search-apple \
+            setup_2fa \
+            verify_2fa
+          do
+            echo "::group::deploy $fn"
+            supabase functions deploy "$fn" --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+            echo "::endgroup::"
+          done
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
