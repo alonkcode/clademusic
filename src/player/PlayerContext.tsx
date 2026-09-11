@@ -1006,18 +1006,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [state.provider, state.isPlaying]);
 
-  // Ensure the page layout reserves space for the floating player when open so
-  // the player never ends up visually behind other UI. We toggle a body class
-  // and set a CSS variable with the player's height to let global styles
-  // push content above the player (no content is covered).
+  // Ensure the page layout reserves space for the docked player when open so
+  // it never ends up visually behind the page's own content. We toggle a body
+  // class here; the matching height is published by EmbeddedPlayerDrawer,
+  // which measures its real rendered height (bar + chord readout) with a
+  // ResizeObserver - a hard-coded 52px here left the taller chord panel
+  // sitting on top of page content.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const el = document.body;
       if (isOpen) {
         el.classList.add('clade-player-open');
-        // Keep this in sync with EmbeddedPlayerDrawer's height
-        el.style.setProperty('--clade-player-height', '52px');
       } else {
         el.classList.remove('clade-player-open');
         el.style.removeProperty('--clade-player-height');

@@ -86,7 +86,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   // player - always there while a track is loaded, never dragged or
   // resized around the screen. "Show video" reveals a compact panel above
   // the bar (the "miniplayer") rather than taking over the screen.
-  const { cinemaRef, showVideo, setShowVideo, toggleFullscreen } = usePlayerLayout({ isCinema, enterCinema, exitCinema });
+  const { cinemaRef, showVideo, setShowVideo, toggleFullscreen, hudCollapsed, setHudCollapsed } = usePlayerLayout({ isCinema, enterCinema, exitCinema });
 
   // Real Spotify playback (Web Playback SDK - actual full tracks, actual
   // play/pause/seek/volume control, driven by the user's own connected
@@ -145,6 +145,8 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const volumePercent = Math.round((isMuted ? 0 : safeVolume) * 100);
   const isIdle = !isOpen || !provider || !trackId;
   const authoritativePositionMs = safeMs(positionMs);
+  // Is there anything in the chord readout worth showing / collapsing?
+  const hasHarmonyPanel = harmony.progression.length > 0 || sections.length > 0;
 
   // Where the embed should start when it loads, so handing a track from one
   // provider to another (the Spotify/YouTube quicklinks) resumes where the
@@ -195,6 +197,29 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
 
   useDevPlayerInvariants(isOpen, resolvedTitle);
 
+  // Publish the docked player's real rendered height so the page reserves
+  // exactly that much bottom space (see body.clade-player-open in index.css).
+  // The chord readout above the bar makes the player 200-350px tall, but the
+  // reservation was hard-coded at 52px - so the panel sat on top of the
+  // page's own content (the login form's submit button, most visibly).
+  useEffect(() => {
+    const el = cinemaRef.current;
+    if (typeof window === 'undefined' || !el) return;
+    const publish = () => {
+      document.body.style.setProperty('--clade-player-height', `${Math.round(el.getBoundingClientRect().height)}px`);
+    };
+    publish();
+    if (typeof ResizeObserver === 'undefined') {
+      return () => document.body.style.removeProperty('--clade-player-height');
+    }
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.body.style.removeProperty('--clade-player-height');
+    };
+  }, [cinemaRef]);
+
   const { handlePrev, handleNext, effectiveCanNext, effectiveCanPrev } = useTransportControls({
     isIdle,
     positionMs,
@@ -231,7 +256,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
         data-player="universal"
         className={`fixed inset-x-0 bottom-0 z-[110] border-t border-border/60 bg-gradient-to-t ${meta.color} shadow-[0_-18px_60px_-30px_rgba(0,0,0,0.75)] backdrop-blur-xl`}
       >
-        {/* Chord readout and section jump chips: always visible whenever a
+        {/* Chord readout and section jump chips: visible by default whenever a
             track is loaded, not just when the video panel below is expanded.
             These used to live inside the collapsible DetailsPanel (gated on
             showVideo, which defaults closed) - since that panel is collapsed
@@ -239,8 +264,26 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             hidden by default, and "jump to chorus/verse" wasn't reachable
             without first opening a panel most listeners never open. Only the
             video box itself (which genuinely benefits from being opt-in) stays
-            behind the expand toggle, below. */}
-        {!isIdle && (
+            behind the expand toggle, below.
+
+            The one dedicated collapse handle here lets the reader reclaim the
+            200-350px it occupies (it is part of a position:fixed bar, so it
+            overlays the page) without hiding the transport too; the choice is
+            remembered across sessions. */}
+        {!isIdle && (hasHarmonyPanel || hudCollapsed) && (
+          <button
+            type="button"
+            onClick={() => setHudCollapsed(!hudCollapsed)}
+            aria-expanded={!hudCollapsed}
+            aria-label={hudCollapsed ? 'Show chord readout' : 'Hide chord readout'}
+            className="flex w-full items-center justify-center gap-1.5 border-b border-border/60 bg-background/95 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {hudCollapsed ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {hudCollapsed ? 'Chords' : 'Hide chords'}
+          </button>
+        )}
+
+        {!isIdle && !hudCollapsed && hasHarmonyPanel && (
           <div className="max-h-[45vh] overflow-y-auto border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
             <HarmonicHUD
               trackId={canonicalTrackId ?? ''}
