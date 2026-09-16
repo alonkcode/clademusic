@@ -214,13 +214,20 @@ export function HarmonicHUD({
   // A finished capture of THIS track, with a key to write numerals against,
   // attached to a real catalog row and a real account. A feed card built from
   // seed data has no uuid to reference, so there is nothing to save it to.
-  const canSaveAnalysis =
+  const hasSavableAnalysis =
     live.status !== 'capturing' &&
     analyzedTrackId === trackId &&
     live.sectionProgressions.length > 0 &&
     live.detectedKey !== null &&
     isUuid(trackId) &&
     Boolean(user);
+
+  // ...and whose timestamps actually line up with the track. The guest Spotify
+  // embed never reports its position, so a capture of it has times relative
+  // only to when listening began; saving those would put wrong timestamps
+  // into the catalog. The button still shows, disabled with the reason,
+  // because a Save that silently never appears reads as a bug.
+  const canSaveAnalysis = hasSavableAnalysis && live.timingAligned;
 
   const sync = useSectionSync({
     trackId,
@@ -454,13 +461,17 @@ export function HarmonicHUD({
               after review anyway, so there is no reason to submit anything
               they have not looked at. Needs a real catalog track to attach
               to, and a signed-in account to attribute it to. */}
-          {canSaveAnalysis && (
+          {hasSavableAnalysis && (
             <button
               type="button"
               onClick={() => void handleSaveAnalysis()}
-              disabled={saveState !== 'idle'}
+              disabled={!canSaveAnalysis || saveState !== 'idle'}
               aria-label="Save this analysis"
-              title="Save the sections and chords just detected"
+              title={
+                canSaveAnalysis
+                  ? 'Save the sections and chords just detected'
+                  : "Can't save: this player doesn't report its position, so the timings aren't tied to the song. Play it through Spotify Premium or YouTube to save."
+              }
               className={cn(
                 'inline-flex items-center justify-center gap-1.5 rounded-full transition-colors shrink-0',
                 'h-8 px-2.5 text-[11px] font-medium',

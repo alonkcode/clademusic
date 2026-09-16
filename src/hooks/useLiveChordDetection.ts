@@ -14,6 +14,7 @@ import {
   type SectionProgression,
 } from '@/lib/harmony/chordTimeline';
 import { estimateKey, type KeyEstimate } from '@/lib/harmony/keyEstimation';
+import { PlaybackClock } from '@/lib/harmony/playbackClock';
 import { usePlayer } from '@/player/PlayerContext';
 
 export type LiveDetectionStatus = 'idle' | 'requesting' | 'capturing' | 'unsupported' | 'error';
@@ -37,6 +38,11 @@ export interface UseLiveChordDetectionResult {
   /** Tonic and mode inferred from the chords heard, which is what lets the
    *  absolute triads the detector produces be written as Roman numerals. */
   detectedKey: KeyEstimate | null;
+  /** Whether the timestamps in this analysis line up with the track itself.
+   *  False when the player never reported a moving position during capture -
+   *  the guest Spotify embed reports none at all - in which case times are
+   *  only relative to when capture started and must not be stored. */
+  timingAligned: boolean;
   start: () => Promise<void>;
   stop: () => void;
   /** Throw away the accumulated analysis. Stopping a capture keeps it. */
@@ -77,6 +83,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   const [chordSpans, setChordSpans] = useState<ChordSpan[]>([]);
   const [sectionProgressions, setSectionProgressions] = useState<SectionProgression[]>([]);
   const [detectedKey, setDetectedKey] = useState<KeyEstimate | null>(null);
+  const [timingAligned, setTimingAligned] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -87,16 +94,24 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   const sectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chromaHistoryRef = useRef<ChromaFrame[]>([]);
   const captureStartedAtRef = useRef<number>(0);
+  const clockRef = useRef(new PlaybackClock());
 
-  // Sections are timed against the app player's own playback position, when
+  // Frames are timed against the app player's own playback position, when
   // this track is the one actually playing through it, so a detected
-  // boundary lands where selectSection's seek would actually go. Read via a
-  // ref (not the value itself) so the capture loop always sees the current
-  // position without needing to restart on every position update.
+  // boundary lands where selectSection's seek would actually go.
+  //
+  // Not against positionMs directly, though: that only changes when the
+  // provider relays a position - every 500ms on Spotify Premium, never on the
+  // guest embed - which quantized chord times to half-seconds or froze them
+  // outright. PlaybackClock interpolates between reports instead. Read via
+  // refs so the capture loop sees the current value without restarting on
+  // every position update.
   const { positionMs, isPlaying } = usePlayer();
   const positionRef = useRef({ positionMs, isPlaying });
   useEffect(() => {
     positionRef.current = { positionMs, isPlaying };
+    clockRef.current.report(positionMs, isPlaying, performance.now());
+    setTimingAligned(clockRef.current.aligned);
   }, [positionMs, isPlaying]);
 
   const supported =
@@ -237,6 +252,12 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
       // songs' chords into one timeline would be nonsense.
       reset();
       captureStartedAtRef.current = performance.now();
+      // Alignment is judged per capture: a previous track that reported its
+      // position must not vouch for one that reports nothing. Seed the clock
+      // with wherever the player is now, so the first frames have an anchor.
+      clockRef.current.reset();
+      clockRef.current.report(positionRef.current.positionMs, positionRef.current.isPlaying, performance.now());
+      setTimingAligned(false);
 
       intervalRef.current = setInterval(() => {
         analyser.getFloatFrequencyData(magnitudes);
@@ -250,15 +271,25 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
         const smoothed = smootherRef.current.push(raw);
         setChord(smoothed);
 
-        // Time each frame against the app player's real position while this
-        // track is the one actually playing, so a detected boundary is
-        // exactly where tapping it would seek to; otherwise fall back to
-        // elapsed capture time (still internally consistent, just not tied
-        // to a seekable timeline).
-        const { positionMs, isPlaying } = positionRef.current;
-        const timeSec = isPlaying
-          ? positionMs / 1000
-          : (performance.now() - captureStartedAtRef.current) / 1000;
+        // Time each frame against the app player's position while this track
+        // is the one playing through it, so a detected boundary is exactly
+        // where tapping it would seek to; otherwise fall back to elapsed
+        // capture time (internally consistent, just not tied to the track).
+        const now = performance.now();
+        const { isPlaying } = positionRef.current;
+        const clock = clockRef.current;
+        const clockSec = clock.positionSec(now);
+
+        // Paused partway through a capture of this player: the clock is
+        // holding still and the audio has gone quiet, so there is nothing to
+        // record. Stacking silent frames onto one frozen instant would only
+        // dilute whichever section bucket that instant falls in.
+        if (!isPlaying && clock.aligned) return;
+
+        const timeSec =
+          clockSec !== null && (isPlaying || clock.aligned)
+            ? clockSec
+            : (now - captureStartedAtRef.current) / 1000;
         chromaHistoryRef.current.push({ chroma, timeSec });
         // The same estimate that drives the live readout, kept this time:
         // ChordTimeline extends the current span while the chord holds and
@@ -297,6 +328,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
     chordSpans,
     sectionProgressions,
     detectedKey,
+    timingAligned,
     start,
     stop,
     reset,
