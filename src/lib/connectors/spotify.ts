@@ -15,7 +15,7 @@ import {
 import { ProviderLink } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 
-interface SpotifyTrack {
+export interface SpotifyTrack {
   id: string;
   name: string;
   artists: Array<{ name: string }>;
@@ -32,6 +32,33 @@ interface SpotifyTrack {
   };
   preview_url?: string;
   uri: string;
+}
+
+/**
+ * A raw Spotify Web API track, as search-spotify returns it, in the
+ * provider-agnostic shape the connectors share.
+ *
+ * Replaces a normaliser written for a response shape - `title`, `artist`,
+ * `providers.spotify.provider_track_id` - that the function has never
+ * produced, which is why every field it read came back undefined.
+ */
+export function normalizeSpotifyTrack(track: SpotifyTrack): NormalizedTrack {
+  // Spotify orders images largest first; take the first rather than guessing
+  // at a size, since any of them is better than none.
+  const artwork = track.album?.images?.[0]?.url;
+  return {
+    title: track.name,
+    artists: (track.artists ?? []).map((a) => a.name).filter(Boolean),
+    album: track.album?.name ?? '',
+    duration_ms: track.duration_ms ?? 0,
+    artwork_url: artwork,
+    isrc: track.external_ids?.isrc,
+    provider_track_id: track.id,
+    provider: 'spotify',
+    url_web: track.external_urls?.spotify ?? `https://open.spotify.com/track/${track.id}`,
+    url_app: track.uri ?? `spotify:track:${track.id}`,
+    url_preview: track.preview_url ?? undefined,
+  };
 }
 
 export class SpotifyConnector implements ProviderConnector {
@@ -69,12 +96,17 @@ export class SpotifyConnector implements ProviderConnector {
       const { data: session } = await supabase.auth.getSession();
       
       if (session?.session) {
-        const { data, error } = await supabase.functions.invoke('search_spotify', {
+        // The function is `search-spotify` and returns Spotify's own track
+        // objects as `{ tracks, total }`. This used to call `search_spotify`
+        // (which does not exist) and read `data.results` (which the function
+        // never sends), so it failed twice over and always fell through to
+        // the cache below. spotifySearchService already calls it correctly.
+        const { data, error } = await supabase.functions.invoke('search-spotify', {
           body: { query, limit, market },
         });
-        
-        if (!error && data?.results) {
-          return data.results.map((r: any) => this.normalizeEdgeFunctionResult(r));
+
+        if (!error && Array.isArray(data?.tracks)) {
+          return (data.tracks as SpotifyTrack[]).map((t) => normalizeSpotifyTrack(t));
         }
       }
       
@@ -97,21 +129,6 @@ export class SpotifyConnector implements ProviderConnector {
       console.error('Spotify search failed:', error);
       return [];
     }
-  }
-
-  private normalizeEdgeFunctionResult(result: any): NormalizedTrack {
-    return {
-      title: result.title,
-      artists: result.artist?.split(', ') || [],
-      album: result.album || '',
-      duration_ms: result.duration_ms || 0,
-      artwork_url: result.artwork_url,
-      isrc: result.isrc,
-      provider_track_id: result.providers?.spotify?.provider_track_id || '',
-      provider: 'spotify',
-      url_web: `https://open.spotify.com/track/${result.providers?.spotify?.provider_track_id}`,
-      url_app: `spotify:track:${result.providers?.spotify?.provider_track_id}`,
-    };
   }
 
   private normalizeCachedTrack(track: any): NormalizedTrack {
