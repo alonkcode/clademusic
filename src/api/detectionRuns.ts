@@ -87,32 +87,44 @@ export function buildDetectionRunPayload(args: {
   const { trackId, sectionProgressions, detectedKey } = args;
   if (!trackId || !detectedKey || sectionProgressions.length === 0) return null;
 
-  const ordered = [...sectionProgressions].sort((a, b) => a.section.startSec - b.section.startSec);
+  // Anything that rounds to zero whole milliseconds is dropped, not stretched.
+  //
+  // This used to bump such a span's end forward by 1ms so it would pass the
+  // server's end-after-start check - but the next span starts at that same
+  // millisecond, so the bump made the two overlap, and the server rejects an
+  // entire run over one overlap. A chord clipped at a section edge can easily
+  // be a sub-millisecond sliver, so that failed real Saves. Dropping is also
+  // simply correct: nothing audible happens in less than a millisecond.
+  //
+  // With the stretch gone, overlap is impossible: the source spans never
+  // overlap, and rounding is monotonic, so one span's end can never round
+  // past the next one's start.
+  const ordered = [...sectionProgressions]
+    .sort((a, b) => a.section.startSec - b.section.startSec)
+    .map((sp) => ({ sp, startMs: toMs(sp.section.startSec), endMs: toMs(sp.section.endSec) }))
+    .filter(({ startMs, endMs }) => endMs > startMs);
 
   // "Verse 1", "Verse 2": which occurrence of this label it is, counted in
   // playing order. Derived here rather than parsed out of the display label,
-  // which is text meant for a human.
+  // which is text meant for a human - and counted after dropping, so the
+  // numbering has no gaps.
   const seen = new Map<string, number>();
 
-  const sections = ordered.map((sp) => {
+  const sections = ordered.map(({ sp, startMs, endMs }) => {
     const label = sp.section.type;
     const ordinal = (seen.get(label) ?? 0) + 1;
     seen.set(label, ordinal);
 
-    const startMs = toMs(sp.section.startSec);
-    const endMs = Math.max(startMs + 1, toMs(sp.section.endSec));
-
-    const chords = sp.chords.map((c) => {
-      const cStart = toMs(c.startSec);
-      return {
+    const chords = sp.chords
+      .map((c) => ({
         numeral: toRomanNumeral(c, detectedKey),
         rootPitchClass: c.root,
         quality: c.quality,
-        startMs: cStart,
-        endMs: Math.max(cStart + 1, toMs(c.endSec)),
+        startMs: toMs(c.startSec),
+        endMs: toMs(c.endSec),
         confidence: Math.round(Math.min(1, Math.max(0, c.confidence)) * 1000) / 1000,
-      };
-    });
+      }))
+      .filter((c) => c.endMs > c.startMs);
 
     // The mean of what the detector thought of the chords it heard here -
     // a section built from shaky readings should not look as solid as one
@@ -133,6 +145,8 @@ export function buildDetectionRunPayload(args: {
       chords,
     };
   });
+
+  if (sections.length === 0) return null;
 
   const coveredFromMs = sections[0].startMs;
   const coveredToMs = sections[sections.length - 1].endMs;

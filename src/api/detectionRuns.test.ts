@@ -119,15 +119,45 @@ describe('buildDetectionRunPayload', () => {
 
   // The server rejects any span that does not end after it starts, and
   // rounding two nearby times can collapse them onto the same millisecond.
-  it('never emits a zero-length section or chord', () => {
+  // Such slivers are dropped rather than stretched: stretching one by 1ms
+  // made it overlap its neighbour, and the server rejects a whole run for that.
+  it('drops a chord that rounds to zero length, keeping the section', () => {
     const payload = buildDetectionRunPayload({
       trackId: TRACK,
       detectedKey: C_MAJOR,
-      sectionProgressions: [progression('intro', 4.0001, 4.0002, [span(0, 'major', 4.0001, 4.0002)])],
+      sectionProgressions: [
+        progression('verse', 0, 8, [span(7, 'major', 0, 0.0004), span(0, 'major', 0.0004, 8)]),
+      ],
     });
-    const section = payload!.sections[0];
-    expect(section.endMs).toBeGreaterThan(section.startMs);
-    expect(section.chords[0].endMs).toBeGreaterThan(section.chords[0].startMs);
+    const chords = payload!.sections[0].chords;
+    expect(chords).toHaveLength(1);
+    expect(chords[0].numeral).toBe('I');
+  });
+
+  it('drops a section that rounds to zero length and numbers the rest without gaps', () => {
+    const payload = buildDetectionRunPayload({
+      trackId: TRACK,
+      detectedKey: C_MAJOR,
+      sectionProgressions: [
+        progression('verse', 0, 8, [span(0, 'major', 0, 4)]),
+        progression('verse', 8.0001, 8.0002, [span(0, 'major', 8.0001, 8.0002)]),
+        progression('verse', 16, 24, [span(0, 'major', 16, 20)]),
+      ],
+    });
+    expect(payload!.sections.map((s) => [s.startMs, s.ordinal])).toEqual([
+      [0, 1],
+      [16000, 2],
+    ]);
+  });
+
+  it('returns null when every section is a sliver', () => {
+    expect(
+      buildDetectionRunPayload({
+        trackId: TRACK,
+        detectedKey: C_MAJOR,
+        sectionProgressions: [progression('intro', 4.0001, 4.0002, [span(0, 'major', 4.0001, 4.0002)])],
+      })
+    ).toBeNull();
   });
 
   it('covers the span from the first section to the last', () => {
