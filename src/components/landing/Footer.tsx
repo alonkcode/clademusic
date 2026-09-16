@@ -179,6 +179,12 @@ export function Footer() {
                 stroke="url(#footerGradient)"
                 strokeWidth="2"
                 fill="none"
+                // Seed the animated value explicitly. With only `animate`, the
+                // motion value for d starts unresolved and framer-motion writes
+                // it for one frame before the first keyframe lands - the path
+                // got d="undefined", which the browser logs as "Expected moveto
+                // path command". Caught by watching the attribute itself.
+                initial={{ d: base }}
                 animate={{ d: [base, alt, base] }}
                 transition={{
                   duration: 4,

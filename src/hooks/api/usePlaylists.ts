@@ -1,6 +1,21 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Retry only failures that might succeed next time. An error carrying a
+ * PostgREST or Postgres `code` (PGRST200, 22P02, ...) is the server's settled
+ * answer to that exact request - retrying it three times with backoff just
+ * adds seconds of spinner before the same error. Network failures carry no
+ * such code and are still retried.
+ */
+export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && code.length > 0) return false;
+  return failureCount < 2;
+}
+
 export interface Playlist {
   id: string;
   user_id: string;
@@ -74,6 +89,9 @@ export function usePlaylist(playlistId?: string) {
     queryKey: ['playlist', playlistId],
     queryFn: async () => {
       if (!playlistId) return null;
+      // playlists.id is a uuid; anything else can't match a row, and sending it
+      // only earns a 22P02 from the server. Treat it as the not-found it is.
+      if (!UUID_PATTERN.test(playlistId)) return null;
 
       const { data, error } = await supabase
         .from('playlists')
@@ -91,12 +109,17 @@ export function usePlaylist(playlistId?: string) {
         `)
         .eq('id', playlistId)
         .order('position', { foreignTable: 'playlist_tracks' })
-        .single();
+        // maybeSingle, not single: zero rows is an ordinary "no such playlist",
+        // which single() reports as an error. Thrown, it was retried three
+        // times with backoff, holding the page on "Loading..." for ~8.6s
+        // before it could say "Playlist not found".
+        .maybeSingle();
 
       if (error) throw error;
       return data;
     },
     enabled: !!playlistId,
+    retry: shouldRetryQuery,
   });
 }
 

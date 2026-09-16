@@ -43,7 +43,7 @@ interface VideoSource {
 export default function TrackDetailPage() {
   const { trackId } = useParams();
   const navigate = useNavigate();
-  const { data: track, isLoading } = useTrack(decodeURIComponent(trackId || ''));
+  const { data: track, isLoading, isError } = useTrack(decodeURIComponent(trackId || ''));
   const { openPlayer, provider, trackId: activeTrackId, isPlaying } = usePlayer();
   // IMPORTANT: There must NEVER be more than one playback surface.
   // YouTube must be played only through the universal player.
@@ -300,12 +300,40 @@ export default function TrackDetailPage() {
       }]
     : [];
 
-  if (isLoading || !track) {
+  // Three distinct states, not one. This used to be `if (isLoading || !track)`,
+  // which rendered "Loading track..." with a pulsing icon for a track that had
+  // finished loading and simply did not exist - so an unknown or mistyped id
+  // looked like it was loading forever, with no way to tell it never would.
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <Music2 className="w-12 h-12 text-muted-foreground animate-pulse mx-auto mb-4" />
           <p className="text-muted-foreground">Loading track...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !track) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-6">
+        <div className="text-center max-w-sm space-y-4">
+          <Music2 className="w-12 h-12 text-muted-foreground mx-auto" />
+          <p className="text-lg font-semibold">
+            {isError ? "Couldn't load this track" : 'Track not found'}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {isError
+              ? 'Something went wrong fetching it. Try again in a moment.'
+              : "It may have been removed, or the link isn't quite right."}
+          </p>
+          <div className="flex justify-center gap-2">
+            <Button variant="outline" onClick={() => navigate(-1)}>
+              Go back
+            </Button>
+            <Button onClick={() => navigate('/search')}>Search tracks</Button>
+          </div>
         </div>
       </div>
     );
