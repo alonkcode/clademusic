@@ -136,21 +136,33 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
       frame.contentWindow.postMessage({ type: 'universal-player:command', payload: { command, ...extra } }, window.location.origin);
     };
     registerProviderControls(request.provider, {
-      play: (startSec) => {
-        // Consume the pending seek. PlayerContext hands play() whatever
-        // seekToSec still holds, and nothing on this path ever cleared it
-        // (only the Spotify providers did), so it stayed set to the last
-        // section chip that was tapped for the rest of the track: pause and
-        // press play again anywhere later and playback jumped back to that
-        // chip instead of resuming where it stopped.
-        if (typeof startSec === 'number') {
-          sendCommand('seek', { seconds: startSec });
-          clearSeek();
-        }
+      // On this path a pending seekToSec has ALWAYS already been delivered by
+      // the time play() sees it: a start position (openPlayer, including the
+      // quicklink handoff) goes out in the embed URL's start=, and a seek
+      // during playback goes out immediately through seekTo below. So play()
+      // must not apply it again. It used to: PlayerContext hands play()
+      // whatever seekToSec still holds, and re-sending it made every
+      // pause-then-play after a seekbar drag, a section chip, or a quicklink
+      // handoff jump back to that point instead of resuming where the
+      // listener paused. Verified against the live site: paused at 229.8s
+      // after seeking to 221.7s, and play resumed at 223.4s.
+      //
+      // Known limit: a seek issued in the second or so before YouTube's
+      // widget initialises is dropped by YouTube, and is no longer retried on
+      // the next play press. That retry only ever worked on an explicit
+      // press, and it was the same mechanism that caused the jump-back.
+      play: () => {
+        clearSeek();
         sendCommand('play');
       },
       pause: () => sendCommand('pause'),
-      seekTo: (seconds: number) => sendCommand('seek', { seconds }),
+      // Delivered on the spot, so clear it here rather than leaving it pending
+      // for a later play() - the convention every other provider follows is
+      // "apply the pending seek, then clearSeek()".
+      seekTo: (seconds: number) => {
+        sendCommand('seek', { seconds });
+        clearSeek();
+      },
       setVolume: (volume: number) => sendCommand('setVolume', { volume }),
       setMute: (muted: boolean) => sendCommand('setMute', { muted }),
       teardown: () => {},
