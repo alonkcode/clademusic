@@ -70,64 +70,15 @@ export function TrackCard({
     }));
   }, [track.id, track.duration_ms]);
 
-  // Generate default sections if not present
-  const generateDefaultSections = useCallback((): TrackSection[] => {
-    const durationMs = track.duration_ms || 240000; // Default 4 minutes
-    return [
-      {
-        id: `${track.id}-intro`,
-        track_id: track.id,
-        label: 'intro',
-        start_ms: 0,
-        end_ms: Math.floor(durationMs * 0.1),
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: `${track.id}-verse1`,
-        track_id: track.id,
-        label: 'verse',
-        start_ms: Math.floor(durationMs * 0.1),
-        end_ms: Math.floor(durationMs * 0.3),
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: `${track.id}-chorus1`,
-        track_id: track.id,
-        label: 'chorus',
-        start_ms: Math.floor(durationMs * 0.3),
-        end_ms: Math.floor(durationMs * 0.5),
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: `${track.id}-verse2`,
-        track_id: track.id,
-        label: 'verse',
-        start_ms: Math.floor(durationMs * 0.5),
-        end_ms: Math.floor(durationMs * 0.65),
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: `${track.id}-chorus2`,
-        track_id: track.id,
-        label: 'chorus',
-        start_ms: Math.floor(durationMs * 0.65),
-        end_ms: Math.floor(durationMs * 0.85),
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: `${track.id}-outro`,
-        track_id: track.id,
-        label: 'outro',
-        start_ms: Math.floor(durationMs * 0.85),
-        end_ms: durationMs,
-        created_at: new Date().toISOString(),
-      },
-    ];
-  }, [track.id, track.duration_ms]);
 
-  const trackSections: TrackSection[] = track.sections && track.sections.length > 0 
+  // Only the track's own analyzed sections. The fallback used to invent them
+  // at fixed percentages of the duration (intro 0-10%, verse 10-30%, ...),
+  // which meant every song claimed the same structure regardless of how it
+  // actually goes - the chips looked authoritative and were wrong. A song
+  // whose sections have not been analyzed yet shows none.
+  const trackSections: TrackSection[] = track.sections && track.sections.length > 0
     ? convertSections(track.sections)
-    : generateDefaultSections();
+    : [];
 
   // Pause audio when card becomes inactive
   useEffect(() => {
