@@ -6,6 +6,7 @@ import { Track } from '@/types';
 export const historicalTracks: Track[] = [
   {
     "id": "historical-1",
+    "youtube_id": "nvLuCm2kSDE",
     "external_id": "historical:Crazy Blues:Mamie Smith and her Jazz Hounds",
     "title": "Crazy Blues",
     "artist": "Mamie Smith and her Jazz Hounds",
@@ -139,6 +140,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-5",
+    "youtube_id": "XkOSCQyRJsE",
     "external_id": "historical:West End Blues:Louis Armstrong and His Hot Five",
     "title": "West End Blues",
     "artist": "Louis Armstrong and His Hot Five",
@@ -163,6 +165,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-6",
+    "youtube_id": "649wWWkW_1o",
     "external_id": "historical:Strange Fruit:Billie Holiday",
     "title": "Strange Fruit",
     "artist": "Billie Holiday",
@@ -221,6 +224,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-8",
+    "youtube_id": "54R4ak69ItE",
     "external_id": "historical:Rocket 88:Jackie Brenston and His Delta Cats",
     "title": "Rocket 88",
     "artist": "Jackie Brenston and His Delta Cats",
@@ -885,6 +889,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-27",
+    "youtube_id": "QoJP65nAMGA",
     "external_id": "historical:Hush:Billy Joe Royal",
     "title": "Hush",
     "artist": "Billy Joe Royal",
@@ -978,6 +983,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-30",
+    "youtube_id": "lknJe0zUQXk",
     "external_id": "historical:Hush:Joe South",
     "title": "Hush",
     "artist": "Joe South",
@@ -1000,6 +1006,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-31",
+    "youtube_id": "1kA3nZwGHHA",
     "external_id": "historical:Laléna:Donovan",
     "title": "Laléna",
     "artist": "Donovan",
@@ -1299,6 +1306,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-40",
+    "youtube_id": "QXw6YZltKJk",
     "external_id": "historical:Funky Drummer:James Brown",
     "title": "Funky Drummer",
     "artist": "James Brown",
@@ -1606,6 +1614,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-49",
+    "youtube_id": "-Udnb6F1A0g",
     "external_id": "historical:Apache:Incredible Bongo Band",
     "title": "Apache",
     "artist": "Incredible Bongo Band",
@@ -1630,6 +1639,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-50",
+    "youtube_id": "wVycUX1y0XE",
     "external_id": "historical:Impeach the President:The Honey Drippers",
     "title": "Impeach the President",
     "artist": "The Honey Drippers",
@@ -1690,6 +1700,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-52",
+    "youtube_id": "aPw0ua8U6fc",
     "external_id": "historical:Synthetic Substitution:Melvin Bliss",
     "title": "Synthetic Substitution",
     "artist": "Melvin Bliss",
@@ -1712,6 +1723,7 @@ export const historicalTracks: Track[] = [
   },
   {
     "id": "historical-53",
+    "youtube_id": "qGZh_EwIU6c",
     "external_id": "historical:Assembly Line:Commodores",
     "title": "Assembly Line",
     "artist": "Commodores",

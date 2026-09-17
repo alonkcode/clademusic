@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { searchYouTubeVideos } from '@/services/youtubeSearchService';
+import { searchSpotifyPublic } from '@/services/spotifySearchService';
+import { toast } from 'sonner';
 import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
 import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
 import { buildProviderDeepLink } from '@/player/universal/buildEmbedSrc';
@@ -84,7 +86,18 @@ export function QuickStreamButtons({
 
   const hasSpotify = Boolean(spotifyTrackId);
   const hasYouTube = Boolean(youtubeTrackId);
-  const unavailable = !hasSpotify && !hasYouTube;
+  // The YouTube button doesn't need a known id to be useful: handleYouTubeClick
+  // already falls back to searching by title/artist when youtubeTrackId is
+  // empty (e.g. a Last.fm scrobble that isn't in the catalog). So "nothing to
+  // show" should only fire when there's truly no way to play anything at all -
+  // no direct link AND no name to search by - not just when no id is cached.
+  const canFindYouTube = hasYouTube || Boolean(trackArtist || trackTitle);
+  // Spotify is resolvable on the same terms: a cached id, or a name to search
+  // by. Gating the button on hasSpotify alone greyed it out for every card
+  // whose id simply wasn't cached yet, even though the track is perfectly
+  // playable once looked up.
+  const canFindSpotify = hasSpotify || Boolean(trackArtist || trackTitle);
+  const unavailable = !canFindSpotify && !canFindYouTube;
 
   // Check if this is the currently playing track
   const isCurrentTrack = currentTrackId === canonicalTrackId
@@ -101,9 +114,33 @@ export function QuickStreamButtons({
     [youtubeTrackId, currentPositionSec]
   );
 
-  const handleSpotifyClick = useCallback(() => {
-    if (!hasSpotify || !spotifyTrackId) return;
+  const handleSpotifyClick = useCallback(async () => {
     setPreferredProvider('spotify');
+
+    // Same fallback YouTube has had: a card without a cached Spotify id - a
+    // Last.fm scrobble that isn't in the catalog, say - is still playable, we
+    // just have to look the track up by name first. Without this the Spotify
+    // button sat permanently greyed on exactly those cards while the YouTube
+    // one beside it worked, which is what made it look broken.
+    //
+    // searchSpotifyPublic authenticates at the app level, so this works for a
+    // guest too, not only for someone with Spotify connected.
+    let resolvedId = spotifyTrackId;
+    if (!resolvedId) {
+      const query = [trackArtist, trackTitle].filter(Boolean).join(' ').trim();
+      if (!query) return;
+      try {
+        const { tracks: found } = await searchSpotifyPublic(query, 1);
+        resolvedId = found[0]?.spotify_id ?? null;
+      } catch (err) {
+        console.warn('Spotify search failed; cannot play', err);
+      }
+    }
+
+    if (!resolvedId) {
+      toast.error(`Couldn't find "${trackTitle ?? 'this track'}" on Spotify`);
+      return;
+    }
 
     // Always allow Spotify to play *something* immediately:
     // - Guest / not connected: Spotify embed preview
@@ -112,14 +149,14 @@ export function QuickStreamButtons({
     openPlayer({
       canonicalTrackId,
       provider: 'spotify',
-      providerTrackId: spotifyTrackId,
+      providerTrackId: resolvedId,
       autoplay: true,
       context: 'quick-stream',
       title: trackTitle,
       artist: trackArtist,
       startSec: currentPositionSec,
     });
-  }, [hasSpotify, canonicalTrackId, trackTitle, trackArtist, openPlayer, currentPositionSec, spotifyTrackId]);
+  }, [canonicalTrackId, trackTitle, trackArtist, openPlayer, currentPositionSec, spotifyTrackId]);
 
   const handleYouTubeClick = useCallback(async () => {
     setPreferredProvider('youtube');
@@ -176,10 +213,12 @@ export function QuickStreamButtons({
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <motion.button
-        whileHover={{ scale: hasSpotify ? 1.05 : 1 }}
-        whileTap={{ scale: hasSpotify ? 0.97 : 1 }}
+        whileHover={{ scale: canFindSpotify ? 1.05 : 1 }}
+        whileTap={{ scale: canFindSpotify ? 0.97 : 1 }}
         onMouseDown={(e) => {
           // Middle-click / cmd-click / ctrl-click opens provider page in a new tab.
+          // Only possible with a known id - there is no deep link to a track
+          // we have not looked up yet.
           if (!hasSpotify || !spotifyDeepLink) return;
           if (e.button === 1 || e.metaKey || e.ctrlKey) {
             e.preventDefault();
@@ -187,20 +226,26 @@ export function QuickStreamButtons({
             window.open(spotifyDeepLink, '_blank', 'noopener,noreferrer');
           }
         }}
-        onClick={hasSpotify ? handleSpotifyClick : undefined}
+        onClick={canFindSpotify ? handleSpotifyClick : undefined}
         data-provider="spotify"
-        disabled={!hasSpotify}
+        disabled={!canFindSpotify}
         className={cn(
           sizeClasses[size],
           'rounded-full flex items-center justify-center transition-all',
-          hasSpotify
+          canFindSpotify
             ? 'bg-gradient-to-br from-[#1DB954] to-[#1ed760] text-white shadow-lg hover:shadow-xl hover:from-[#1ed760] hover:to-[#1DB954] cursor-pointer'
             : 'bg-muted text-muted-foreground cursor-not-allowed opacity-60',
           currentProvider === 'spotify' && isCurrentTrack && 'ring-2 ring-white ring-offset-2 ring-offset-background',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
         )}
-        title={hasSpotify ? 'Play in Spotify' : 'Spotify unavailable'}
-        aria-label={hasSpotify ? `Play ${trackTitle} in Spotify` : 'Spotify unavailable'}
+        title={hasSpotify ? 'Play in Spotify' : canFindSpotify ? 'Find on Spotify' : 'Spotify unavailable'}
+        aria-label={
+          hasSpotify
+            ? `Play ${trackTitle} in Spotify`
+            : canFindSpotify
+              ? `Find ${trackTitle} on Spotify`
+              : 'Spotify unavailable'
+        }
       >
         <SpotifyIcon className={iconSizes[size]} />
       </motion.button>

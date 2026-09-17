@@ -30,7 +30,7 @@ export function focusUniversalPlayerFrame() {
 }
 
 export function UniversalPlayerHost({ request, className }: UniversalPlayerHostProps) {
-  const { registerProviderControls, updatePlaybackState } = usePlayer();
+  const { registerProviderControls, updatePlaybackState, clearSeek } = usePlayer();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const seqRef = useRef(0);
   const lastScheduledRef = useRef<PlayTarget>(null);
@@ -38,21 +38,52 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
   const baseUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.BASE_URL) || '/';
   const iframeSrc = useMemo(() => `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}universal-player.html`, [baseUrl]);
 
+  // The embed URL is the identity of a LOAD, so it may only depend on WHICH
+  // track is wanted - never on live transport state. autoplay/startSec say how
+  // to *start* a load, so they're captured once per track and not read again.
+  //
+  // The caller passes autoplay={isPlaying}, and universal-player.html relays
+  // YouTube's real player state back up into that same isPlaying (see the
+  // state-relay effect below). Reading autoplay live therefore closed a loop:
+  // YouTube reports buffering -> isPlaying goes false -> autoplay=1 drops out
+  // of the URL -> the src differs -> the frame (which dedupes by exact src and
+  // hard-unloads to about:blank on any difference) reloads -> it buffers ->
+  // repeat. Playback stuttered and restarted from 0:00 continuously, and an
+  // ordinary pause reloaded the iframe instead of pausing it. Transport after
+  // load doesn't need the URL at all: play/pause/seek go through the
+  // postMessage commands registered below, with no reload.
+  const trackKey = request ? `${request.provider}:${request.id}` : null;
+  const loadIntentRef = useRef<{ key: string | null; autoplay: boolean; startSec?: number }>({
+    key: null,
+    autoplay: false,
+    startSec: undefined,
+  });
+  if (loadIntentRef.current.key !== trackKey) {
+    loadIntentRef.current = {
+      key: trackKey,
+      autoplay: request?.autoplay === true,
+      startSec: request?.startSec,
+    };
+  }
+  const { autoplay: loadAutoplay, startSec: loadStartSec } = loadIntentRef.current;
+
+  const provider = request?.provider ?? null;
+  const providerTrackId = request?.id ?? null;
+
   const target = useMemo<PlayTarget>(() => {
-    if (!request) return null;
-    const src = buildEmbedSrc(request.provider, request.id, {
-      autoplay: request.autoplay,
-      startSec: request.startSec,
+    if (!provider || !providerTrackId) return null;
+    const src = buildEmbedSrc(provider, providerTrackId, {
+      autoplay: loadAutoplay,
+      startSec: loadStartSec,
       youtubeNoCookie: true,
     });
-    if (!src) return { provider: request.provider, id: request.id, src: '' };
-    return { provider: request.provider, id: request.id, src };
-  }, [request]);
+    return { provider, id: providerTrackId, src: src || '' };
+  }, [provider, providerTrackId, loadAutoplay, loadStartSec]);
 
   const deepLink = useMemo(() => {
-    if (!request) return null;
-    return buildProviderDeepLink(request.provider, request.id, { startSec: request.startSec });
-  }, [request]);
+    if (!provider || !providerTrackId) return null;
+    return buildProviderDeepLink(provider, providerTrackId, { startSec: loadStartSec });
+  }, [provider, providerTrackId, loadStartSec]);
 
   const schedulerRef = useRef<ReturnType<typeof createDebouncedScheduler> | null>(null);
   if (!schedulerRef.current && typeof window !== 'undefined') {
@@ -105,12 +136,33 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
       frame.contentWindow.postMessage({ type: 'universal-player:command', payload: { command, ...extra } }, window.location.origin);
     };
     registerProviderControls(request.provider, {
-      play: (startSec) => {
-        if (typeof startSec === 'number') sendCommand('seek', { seconds: startSec });
+      // On this path a pending seekToSec has ALWAYS already been delivered by
+      // the time play() sees it: a start position (openPlayer, including the
+      // quicklink handoff) goes out in the embed URL's start=, and a seek
+      // during playback goes out immediately through seekTo below. So play()
+      // must not apply it again. It used to: PlayerContext hands play()
+      // whatever seekToSec still holds, and re-sending it made every
+      // pause-then-play after a seekbar drag, a section chip, or a quicklink
+      // handoff jump back to that point instead of resuming where the
+      // listener paused. Verified against the live site: paused at 229.8s
+      // after seeking to 221.7s, and play resumed at 223.4s.
+      //
+      // Known limit: a seek issued in the second or so before YouTube's
+      // widget initialises is dropped by YouTube, and is no longer retried on
+      // the next play press. That retry only ever worked on an explicit
+      // press, and it was the same mechanism that caused the jump-back.
+      play: () => {
+        clearSeek();
         sendCommand('play');
       },
       pause: () => sendCommand('pause'),
-      seekTo: (seconds: number) => sendCommand('seek', { seconds }),
+      // Delivered on the spot, so clear it here rather than leaving it pending
+      // for a later play() - the convention every other provider follows is
+      // "apply the pending seek, then clearSeek()".
+      seekTo: (seconds: number) => {
+        sendCommand('seek', { seconds });
+        clearSeek();
+      },
       setVolume: (volume: number) => sendCommand('setVolume', { volume }),
       setMute: (muted: boolean) => sendCommand('setMute', { muted }),
       teardown: () => {},
@@ -121,7 +173,7 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
     // a captured id/src - re-registering on every unrelated parent re-render
     // would be pure churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request?.provider, registerProviderControls]);
+  }, [request?.provider, registerProviderControls, clearSeek]);
 
   // Real state coming back UP from the embed - universal-player.html relays
   // YouTube's own postMessage position/duration/playing-state here (see its
@@ -153,10 +205,24 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
 
   const showFallback = Boolean(request && target && !target.src);
 
+  // Nothing loaded yet. The iframe still has to stay mounted - it is a
+  // singleton reused across every provider switch, and CI asserts it exists
+  // from page load - but it must not paint anything: an empty 16:9 black
+  // rectangle sitting on the page before playback is what read as "half a
+  // screen black".
+  const idle = !request || !target?.src;
+
+  // Only YouTube actually has a picture. Spotify's embed is an audio widget
+  // roughly 152px tall; forcing 16:9 on it framed it in tall black letterbox
+  // bars above and below the controls, which is the other half of the same
+  // complaint.
+  const isVideo = request?.provider === 'youtube';
+  const frameBox = isVideo ? 'w-full aspect-video' : 'w-full h-[152px]';
+
   return (
-    <div className={className}>
-      <div className="relative w-full overflow-hidden rounded-lg bg-black/40 border border-white/10">
-        <div className="w-full aspect-video">
+    <div className={[className, idle ? 'h-0 overflow-hidden opacity-0 pointer-events-none' : ''].filter(Boolean).join(' ')}>
+      <div className={['relative w-full overflow-hidden rounded-lg border border-white/10', isVideo ? 'bg-black/40' : ''].filter(Boolean).join(' ')}>
+        <div className={frameBox}>
           <iframe
             ref={iframeRef}
             id={IFRAME_ID}

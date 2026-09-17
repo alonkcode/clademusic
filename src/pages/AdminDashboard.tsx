@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { PageLayout } from '@/components/shared';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DetectionRunsPanel } from '@/components/admin/DetectionRunsPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAdminStats, useFlaggedContent, useAdminUsers } from '@/hooks/api/useAdmin';
 import { useLatestTestRuns, useTestRunHistory } from '@/hooks/api/useTestRuns';
@@ -76,10 +77,11 @@ export default function AdminDashboard() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="moderation">Moderation</TabsTrigger>
+            <TabsTrigger value="harmony">Harmony</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
             <TabsTrigger value="testruns">Test Runs</TabsTrigger>
           </TabsList>
@@ -286,6 +288,10 @@ export default function AdminDashboard() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="harmony" className="space-y-6">
+            <DetectionRunsPanel />
           </TabsContent>
 
           <TabsContent value="settings" className="space-y-6">

@@ -20,9 +20,14 @@ export interface TrackSection {
   start_ms: number;
   end_ms: number;
   created_at: string;
+  // Which occurrence of this label the section is, in playing order - the
+  // "Verse 1 / Verse 2" number. Derived from start order, not detected.
+  ordinal?: number;
   // Optional chord progression specific to this section
   chords?: string[]; // Roman numerals
   chord_timings?: number[]; // Millisecond timestamps for each chord within the section
+  // How much the analysis this was promoted from trusted itself, 0-1.
+  confidence?: number;
 }
 
 // Playback provider for player context

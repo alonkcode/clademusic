@@ -1,149 +1,157 @@
 /**
  * Artist Page
- * 
- * Displays artist profile with:
- * - Artist header with background image
- * - Popular tracks section
- * - Discography (albums)
- * - Sample connections for the artist
- * - Nearby listeners
- * - Live comment feed with pinned comment
+ *
+ * Built entirely from the tracks this artist has in the Clade catalog. It used
+ * to render one hardcoded mock - the same "Kendrick Lamar" tracks, albums,
+ * "Verified Artist" badge, 28.5M followers and 92% popularity for every
+ * artist - plus play/shuffle buttons wired to nothing, a follow toggle that
+ * only lived in local state, and comment/listener panels that are themselves
+ * fixed mock data. None of that is shown now. What is shown is real: the
+ * artist's catalog tracks (primary and featured credits), the albums they come
+ * from, and their harmonic profile - keys and progressions - which is what this
+ * app is actually about.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  ArrowLeft, 
-  Play, 
-  Users, 
-  Music, 
-  Disc3, 
-  Share2,
-  Verified,
-  Shuffle,
-  Heart
-} from 'lucide-react';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Play, Users, Music, Disc3, Share2, Search, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { BottomNav } from '@/components/BottomNav';
-import { LiveCommentFeed } from '@/components/LiveCommentFeed';
-import { SampleConnections } from '@/components/SampleConnections';
-import { NearbyListenersPanel } from '@/components/NearbyListenersPanel';
-import { cn } from '@/lib/utils';
 import { formatDurationFull } from '@/lib/timeFormat';
-import type { Artist, Track, Album } from '@/types';
+import { navigateToTrack } from '@/lib/navigation';
+import { usePlayer } from '@/player/PlayerContext';
+import { useArtistCatalog, type ArtistCatalogTrack } from '@/hooks/api/useArtistCatalog';
 
-// Mock artist data
-const mockArtist: Artist = {
-  id: 'artist-kendrick',
-  name: 'Kendrick Lamar',
-  image_url: 'https://i.scdn.co/image/ab6761610000e5eb437b9e2a82505b3d93ff1022',
-  genres: ['Hip Hop', 'Conscious Hip Hop', 'West Coast Hip Hop', 'Jazz Rap'],
-  followers: 28500000,
-  popularity: 92,
-  spotify_id: '2YZyLoL8N0Wb9xBt1NhZWg',
-  top_tracks: [
-    { id: 't1', title: 'HUMBLE.', artist: 'Kendrick Lamar', duration_ms: 177000, cover_url: 'https://i.scdn.co/image/ab67616d0000b273d28d2ebdedb220e479743797' },
-    { id: 't2', title: 'All The Stars', artist: 'Kendrick Lamar, SZA', duration_ms: 232000, cover_url: 'https://i.scdn.co/image/ab67616d0000b2730153f5eb8cf3a7e2f2b2aecb' },
-    { id: 't3', title: 'Money Trees', artist: 'Kendrick Lamar, Jay Rock', duration_ms: 387000, cover_url: 'https://i.scdn.co/image/ab67616d0000b273d58e537cea05c2156792c53d' },
-    { id: 't4', title: 'Swimming Pools (Drank)', artist: 'Kendrick Lamar', duration_ms: 313000, cover_url: 'https://i.scdn.co/image/ab67616d0000b273d58e537cea05c2156792c53d' },
-    { id: 't5', title: 'DNA.', artist: 'Kendrick Lamar', duration_ms: 186000, cover_url: 'https://i.scdn.co/image/ab67616d0000b273d28d2ebdedb220e479743797' },
-    { id: 't6', title: 'Alright', artist: 'Kendrick Lamar', duration_ms: 219000, cover_url: 'https://i.scdn.co/image/ab67616d0000b273cdb645498cd3d8a2db4d05e1' },
-    { id: 't7', title: 'King Kunta', artist: 'Kendrick Lamar', duration_ms: 234000, cover_url: 'https://i.scdn.co/image/ab67616d0000b273cdb645498cd3d8a2db4d05e1' },
-    { id: 't8', title: 'Poetic Justice', artist: 'Kendrick Lamar, Drake', duration_ms: 304000, cover_url: 'https://i.scdn.co/image/ab67616d0000b273d58e537cea05c2156792c53d' },
-  ] as Track[],
-  albums: [
-    { id: 'a1', name: 'Mr. Morale & The Big Steppers', artist: 'Kendrick Lamar', artist_id: 'artist-kendrick', cover_url: 'https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f', release_date: '2022-05-13', total_tracks: 18 },
-    { id: 'a2', name: 'DAMN.', artist: 'Kendrick Lamar', artist_id: 'artist-kendrick', cover_url: 'https://i.scdn.co/image/ab67616d0000b273d28d2ebdedb220e479743797', release_date: '2017-04-14', total_tracks: 14 },
-    { id: 'a3', name: 'To Pimp a Butterfly', artist: 'Kendrick Lamar', artist_id: 'artist-kendrick', cover_url: 'https://i.scdn.co/image/ab67616d0000b273cdb645498cd3d8a2db4d05e1', release_date: '2015-03-15', total_tracks: 16 },
-    { id: 'a4', name: 'good kid, m.A.A.d city', artist: 'Kendrick Lamar', artist_id: 'artist-kendrick', cover_url: 'https://i.scdn.co/image/ab67616d0000b273d58e537cea05c2156792c53d', release_date: '2012-10-22', total_tracks: 12 },
-  ] as Album[],
-};
-
-function formatDuration(ms: number): string {
-  const minutes = Math.floor(ms / 60000);
-  const seconds = Math.floor((ms % 60000) / 1000);
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
-function formatFollowers(count: number): string {
-  if (count >= 1000000) {
-    return `${(count / 1000000).toFixed(1)}M`;
-  }
-  if (count >= 1000) {
-    return `${(count / 1000).toFixed(1)}K`;
-  }
-  return count.toString();
+function playableProvider(track: ArtistCatalogTrack) {
+  if (track.spotify_id) return { provider: 'spotify' as const, providerTrackId: track.spotify_id };
+  if (track.youtube_id) return { provider: 'youtube' as const, providerTrackId: track.youtube_id };
+  return null;
 }
 
 export default function ArtistPage() {
   const { artistId } = useParams<{ artistId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [activeTab, setActiveTab] = useState('popular');
+  const { openPlayer } = usePlayer();
 
-  // There's no real per-artist data source wired up yet (top tracks, albums,
-  // bio, follower counts are all still the same mock throughout) - fetching
-  // that is a separate, larger piece of work. Until then, at least show the
-  // artist actually clicked rather than always "Kendrick Lamar": a caller
-  // that knows the real name/art (e.g. Profile's Top Artists list) can pass
-  // it via navigate state, otherwise fall back to the URL param itself.
+  // A caller that already knows the display name/art (Profile's Top Artists)
+  // passes it through router state; a direct visit falls back to the URL.
   const navState = location.state as { name?: string; coverUrl?: string | null } | null;
-  const artist = useMemo(() => {
-    const name = navState?.name ?? (artistId ? decodeURIComponent(artistId) : mockArtist.name);
-    return {
-      ...mockArtist,
-      id: artistId ?? mockArtist.id,
-      name,
-      image_url: navState?.coverUrl ?? mockArtist.image_url,
-    };
-  }, [artistId, navState]);
+  const artistName = navState?.name ?? (artistId ? decodeURIComponent(artistId) : '');
+
+  const { data: tracks = [], isLoading, isError } = useArtistCatalog(artistName);
+
+  const coverUrl = navState?.coverUrl ?? tracks.find((t) => t.cover_url)?.cover_url ?? null;
+
+  const albums = useMemo(() => {
+    const byName = new Map<string, { name: string; cover: string | null; count: number }>();
+    for (const t of tracks) {
+      if (!t.album) continue;
+      const entry = byName.get(t.album) ?? { name: t.album, cover: t.cover_url, count: 0 };
+      entry.count += 1;
+      entry.cover = entry.cover ?? t.cover_url;
+      byName.set(t.album, entry);
+    }
+    return [...byName.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [tracks]);
+
+  const genres = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of tracks) for (const g of t.genres ?? []) if (g) set.add(g);
+    return [...set];
+  }, [tracks]);
+
+  const keyUsage = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of tracks) {
+      if (!t.detected_key) continue;
+      const label = t.detected_mode ? `${t.detected_key} ${t.detected_mode}` : t.detected_key;
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [tracks]);
+
+  const tempos = tracks.map((t) => t.tempo).filter((v): v is number => typeof v === 'number' && v > 0);
+  const tracksWithProgressions = tracks.filter((t) => t.progression_roman && t.progression_roman.length > 0);
+
+  const firstPlayable = tracks.find((t) => playableProvider(t));
+
+  const playTrack = (track: ArtistCatalogTrack) => {
+    const target = playableProvider(track);
+    if (!target) {
+      toast.error(`"${track.title}" has no Spotify or YouTube link yet`);
+      return;
+    }
+    openPlayer({
+      canonicalTrackId: track.id,
+      ...target,
+      autoplay: true,
+      context: 'artist-page',
+      title: track.title,
+      artist: track.artist,
+    });
+  };
+
+  const handleShare = async () => {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: artistName, url });
+      } else {
+        await navigator.clipboard.writeText(url);
+        toast.success('Link copied');
+      }
+    } catch {
+      // Dismissing the native share sheet rejects; that is not an error.
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background flex">
-      {/* Side navigation - Desktop */}
       <div className="hidden lg:block">
         <BottomNav />
       </div>
 
       <div className="flex-1 pb-24 lg:pb-8">
-        {/* Hero header with gradient background */}
-        <div className="relative h-72 lg:h-96 overflow-hidden">
-          {/* Background image with blur */}
-          <div 
-            className="absolute inset-0 bg-cover bg-center scale-110 blur-sm opacity-60"
-            style={{ backgroundImage: `url(${artist.image_url})` }}
-          />
+        {/* Hero */}
+        <div className="relative h-64 lg:h-80 overflow-hidden">
+          {coverUrl && (
+            <div
+              className="absolute inset-0 bg-cover bg-center scale-110 blur-sm opacity-60"
+              style={{ backgroundImage: `url(${coverUrl})` }}
+            />
+          )}
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/70 to-background" />
-          
-          {/* Back button */}
+
           <button
             onClick={() => navigate(-1)}
             className="absolute top-4 left-4 z-10 p-2 rounded-full glass hover:bg-muted/50 transition-colors"
+            aria-label="Go back"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
 
-          {/* Share button */}
-          <button className="absolute top-4 right-4 z-10 p-2 rounded-full glass hover:bg-muted/50 transition-colors">
+          <button
+            onClick={handleShare}
+            className="absolute top-4 right-4 z-10 p-2 rounded-full glass hover:bg-muted/50 transition-colors"
+            aria-label="Share artist"
+          >
             <Share2 className="w-5 h-5" />
           </button>
 
-          {/* Artist info */}
           <div className="absolute bottom-0 left-0 right-0 p-6 flex items-end gap-6">
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="w-32 h-32 lg:w-44 lg:h-44 rounded-full overflow-hidden shadow-2xl ring-4 ring-background shrink-0"
+              className="w-28 h-28 lg:w-40 lg:h-40 rounded-full overflow-hidden shadow-2xl ring-4 ring-background shrink-0 bg-muted flex items-center justify-center"
             >
-              {artist.image_url ? (
-                <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover" />
+              {coverUrl ? (
+                <img src={coverUrl} alt={artistName} className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full bg-muted flex items-center justify-center">
-                  <Users className="w-16 h-16 text-muted-foreground" />
-                </div>
+                <Users className="w-14 h-14 text-muted-foreground" />
               )}
             </motion.div>
 
@@ -153,27 +161,18 @@ export default function ArtistPage() {
               transition={{ delay: 0.1 }}
               className="flex-1 min-w-0"
             >
-              <div className="flex items-center gap-2">
-                <Verified className="w-5 h-5 text-primary" />
-                <p className="text-sm text-primary uppercase tracking-wider font-medium">Verified Artist</p>
-              </div>
-              <h1 className="text-3xl lg:text-5xl font-bold mt-1">{artist.name}</h1>
-              <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Users className="w-4 h-4" />
-                  {formatFollowers(artist.followers || 0)} followers
-                </span>
-                {artist.popularity && (
-                  <span className="flex items-center gap-1">
-                    <Music className="w-4 h-4" />
-                    {artist.popularity}% popularity
-                  </span>
-                )}
-              </div>
-              {artist.genres && artist.genres.length > 0 && (
-                <div className="flex gap-2 mt-3 flex-wrap">
-                  {artist.genres.slice(0, 4).map(genre => (
-                    <span key={genre} className="px-2 py-0.5 bg-primary/10 text-primary text-xs rounded-full">
+              <p className="text-sm text-primary uppercase tracking-wider font-medium">Artist</p>
+              <h1 className="text-3xl lg:text-5xl font-bold mt-1 truncate">{artistName || 'Unknown artist'}</h1>
+              {!isLoading && tracks.length > 0 && (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'} in the Clade catalog
+                  {albums.length > 0 && ` · ${albums.length} ${albums.length === 1 ? 'album' : 'albums'}`}
+                </p>
+              )}
+              {genres.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {genres.slice(0, 4).map((genre) => (
+                    <span key={genre} className="px-3 py-1 text-xs rounded-full bg-muted/50 text-muted-foreground">
                       {genre}
                     </span>
                   ))}
@@ -183,162 +182,169 @@ export default function ArtistPage() {
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div className="px-4 pt-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="flex items-center gap-3"
-          >
-            <Button className="gap-2 bg-primary hover:bg-primary/90">
-              <Play className="w-5 h-5 fill-current" />
-              Play
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            Loading {artistName}…
+          </div>
+        ) : isError ? (
+          <div className="px-4 py-16 text-center text-muted-foreground">
+            Couldn't load this artist right now. Try again in a moment.
+          </div>
+        ) : tracks.length === 0 ? (
+          <div className="px-4 py-16 max-w-md mx-auto text-center space-y-4">
+            <Music className="w-10 h-10 mx-auto text-muted-foreground" />
+            <p className="text-lg font-semibold">
+              {artistName ? `${artistName} isn't in the catalog yet` : 'No artist specified'}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Tracks appear here once they've been added to Clade and analyzed.
+            </p>
+            <Button variant="outline" className="gap-2" onClick={() => navigate('/search')}>
+              <Search className="w-4 h-4" />
+              Search the catalog
             </Button>
-            <Button variant="outline" className="gap-2">
-              <Shuffle className="w-4 h-4" />
-              Shuffle
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setIsFollowing(!isFollowing)}
-              className={cn(
-                'gap-2',
-                isFollowing && 'border-primary text-primary'
-              )}
-            >
-              <Heart className={cn('w-4 h-4', isFollowing && 'fill-current')} />
-              {isFollowing ? 'Following' : 'Follow'}
-            </Button>
-          </motion.div>
-        </div>
+          </div>
+        ) : (
+          <>
+            {firstPlayable && (
+              <div className="px-4 pt-6">
+                <Button className="gap-2 bg-primary hover:bg-primary/90" onClick={() => playTrack(firstPlayable)}>
+                  <Play className="w-5 h-5 fill-current" />
+                  Play
+                </Button>
+              </div>
+            )}
 
-        {/* Tabs Content */}
-        <div className="px-4 py-6 max-w-4xl lg:mx-auto">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="glass mb-6">
-              <TabsTrigger value="popular">Popular</TabsTrigger>
-              <TabsTrigger value="albums">Albums</TabsTrigger>
-              <TabsTrigger value="samples">Samples</TabsTrigger>
-              <TabsTrigger value="community">Community</TabsTrigger>
-            </TabsList>
+            <div className="px-4 py-6 max-w-4xl lg:mx-auto">
+              <Tabs defaultValue="tracks">
+                <TabsList className="glass mb-6">
+                  <TabsTrigger value="tracks">Tracks</TabsTrigger>
+                  <TabsTrigger value="harmony">Harmony</TabsTrigger>
+                  {albums.length > 0 && <TabsTrigger value="albums">Albums</TabsTrigger>}
+                </TabsList>
 
-            {/* Popular Tracks */}
-            <TabsContent value="popular" className="space-y-6">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="space-y-2"
-              >
-                <h2 className="font-bold text-lg">Popular</h2>
-                <div className="space-y-1">
-                  {artist.top_tracks?.map((track, index) => (
-                    <motion.div
-                      key={track.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex items-center gap-3 p-3 rounded-xl hover:bg-muted/30 transition-colors group cursor-pointer"
-                    >
-                      <span className="w-6 text-center text-muted-foreground text-sm">
-                        {index + 1}
-                      </span>
-                      <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 relative">
-                        {track.cover_url ? (
-                          <img src={track.cover_url} alt={track.title} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full bg-muted flex items-center justify-center">
+                <TabsContent value="tracks" className="space-y-1">
+                  {tracks.map((track, index) => {
+                    const playable = !!playableProvider(track);
+                    return (
+                      <motion.div
+                        key={track.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.04 }}
+                        onClick={() => navigateToTrack(navigate, track.id)}
+                        className="flex items-center gap-3 p-3 rounded-xl hover:bg-muted/30 transition-colors group cursor-pointer"
+                      >
+                        <span className="w-6 text-center text-muted-foreground text-sm">{index + 1}</span>
+                        <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 bg-muted flex items-center justify-center">
+                          {track.cover_url ? (
+                            <img src={track.cover_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
                             <Music className="w-6 h-6 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <Play className="w-5 h-5 text-white fill-current" />
+                          )}
                         </div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm truncate">{track.title}</p>
-                        <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
-                      </div>
-                      <span className="text-sm text-muted-foreground">
-                        {track.duration_ms ? formatDurationFull(track.duration_ms) : '--:--'}
-                      </span>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
-
-              {/* Nearby Listeners */}
-              <NearbyListenersPanel 
-                entityId={artist.id} 
-                entityType="artist" 
-              />
-            </TabsContent>
-
-            {/* Albums / Discography */}
-            <TabsContent value="albums" className="space-y-6">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="space-y-4"
-              >
-                <h2 className="font-bold text-lg">Discography</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {artist.albums?.map((album, index) => (
-                    <motion.div
-                      key={album.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      onClick={() => navigate(`/album/${album.id}`)}
-                      className="group cursor-pointer"
-                    >
-                      <div className="aspect-square rounded-xl overflow-hidden relative mb-2 shadow-lg">
-                        {album.cover_url ? (
-                          <img 
-                            src={album.cover_url} 
-                            alt={album.name} 
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-muted flex items-center justify-center">
-                            <Disc3 className="w-12 h-12 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <Play className="w-12 h-12 text-white fill-current" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{track.title}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {track.artist}
+                            {track.detected_key &&
+                              ` · ${track.detected_key}${track.detected_mode ? ` ${track.detected_mode}` : ''}`}
+                          </p>
                         </div>
+                        <span className="text-sm text-muted-foreground tabular-nums">
+                          {track.duration_ms ? formatDurationFull(track.duration_ms) : '--:--'}
+                        </span>
+                        {playable && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              playTrack(track);
+                            }}
+                            className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 shrink-0"
+                            aria-label={`Play ${track.title}`}
+                          >
+                            <Play className="w-4 h-4 fill-current" />
+                          </button>
+                        )}
+                      </motion.div>
+                    );
+                  })}
+                </TabsContent>
+
+                <TabsContent value="harmony" className="space-y-6">
+                  {keyUsage.length > 0 && (
+                    <section className="space-y-3">
+                      <h2 className="font-bold text-lg">Keys</h2>
+                      <div className="flex flex-wrap gap-2">
+                        {keyUsage.map(([label, count]) => (
+                          <span key={label} className="px-3 py-1.5 rounded-full glass text-sm font-mono">
+                            {label}
+                            {count > 1 && <span className="text-muted-foreground"> ×{count}</span>}
+                          </span>
+                        ))}
                       </div>
-                      <p className="font-medium text-sm truncate">{album.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {album.release_date ? new Date(album.release_date).getFullYear() : ''} • {album.total_tracks} tracks
+                    </section>
+                  )}
+
+                  <section className="space-y-3">
+                    <h2 className="font-bold text-lg">Progressions</h2>
+                    {tracksWithProgressions.length > 0 ? (
+                      <div className="space-y-2">
+                        {tracksWithProgressions.map((t) => (
+                          <div key={t.id} className="flex items-center justify-between gap-3 p-3 rounded-xl glass">
+                            <span className="text-sm truncate">{t.title}</span>
+                            <span className="font-mono text-sm text-primary shrink-0">
+                              {t.progression_roman!.join(' – ')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No progressions analyzed for this artist yet.</p>
+                    )}
+                  </section>
+
+                  {tempos.length > 0 && (
+                    <section className="space-y-2">
+                      <h2 className="font-bold text-lg">Tempo</h2>
+                      <p className="text-sm text-muted-foreground font-mono">
+                        {Math.min(...tempos) === Math.max(...tempos)
+                          ? `${Math.round(tempos[0])} BPM`
+                          : `${Math.round(Math.min(...tempos))}–${Math.round(Math.max(...tempos))} BPM`}
                       </p>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
-            </TabsContent>
+                    </section>
+                  )}
+                </TabsContent>
 
-            {/* Sample Connections */}
-            <TabsContent value="samples" className="space-y-6">
-              <SampleConnections 
-                trackId={artist.id} 
-                trackTitle={artist.name} 
-              />
-            </TabsContent>
-
-            {/* Community - Comments & Discussions */}
-            <TabsContent value="community" className="space-y-6">
-              <LiveCommentFeed
-                entityId={artist.id}
-                entityType="artist"
-                entityTitle={artist.name}
-              />
-            </TabsContent>
-          </Tabs>
-        </div>
+                {albums.length > 0 && (
+                  <TabsContent value="albums">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {albums.map((album) => (
+                        <div key={album.name}>
+                          <div className="aspect-square rounded-xl overflow-hidden mb-2 shadow-lg bg-muted flex items-center justify-center">
+                            {album.cover ? (
+                              <img src={album.cover} alt={album.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Disc3 className="w-12 h-12 text-muted-foreground" />
+                            )}
+                          </div>
+                          <p className="font-medium text-sm truncate">{album.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {album.count} {album.count === 1 ? 'track' : 'tracks'} in catalog
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </TabsContent>
+                )}
+              </Tabs>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Bottom navigation - Mobile */}
       <div className="lg:hidden">
         <BottomNav />
       </div>

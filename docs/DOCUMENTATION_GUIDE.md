@@ -21,7 +21,7 @@ This document outlines the organization of Clade's documentation.
 #### Developer Guides
 - [development.md](development.md) — Local development workflow
 - [tech-stack.md](tech-stack.md) — Technologies used
-- [testing.md](testing.md) — Testing with Vitest and Cypress
+- [testing.md](testing.md) — Testing with Vitest and Playwright
 - [build.md](build.md) — Production builds
 - [deployment.md](deployment.md) — Deployment to GitHub Pages and hosting
 - [contributing.md](contributing.md) — Contribution guidelines

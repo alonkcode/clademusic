@@ -8,4 +8,4 @@
 | Animations       | Framer Motion                              |
 | State Management | TanStack Query (React Query)               |
 | Backend          | Supabase (Auth, Postgres, Edge Functions)  |
-| Testing          | Vitest, Cypress                            |
+| Testing          | Vitest, Playwright                         |

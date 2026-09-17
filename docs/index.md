@@ -23,7 +23,7 @@ Clade is a TikTok-style music discovery platform that analyzes songs by **harmon
 ### Development
 - [Development Guide](development.md) — Local development workflow
 - [Database Setup](DATABASE_SETUP.md) — Provisioning Supabase from empty, seeding, verification
-- [Testing](testing.md) — Vitest and Cypress testing
+- [Testing](testing.md) — Vitest and Playwright testing
 - [Building for Production](build.md) — Production builds
 - [Deployment](deployment.md) — GitHub Pages, Vercel, and base paths
 
@@ -46,6 +46,7 @@ Clade is a TikTok-style music discovery platform that analyzes songs by **harmon
 - [Release Process](RELEASE_PROCESS.md) — How versions/releases work
 - [Code Review Checklist](CODE_REVIEW.md) — What to verify for every PR
 - [Known Issues](KNOWN_ISSUES.md) — Operational notes + open bugs
+- [Archive](archive/README.md) — Superseded reports and setup guides, kept for history
 
 ---
 

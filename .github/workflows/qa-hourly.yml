@@ -1,10 +1,9 @@
-# Was disabled_manually after failing every single hourly run: the Sanity
-# and Performance steps pointed Cypress at cypress.config.mjs's baseUrl
-# without ever starting a dev server first, so every run failed before a
-# single test could even connect. Both steps now use the *:auto script
-# variants (start-server-and-test), matching test:e2e:smoke:auto's existing
-# pattern; cypress.config.mjs's own baseUrl was also stale (localhost:5173
-# /cladeai - a different port and a project name from before the rebrand).
+# Cypress was removed from this repo; these steps now run Playwright, which
+# starts its own dev server via playwright.config.ts webServer, so no
+# start-server-and-test wrapper is needed. The step names are kept so the
+# suite labels posted to /functions/v1/test-runs stay continuous, but note
+# they were never accurate: the "Performance" step has never run a
+# performance test.
 name: QA Hourly Orchestrated
 
 on:
@@ -39,13 +38,16 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+
       - name: Run Sanity Suite
         env:
           SUITE: sanity
         run: |
           SECONDS=0
           set +e
-          bun run test:e2e:smoke:auto
+          bunx playwright test tests/app-routes.spec.ts
           EXIT_CODE=$?
           set -e
           DURATION_MS=$((SECONDS*1000))
@@ -89,7 +91,7 @@ jobs:
         run: |
           SECONDS=0
           set +e
-          bun run test:e2e:sanity:auto || true
+          bunx playwright test || true
           EXIT_CODE=$?
           set -e
           DURATION_MS=$((SECONDS*1000))

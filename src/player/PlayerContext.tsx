@@ -242,7 +242,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // to the user's current setting without depending on render timing.
   const volumeRef = useRef<number>(DEFAULT_VOLUME);
   const mutedRef = useRef<boolean>(false);
+  // Coalescing state for setVolumeLevel - see the comment there.
+  const pendingVolumeRef = useRef<number | null>(null);
+  const volumeFrameRef = useRef<number | null>(null);
   const opChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(
+    () => () => {
+      if (volumeFrameRef.current !== null) cancelAnimationFrame(volumeFrameRef.current);
+    },
+    []
+  );
 
   const enqueuePlayerOp = useCallback((name: string, op: () => Promise<void>) => {
     opChainRef.current = opChainRef.current
@@ -339,6 +349,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // is never a control that appears to do nothing.
     const nextMuted = clamped === 0;
 
+    const muteChanged = mutedRef.current !== nextMuted;
     volumeRef.current = clamped;
     mutedRef.current = nextMuted;
     setState((prev) => ({ ...prev, volume: clamped, isMuted: nextMuted }));
@@ -347,11 +358,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // closure: a stale closure would send the volume to the previous provider
     // after a switch.
     const activeProvider = activeProviderRef.current;
-    if (activeProvider) {
-      const controls = providerControlsRef.current[activeProvider];
-      controls?.setVolume?.(clamped);
-      controls?.setMute?.(nextMuted);
-    }
+    if (!activeProvider) return;
+    const controls = providerControlsRef.current[activeProvider];
+
+    // Dragging the slider fires `input` on every pixel - 60-100 times a
+    // second - and this used to send BOTH setVolume and setMute on every one
+    // of them. For the embed path each of those is a postMessage hop into the
+    // iframe and on to YouTube's widget API, so a single drag buried the
+    // player in a few hundred commands, and the infoDelivery replies it
+    // pushed back carried stale currentTime values that yanked the seekbar
+    // backwards (see useAnimatedSeekbar for the guard on the receiving end).
+    // Mute is a discrete state, so it only needs sending when it flips, and
+    // the volume itself only needs to be right once per frame - nobody can
+    // hear an intermediate value that is replaced 16ms later.
+    if (muteChanged) controls?.setMute?.(nextMuted);
+
+    pendingVolumeRef.current = clamped;
+    if (volumeFrameRef.current !== null) return;
+    volumeFrameRef.current = requestAnimationFrame(() => {
+      volumeFrameRef.current = null;
+      const pending = pendingVolumeRef.current;
+      if (pending === null) return;
+      pendingVolumeRef.current = null;
+      const provider = activeProviderRef.current;
+      if (!provider) return;
+      providerControlsRef.current[provider]?.setVolume?.(pending);
+    });
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -454,6 +486,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       return next;
     });
   }, []);
+
+  // A playback clock.
+  //
+  // positionMs only ever moved when a provider pushed it through
+  // updatePlaybackState, and the embed path pushes nothing: the guest Spotify
+  // embed has no public API to report through at all, and YouTube only relays
+  // while its own state messages happen to be flowing. So for most embed
+  // playback position sat at 0 for the entire track. The seekbar hid that -
+  // it extrapolates locally for smoothness - but everything that reads the
+  // real value saw 0, which is why handing a track from one provider to
+  // another restarted it at 0:00: the handoff passes startSec from here.
+  //
+  // Providers that DO report re-baseline this on every message, so the clock
+  // only ever fills the gaps between reports rather than competing with them.
+  // Ticking at 250ms keeps each step inside useAnimatedSeekbar's re-anchor
+  // tolerance, so filling those gaps cannot make the bar stutter.
+  useEffect(() => {
+    if (!state.isPlaying || !state.provider || !state.trackId) return;
+    let last = Date.now();
+    const id = window.setInterval(() => {
+      const now = Date.now();
+      const delta = now - last;
+      last = now;
+      if (delta <= 0) return;
+      setState((prev) => {
+        if (!prev.isPlaying) return prev;
+        const limit = prev.durationMs > 0 ? prev.durationMs : Number.POSITIVE_INFINITY;
+        const nextPosition = Math.min(prev.positionMs + delta, limit);
+        if (nextPosition === prev.positionMs) return prev;
+        positionMsRef.current = nextPosition;
+        return { ...prev, positionMs: nextPosition };
+      });
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [state.isPlaying, state.provider, state.trackId]);
 
   const setMinimized = useCallback((value: boolean) => {
     setState((prev) => ({ ...prev, isMinimized: value }));
@@ -939,18 +1006,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [state.provider, state.isPlaying]);
 
-  // Ensure the page layout reserves space for the floating player when open so
-  // the player never ends up visually behind other UI. We toggle a body class
-  // and set a CSS variable with the player's height to let global styles
-  // push content above the player (no content is covered).
+  // Ensure the page layout reserves space for the docked player when open so
+  // it never ends up visually behind the page's own content. We toggle a body
+  // class here; the matching height is published by EmbeddedPlayerDrawer,
+  // which measures its real rendered height (bar + chord readout) with a
+  // ResizeObserver - a hard-coded 52px here left the taller chord panel
+  // sitting on top of page content.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const el = document.body;
       if (isOpen) {
         el.classList.add('clade-player-open');
-        // Keep this in sync with EmbeddedPlayerDrawer's height
-        el.style.setProperty('--clade-player-height', '52px');
       } else {
         el.classList.remove('clade-player-open');
         el.style.removeProperty('--clade-player-height');

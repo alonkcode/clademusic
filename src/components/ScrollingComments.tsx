@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { isTestEnv as IS_TEST } from '@/lib/env';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface Comment {
   id: string;
   content: string;
@@ -52,6 +54,26 @@ export function ScrollingComments({
 
     const setupSubscription = async () => {
       let disableRealtime = false;
+      // roomId may be a real chat_rooms uuid OR a room type such as "global".
+      // FeedPage passes "global", and chat_messages.room_id is a uuid, so
+      // filtering on the literal string failed with 22P02 (invalid input
+      // syntax for type uuid). That error was invisible until the RLS
+      // recursion in front of it was fixed - resolve a type to its room first.
+      let resolvedRoomId = roomId;
+      if (!trackId && roomId && !UUID_PATTERN.test(roomId)) {
+        const { data: room, error: roomError } = await supabase
+          .from('chat_rooms')
+          .select('id')
+          .eq('type', roomId)
+          .limit(1)
+          .maybeSingle();
+        if (roomError || !room) {
+          // No such room yet is an empty state, not a failure.
+          setComments([]);
+          return;
+        }
+        resolvedRoomId = room.id;
+      }
       try {
         // Fetch recent comments
         const query = trackId
@@ -64,7 +86,7 @@ export function ScrollingComments({
           : supabase
               .from('chat_messages')
               .select('id, message, profiles(full_name), created_at')
-              .eq('room_id', roomId)
+              .eq('room_id', resolvedRoomId)
               .order('created_at', { ascending: false })
               .limit(20);
 
@@ -106,14 +128,14 @@ export function ScrollingComments({
       // Set up real-time subscription
       const table = trackId ? 'track_comments' : 'chat_messages';
       channel = supabase
-        .channel(`scrolling-comments-${trackId || roomId}`)
+        .channel(`scrolling-comments-${trackId || resolvedRoomId}`)
         .on(
           'postgres_changes',
           {
             event: 'INSERT',
             schema: 'public',
             table,
-            filter: trackId ? `track_id=eq.${trackId}` : `room_id=eq.${roomId}`,
+            filter: trackId ? `track_id=eq.${trackId}` : `room_id=eq.${resolvedRoomId}`,
           },
           async (payload) => {
             try {

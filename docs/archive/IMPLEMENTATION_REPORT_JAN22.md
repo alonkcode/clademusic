@@ -9,8 +9,8 @@ All requested features have been successfully implemented with production-ready 
 ## 1. ✅ Unified Player System (Spotify & YouTube)
 
 ### Implementation:
-- **File:** [src/components/UnifiedPlayer.tsx](src/components/UnifiedPlayer.tsx)
-- **File:** [src/player/EmbeddedPlayerDrawer.tsx](src/player/EmbeddedPlayerDrawer.tsx) (updated)
+- **File:** [src/components/UnifiedPlayer.tsx](../../src/components/UnifiedPlayer.tsx)
+- **File:** [src/player/EmbeddedPlayerDrawer.tsx](../../src/player/EmbeddedPlayerDrawer.tsx) (updated)
 
 ### Features:
 - **Same Size & Position:** Both players occupy EXACT same space
@@ -40,7 +40,7 @@ className="fixed bottom-16 md:bottom-0 left-0 right-0 md:left-auto md:right-4 z-
 ## 2. ✅ Music Taste Survey (Onboarding)
 
 ### Implementation:
-- **File:** [src/components/MusicTasteSurvey.tsx](src/components/MusicTasteSurvey.tsx)
+- **File:** [src/components/MusicTasteSurvey.tsx](../../src/components/MusicTasteSurvey.tsx)
 - **Route:** `/survey`
 
 ### Features:
@@ -71,8 +71,8 @@ ALTER TABLE profiles ADD COLUMN onboarding_completed BOOLEAN DEFAULT FALSE;
 ## 3. ✅ Terms of Service & Privacy Policy
 
 ### Implementation:
-- **File:** [src/pages/TermsOfServicePage.tsx](src/pages/TermsOfServicePage.tsx)
-- **File:** [src/pages/PrivacyPolicyPage.tsx](src/pages/PrivacyPolicyPage.tsx)
+- **File:** [src/pages/TermsOfServicePage.tsx](../../src/pages/TermsOfServicePage.tsx)
+- **File:** [src/pages/PrivacyPolicyPage.tsx](../../src/pages/PrivacyPolicyPage.tsx)
 - **Routes:** `/terms`, `/privacy`
 
 ### Terms of Service Coverage:
@@ -115,7 +115,7 @@ ALTER TABLE profiles ADD COLUMN onboarding_completed BOOLEAN DEFAULT FALSE;
 ## 4. ✅ Footer Component
 
 ### Implementation:
-- **File:** [src/components/Footer.tsx](src/components/Footer.tsx)
+- **File:** [src/components/Footer.tsx](../../src/components/Footer.tsx)
 
 ### Sections:
 1. **Brand:** Logo, tagline, social links (GitHub, Twitter, Email)
@@ -143,7 +143,7 @@ import { Footer } from '@/components/Footer';
 ## 5. ✅ Emoji Reactions System
 
 ### Implementation:
-- **Migration:** [supabase/migrations/20260122_emoji_reactions.sql](supabase/migrations/20260122_emoji_reactions.sql)
+- **Migration:** [supabase/migrations/20260122_emoji_reactions.sql](../../supabase/migrations/20260122_emoji_reactions.sql)
 
 ### Database Tables:
 1. **reaction_types:** 16 emoji reactions
@@ -196,7 +196,7 @@ const { data } = await supabase.rpc('get_post_reactions', {
 ## 6. ✅ Automated Comment Generation
 
 ### Implementation:
-- **Script:** [scripts/automated-comments.ts](scripts/automated-comments.ts)
+- **Script:** [scripts/automated-comments.ts](../../scripts/automated-comments.ts)
 
 ### Personalities (8 Types):
 1. **Music Nerd:** Technical, detailed, knowledgeable

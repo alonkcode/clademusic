@@ -19,5 +19,5 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["vite.config.ts"],
-  "exclude": ["cypress", "supabase/functions"]
+  "exclude": ["supabase/functions"]
 }

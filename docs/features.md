@@ -147,7 +147,7 @@
 
 ### Testing
 - **Vitest Unit Tests** — Component and utility testing
-- **Cypress E2E** — End-to-end smoke tests
+- **Playwright E2E** — Browser tests for routes and the universal player
 - **Type Checking** — Strict mode TypeScript validation
 
 ## 🚧 Coming Soon

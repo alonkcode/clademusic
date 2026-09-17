@@ -9,14 +9,17 @@ export interface UsePlayerLayoutOptions {
 }
 
 /**
- * The video/details panel's open state (persisted across sessions) and the
- * cinema/fullscreen plumbing for it. The bar itself is always docked
- * full-width to the bottom edge - there's no position/size state left to
- * remember beyond whether the panel above it was left open.
+ * The video/details panel's open state and the chord-readout collapse state
+ * (both persisted across sessions), plus the cinema/fullscreen plumbing. The
+ * bar itself is always docked full-width to the bottom edge - there's no
+ * position/size state left to remember beyond what was left open or collapsed.
  */
 export function usePlayerLayout({ isCinema, enterCinema, exitCinema }: UsePlayerLayoutOptions) {
   const cinemaRef = useRef<HTMLDivElement | null>(null);
   const [showVideo, setShowVideo] = useState(false);
+  // The chord readout above the bar can be collapsed to reclaim the vertical
+  // space it takes (200-350px); the choice sticks across sessions.
+  const [hudCollapsed, setHudCollapsed] = useState(false);
 
   const toggleFullscreen = useCallback(() => {
     const el = cinemaRef.current;
@@ -44,14 +47,16 @@ export function usePlayerLayout({ isCinema, enterCinema, exitCinema }: UsePlayer
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, [enterCinema, exitCinema]);
 
-  // Hydrate/persist just whether the details panel was left open.
+  // Hydrate/persist whether the details panel was left open and whether the
+  // chord readout was left collapsed.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<{ showVideo: boolean }>;
+      const parsed = JSON.parse(raw) as Partial<{ showVideo: boolean; hudCollapsed: boolean }>;
       if (typeof parsed.showVideo === 'boolean') setShowVideo(parsed.showVideo);
+      if (typeof parsed.hudCollapsed === 'boolean') setHudCollapsed(parsed.hudCollapsed);
     } catch (err) {
       console.warn('Failed to hydrate player layout', err);
     }
@@ -60,11 +65,11 @@ export function usePlayerLayout({ isCinema, enterCinema, exitCinema }: UsePlayer
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ showVideo }));
+      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ showVideo, hudCollapsed }));
     } catch (err) {
       console.warn('Failed to persist player layout', err);
     }
-  }, [showVideo]);
+  }, [showVideo, hudCollapsed]);
 
   useEffect(() => {
     if (!isCinema) return;
@@ -76,5 +81,5 @@ export function usePlayerLayout({ isCinema, enterCinema, exitCinema }: UsePlayer
     });
   }, [isCinema, exitCinema]);
 
-  return { cinemaRef, showVideo, setShowVideo, toggleFullscreen };
+  return { cinemaRef, showVideo, setShowVideo, toggleFullscreen, hudCollapsed, setHudCollapsed };
 }

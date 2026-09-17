@@ -33,6 +33,8 @@ import {
 } from 'lucide-react';
 import { usePlayHistory, usePlayStats, useTopArtists } from '@/hooks/api/usePlayEvents';
 import { useProfile, useUserProviders, useSetPreferredProvider } from '@/hooks/api/useProfile';
+import { useCredits, usePlan } from '@/hooks/api/useCredits';
+import { PLAN_COPY } from '@/lib/plans';
 import { useUserInteractionStats } from '@/hooks/api/useFeed';
 import { useConnectSpotify, useDisconnectSpotify } from '@/hooks/api/useSpotifyConnect';
 import { 
@@ -101,6 +103,8 @@ export default function ProfilePage() {
   const { data: profile } = useProfile();
   const { data: userProviders = [], refetch: refetchProviders } = useUserProviders();
   const { data: playStats } = usePlayStats();
+  const { data: creditBalance } = useCredits();
+  const { data: planInfo } = usePlan();
   const { data: interactionStats } = useUserInteractionStats(user?.id);
   const { data: playHistory = [] } = usePlayHistory({ limit: 20 });
   const { data: topArtistsOnClade = [] } = useTopArtists(10);
@@ -308,22 +312,40 @@ export default function ProfilePage() {
           transition={{ delay: 0.05 }}
           className="p-4 glass rounded-2xl"
         >
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-primary" />
-              <span className="font-medium">Credits</span>
-            </div>
-            <span className="text-sm text-muted-foreground">Free tier</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full w-1/4 bg-gradient-to-r from-primary to-accent rounded-full" />
-            </div>
-            <span className="text-sm font-medium">25/100</span>
-          </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Credits reset monthly. Used for track analysis.
-          </p>
+          {(() => {
+            // Real public.credits balance and the signed-in plan's allowance
+            // (both react-query hooks, cached) - this used to be a hardcoded
+            // "25/100" that never reflected an account's actual balance.
+            const balance = creditBalance ?? 0;
+            const allowance = planInfo?.allowance ?? PLAN_COPY.free.credits;
+            const planName = planInfo ? PLAN_COPY[planInfo.plan].name : PLAN_COPY.free.name;
+            const percent = allowance > 0 ? Math.min(100, (balance / allowance) * 100) : 0;
+            return (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-primary" />
+                    <span className="font-medium">Credits</span>
+                  </div>
+                  <span className="text-sm text-muted-foreground">{planName} tier</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
+                      style={{ width: `${percent}%` }}
+                    />
+                  </div>
+                  <span className="text-sm font-medium">
+                    {balance}/{allowance}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Spent on live chord &amp; section detection ("Listen"). The balance doesn't reset on its own - upgrade or top up to get more.
+                </p>
+              </>
+            );
+          })()}
         </motion.div>
 
         {/* Music DNA - From Spotify */}

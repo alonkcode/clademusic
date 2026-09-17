@@ -34,3 +34,15 @@ Object.defineProperty(window, "IntersectionObserver", {
   writable: true,
   value: IntersectionObserverStub,
 });
+
+// jsdom has no ResizeObserver - EmbeddedPlayerDrawer observes its own
+// rendered height to publish it as a CSS var the page layout reserves against.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(window, "ResizeObserver", {
+  writable: true,
+  value: ResizeObserverStub,
+});

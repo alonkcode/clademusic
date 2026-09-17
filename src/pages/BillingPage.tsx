@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 import { CladeBrand, ProfileCircle } from '@/components/shared';
+import { PLAN_COPY, type PlanKey } from '@/lib/plans';
 
 interface SubscriptionRow {
   plan: string;
@@ -17,32 +18,6 @@ interface SubscriptionRow {
 interface CreditsRow {
   balance: number;
 }
-
-const PLAN_COPY = {
-  free: {
-    name: 'Free',
-    price: '₪0',
-    interval: 'month',
-    credits: 50,
-    features: ['Limited monthly credits', 'No card required', 'Basic access'],
-  },
-  starter: {
-    name: 'Starter',
-    price: '₪149',
-    interval: 'month',
-    credits: 500,
-    features: ['Monthly subscription', 'Medium credit allowance', 'Email support'],
-  },
-  pro: {
-    name: 'Pro',
-    price: '₪349',
-    interval: 'month',
-    credits: 2000,
-    features: ['Higher credit allowance', 'Priority features', 'Priority support'],
-  },
-} as const;
-
-type PlanKey = keyof typeof PLAN_COPY;
 
 export default function BillingPage() {
   const { user, loading } = useAuth();

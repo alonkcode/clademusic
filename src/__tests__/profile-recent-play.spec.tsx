@@ -65,6 +65,13 @@ vi.mock('@/hooks/api/useLastFm', () => ({
 
 vi.mock('@/hooks/api/useThemes', () => ({ useUserTheme: () => ({ data: null }) }));
 vi.mock('@/hooks/api/useAdmin', () => ({ useIsAdmin: () => ({ data: false }) }));
+// Like every other react-query hook mocked here: unmocked, they look for a
+// QueryClientProvider this test does not set up and the render throws
+// "No QueryClient set" before anything can be asserted.
+vi.mock('@/hooks/api/useCredits', () => ({
+  useCredits: () => ({ data: 0 }),
+  usePlan: () => ({ data: { plan: 'free', allowance: 50 } }),
+}));
 vi.mock('@/hooks/api/useTasteDNA', () => ({ useTasteDNA: () => ({ data: null, isLoading: false }) }));
 
 vi.mock('@/components/ThemeEditor', () => ({ ThemeEditor: () => null }));
