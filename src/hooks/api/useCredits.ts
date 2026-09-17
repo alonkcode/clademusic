@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { PLAN_COPY, type PlanKey, isPlanKey } from '@/lib/plans';
 
 /** Reads the same public.credits table BillingPage displays, so a spend here
  *  is reflected there without any separate wiring. */
@@ -58,5 +59,32 @@ export function useSpendCredit() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credits', user?.id] });
     },
+  });
+}
+
+/**
+ * The signed-in user's plan key ('free' when there's no active subscription
+ * row, same fallback BillingPage's currentPlan uses) plus that plan's
+ * monthly credit allowance from the shared PLAN_COPY catalogue - so any
+ * screen showing "balance out of allowance" reads the real plan instead of
+ * assuming Free.
+ */
+export function usePlan() {
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ['plan', user?.id],
+    queryFn: async (): Promise<{ plan: PlanKey; allowance: number }> => {
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .select('plan')
+        .eq('user_id', user!.id)
+        .maybeSingle();
+      if (error) throw error;
+      const plan = isPlanKey(data?.plan) ? data.plan : 'free';
+      return { plan, allowance: PLAN_COPY[plan].credits };
+    },
+    enabled: !!user,
+    staleTime: 30 * 1000,
   });
 }
