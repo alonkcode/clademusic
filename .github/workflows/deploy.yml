@@ -180,7 +180,6 @@ jobs:
       # To enable one of the rest, set its secrets and add it to the list:
       #   billing-checkout  STRIPE_SECRET_KEY STRIPE_PRICE_STARTER_ID STRIPE_PRICE_PRO_ID
       #   billing-webhook   STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET
-      #   search-spotify    SPOTIFY_CLIENT_ID SPOTIFY_CLIENT_SECRET
       #   send-email        RESEND_API_KEY RESEND_FROM
       #   test-runs         CI_TEST_REPORT_TOKEN
       - name: Deploy Edge Functions
@@ -190,6 +189,7 @@ jobs:
             ingest-detection \
             harmonic-analysis \
             search-apple \
+            search-spotify \
             setup_2fa \
             verify_2fa
           do
