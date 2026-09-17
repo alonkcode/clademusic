@@ -114,19 +114,16 @@ export default function TrackDetailPage() {
     if (!track?.id) return;
     
     try {
-      const data = await getTrackSections(track.id);
-      setSections(data);
-      
-      // If no sections in DB, generate default ones from track duration
-      if (data.length === 0 && track.duration_ms) {
-        setSections(generateDefaultSections(track));
-      }
+      // getTrackSections already falls back to the track's own analyzed
+      // sections when the track_sections table has none. What it will not do
+      // is invent them: the old fallback here spaced intro/verse/chorus at
+      // fixed percentages of the duration, so every song displayed the same
+      // structure and the timestamps were wrong for all but a coincidence.
+      // No analysis yet means no sections shown.
+      setSections(await getTrackSections(track.id));
     } catch (err) {
       console.error('Failed to load sections:', err);
-      // Generate default sections on error
-      if (track.duration_ms) {
-        setSections(generateDefaultSections(track));
-      }
+      setSections([]);
     }
   }
 
@@ -174,86 +171,6 @@ export default function TrackDetailPage() {
     }
   }
 
-  function generateDefaultSections(track: Track): TrackSection[] {
-    const durationMs = track.duration_ms || 180000; // Default 3 minutes
-    
-    // Use track's chord progression if available, distributed across sections
-    const trackChords = track.progression_roman || ['I', 'V', 'vi', 'IV'];
-    
-    // Generate typical song structure with chord progressions
-    return [
-      {
-        id: `${track.id}-intro`,
-        track_id: track.id,
-        label: 'intro',
-        start_ms: 0,
-        end_ms: Math.floor(durationMs * 0.08), // ~8%
-        created_at: new Date().toISOString(),
-        chords: trackChords.slice(0, 2),
-        chord_timings: [0, Math.floor(durationMs * 0.04)],
-      },
-      {
-        id: `${track.id}-verse1`,
-        track_id: track.id,
-        label: 'verse',
-        start_ms: Math.floor(durationMs * 0.08),
-        end_ms: Math.floor(durationMs * 0.3), // ~22%
-        created_at: new Date().toISOString(),
-        chords: trackChords,
-        chord_timings: trackChords.map((_, i) => Math.floor((durationMs * 0.22 * i) / trackChords.length)),
-      },
-      {
-        id: `${track.id}-chorus1`,
-        track_id: track.id,
-        label: 'chorus',
-        start_ms: Math.floor(durationMs * 0.3),
-        end_ms: Math.floor(durationMs * 0.45), // ~15%
-        created_at: new Date().toISOString(),
-        chords: trackChords,
-        chord_timings: trackChords.map((_, i) => Math.floor((durationMs * 0.15 * i) / trackChords.length)),
-      },
-      {
-        id: `${track.id}-verse2`,
-        track_id: track.id,
-        label: 'verse',
-        start_ms: Math.floor(durationMs * 0.45),
-        end_ms: Math.floor(durationMs * 0.6), // ~15%
-        created_at: new Date().toISOString(),
-        chords: trackChords,
-        chord_timings: trackChords.map((_, i) => Math.floor((durationMs * 0.15 * i) / trackChords.length)),
-      },
-      {
-        id: `${track.id}-chorus2`,
-        track_id: track.id,
-        label: 'chorus',
-        start_ms: Math.floor(durationMs * 0.6),
-        end_ms: Math.floor(durationMs * 0.75), // ~15%
-        created_at: new Date().toISOString(),
-        chords: trackChords,
-        chord_timings: trackChords.map((_, i) => Math.floor((durationMs * 0.15 * i) / trackChords.length)),
-      },
-      {
-        id: `${track.id}-bridge`,
-        track_id: track.id,
-        label: 'bridge',
-        start_ms: Math.floor(durationMs * 0.75),
-        end_ms: Math.floor(durationMs * 0.85), // ~10%
-        created_at: new Date().toISOString(),
-        chords: trackChords.slice(0, 2),
-        chord_timings: [0, Math.floor(durationMs * 0.05)],
-      },
-      {
-        id: `${track.id}-outro`,
-        track_id: track.id,
-        label: 'outro',
-        start_ms: Math.floor(durationMs * 0.85),
-        end_ms: durationMs, // ~15%
-        created_at: new Date().toISOString(),
-        chords: trackChords.slice(0, 2),
-        chord_timings: [0, Math.floor(durationMs * 0.075)],
-      },
-    ];
-  }
 
   function handleSectionClick(section: TrackSection) {
     // Not floored - see sectionStartSeconds in lib/sections.ts for why that
