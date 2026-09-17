@@ -125,7 +125,9 @@ serve(async (req) => {
           ordinal: s.ordinal,
           start_ms: s.startMs,
           end_ms: s.endMs,
-          progression_roman: s.progressionRoman,
+          // The payload field keeps its name because the deployed client
+          // already sends it; the column was renamed to say what it holds.
+          loop_roman: s.progressionRoman,
           loop_length_bars: s.loopLengthBars,
           confidence: s.confidence,
         }))
