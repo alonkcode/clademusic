@@ -44,15 +44,28 @@ function deliver(frame: HTMLIFrameElement, info: Record<string, unknown>) {
   );
 }
 
+function deliverError(frame: HTMLIFrameElement, code: number) {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      origin: 'https://www.youtube-nocookie.com',
+      source: frame.contentWindow,
+      data: JSON.stringify({ event: 'onError', info: code, channel: 'widget' }),
+    })
+  );
+}
+
 describe('YouTube state relay (public/universal-player.html)', () => {
   let frame: HTMLIFrameElement;
   let relayed: any[];
+  let errors: any[];
 
   beforeEach(() => {
     vi.restoreAllMocks();
     relayed = [];
+    errors = [];
     vi.spyOn(window.parent, 'postMessage').mockImplementation(((msg: any) => {
       if (msg && msg.type === 'universal-player:state') relayed.push(msg.payload);
+      if (msg && msg.type === 'universal-player:error') errors.push(msg.payload);
     }) as any);
     frame = loadRelay();
   });
@@ -100,5 +113,17 @@ describe('YouTube state relay (public/universal-player.html)', () => {
   it('ignores a zero duration rather than relaying it as a real one', () => {
     deliver(frame, { currentTime: 5, duration: 0 });
     expect(relayed.at(-1)).toEqual({ positionMs: 5000 });
+  });
+
+  // A blocked, removed or region-restricted video sends onError and then goes
+  // completely silent - no infoDelivery ever follows. Relaying the code is the
+  // app's only chance to stop showing a Pause button over a video that will
+  // never play. provider/id ride along so the app can ignore an error that
+  // arrives for a track it has already moved on from.
+  it('relays YouTube onError without reporting a fake playing state', () => {
+    deliverError(frame, 150);
+
+    expect(errors).toEqual([{ code: 150, provider: 'youtube', id: 'abc123' }]);
+    expect(relayed).toHaveLength(0);
   });
 });

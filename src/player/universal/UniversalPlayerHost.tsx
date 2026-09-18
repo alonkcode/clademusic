@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MusicProvider } from '@/types';
 import { usePlayer } from '../PlayerContext';
 import { buildEmbedSrc, buildProviderDeepLink } from './buildEmbedSrc';
@@ -13,12 +13,39 @@ export type UniversalPlayRequest = {
   startSec?: number;
 };
 
+type EmbedError = { code: number | null; message: string };
+
 type UniversalPlayerHostProps = {
   request: UniversalPlayRequest | null;
   className?: string;
+  /** Called when the embed refuses to play the track, and with null when the
+   *  track changes, so the caller can show it somewhere always visible. */
+  onEmbedError?: (error: EmbedError | null) => void;
 };
 
 const IFRAME_ID = 'universal-player';
+
+/**
+ * YouTube's onError codes, as the viewer would want them explained. The
+ * distinction that matters to them is "this will never work" (removed, or the
+ * owner blocked embedding) versus "try opening it on YouTube" - so every case
+ * still offers the deep link rather than leaving them at a dead end.
+ */
+function describeEmbedError(code: number | null): string {
+  switch (code) {
+    case 100:
+      return 'This video has been removed or made private.';
+    case 101:
+    case 150:
+      return "The owner doesn't allow this video to play outside YouTube.";
+    case 2:
+      return "That video link isn't valid.";
+    case 5:
+      return "This video can't be played in the browser.";
+    default:
+      return "This video can't be played here.";
+  }
+}
 
 export function focusUniversalPlayerFrame() {
   try {
@@ -29,7 +56,7 @@ export function focusUniversalPlayerFrame() {
   }
 }
 
-export function UniversalPlayerHost({ request, className }: UniversalPlayerHostProps) {
+export function UniversalPlayerHost({ request, className, onEmbedError }: UniversalPlayerHostProps) {
   const { registerProviderControls, updatePlaybackState, clearSeek } = usePlayer();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const seqRef = useRef(0);
@@ -66,6 +93,20 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
     };
   }
   const { autoplay: loadAutoplay, startSec: loadStartSec } = loadIntentRef.current;
+
+  const [embedError, setEmbedError] = useState<EmbedError | null>(null);
+  const lastErrorKeyRef = useRef<string | null>(null);
+  // Held in a ref so the message listener never has to re-subscribe merely
+  // because the caller passed a fresh arrow function this render.
+  const onEmbedErrorRef = useRef(onEmbedError);
+  onEmbedErrorRef.current = onEmbedError;
+
+  // A failure must not stick to the next track.
+  useEffect(() => {
+    setEmbedError(null);
+    lastErrorKeyRef.current = null;
+    onEmbedErrorRef.current?.(null);
+  }, [trackKey]);
 
   const provider = request?.provider ?? null;
   const providerTrackId = request?.id ?? null;
@@ -191,7 +232,33 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
       if (event.origin !== window.location.origin) return;
       if (event.source !== iframeRef.current?.contentWindow) return;
       const data = event.data;
-      if (!data || typeof data !== 'object' || data.type !== 'universal-player:state') return;
+      if (!data || typeof data !== 'object') return;
+
+      if (data.type === 'universal-player:error') {
+        const payload = data.payload ?? {};
+        if (payload.provider !== provider || payload.id !== providerTrackId) return;
+        const code = typeof payload.code === 'number' ? payload.code : null;
+        const nextError = { code };
+        setEmbedError(nextError);
+        updatePlaybackState({ isPlaying: false, positionMs: 0, durationMs: 0 });
+
+        // Reported UP to the caller as well as shown here. This component
+        // renders inside the collapsed video panel, which is aria-hidden and
+        // clipped to zero height for most of a listener's time in the app, so
+        // a message that only lives here is invisible exactly when it matters.
+        // The bar is always on screen while a track is loaded, so the drawer
+        // puts it there. (A toast was tried first and silently did nothing -
+        // toast() dispatches and the viewport renders, but the list stays
+        // empty, app-wide.)
+        const errorKey = `${provider}:${providerTrackId}:${code}`;
+        if (lastErrorKeyRef.current !== errorKey) {
+          lastErrorKeyRef.current = errorKey;
+          onEmbedErrorRef.current?.({ code, message: describeEmbedError(code) });
+        }
+        return;
+      }
+
+      if (data.type !== 'universal-player:state') return;
       const payload = data.payload ?? {};
       updatePlaybackState({
         positionMs: typeof payload.positionMs === 'number' ? payload.positionMs : undefined,
@@ -201,7 +268,7 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [updatePlaybackState]);
+  }, [updatePlaybackState, provider, providerTrackId]);
 
   const showFallback = Boolean(request && target && !target.src);
 
@@ -234,6 +301,26 @@ export function UniversalPlayerHost({ request, className }: UniversalPlayerHostP
           />
         </div>
       </div>
+
+      {embedError && request && (
+        <div className="mt-2 flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0" role="alert">
+            <p className="text-xs font-semibold text-destructive">Video unavailable</p>
+            <p className="text-xs leading-snug text-muted-foreground">{describeEmbedError(embedError.code)}</p>
+          </div>
+          {deepLink && (
+            <a
+              href={deepLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 items-center rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-white/90 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              aria-label={`Open ${request.title ?? 'this video'} on YouTube`}
+            >
+              Open on YouTube
+            </a>
+          )}
+        </div>
+      )}
 
       {showFallback && request && (
         <div className="mt-2 text-xs text-white/70 flex items-center justify-between gap-2">

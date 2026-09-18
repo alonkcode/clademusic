@@ -81,6 +81,11 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const canSeekInEmbed = true; // Enable seekbar - commit seek immediately to sync positionMs and provider
   const [queueOpen, setQueueOpen] = useState(false);
   const [scrubSec, setScrubSec] = useState<number | null>(null);
+  // Why the embed refused to play, when it does. Lives here rather than in
+  // UniversalPlayerHost because the host renders inside the video panel, which
+  // is collapsed (and aria-hidden) most of the time - the bar is the only part
+  // always on screen while a track is loaded.
+  const [embedError, setEmbedError] = useState<{ code: number | null; message: string } | null>(null);
 
   // Docked to the bottom edge, full width, like Spotify's own desktop
   // player - always there while a track is loaded, never dragged or
@@ -193,6 +198,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
 
   useEffect(() => {
     setScrubSec(null);
+    setEmbedError(null);
   }, [provider, trackId]);
 
   useDevPlayerInvariants(isOpen, resolvedTitle);
@@ -413,6 +419,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                     nothing when idle. */}
                 <div className="relative w-full max-w-sm overflow-hidden rounded-xl">
                   <UniversalPlayerHost
+                    onEmbedError={setEmbedError}
                     request={
                       provider && trackId
                         ? {
@@ -446,8 +453,21 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             {resolvedTitle && (
               <span className="truncate text-xs font-bold text-foreground md:text-sm" aria-label="Track title">{resolvedTitle}</span>
             )}
-            {resolvedArtist && (
+            {resolvedArtist && !embedError && (
               <span className="truncate text-[11px] text-muted-foreground md:text-xs" aria-label="Artist name">{resolvedArtist}</span>
+            )}
+            {embedError && (
+              <span className="flex min-w-0 items-center gap-1 text-[11px] text-destructive md:text-xs" role="alert">
+                <span className="truncate" title={embedError.message}>Unavailable</span>
+                <a
+                  href={buildProviderDeepLink(provider as any, trackId ?? '')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 underline underline-offset-2 hover:text-foreground"
+                >
+                  open
+                </a>
+              </span>
             )}
           </div>
 
