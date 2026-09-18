@@ -107,7 +107,7 @@ export function usePromoteDetectionRun() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['detectionRuns'] });
       queryClient.invalidateQueries({ queryKey: ['detectionRun'] });
-      queryClient.invalidateQueries({ queryKey: ['trackSections'] });
+      queryClient.invalidateQueries({ queryKey: ['track-sections'] });
     },
   });
 }

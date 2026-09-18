@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, Sliders, Radio, AudioLines, Loader2, X, Save, Check } from 'lucide-react';
+import { Play, Pause, Sliders, Radio, AudioLines, Loader2, X, Save, Check, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useSectionSync } from '@/hooks/useSectionSync';
 import { useHarmonicLoop } from '@/hooks/useHarmonicLoop';
 import { useLiveChordDetection } from '@/hooks/useLiveChordDetection';
 import { useAuth } from '@/hooks/useAuth';
+import { useIsAdmin } from '@/hooks/api/useAdmin';
+import { SectionEditor } from '@/components/SectionEditor';
 import { useCredits, useSpendCredit } from '@/hooks/api/useCredits';
 import { chordDisplayName, parseRomanChord, pitchClassName, PITCH_CLASSES } from '@/lib/harmony/theory';
 import { toRomanProgression } from '@/lib/harmony/keyEstimation';
@@ -71,6 +73,8 @@ export function HarmonicHUD({
   const [controlsOpen, setControlsOpen] = useState(false);
   const live = useLiveChordDetection();
   const { user } = useAuth();
+  const { data: isAdmin } = useIsAdmin();
+  const [editingSections, setEditingSections] = useState(false);
   const { data: creditBalance } = useCredits();
   const spendCredit = useSpendCredit();
   // Tracks whether THIS toggle-on has already been charged, so re-renders
@@ -281,6 +285,21 @@ export function HarmonicHUD({
       {/* Stanza selector. Named, thumb-sized and horizontal: picking one here
           changes the chords below, and it stays in step with the section chips
           above the card through the shared selection context. */}
+      {/* Marking structure by ear, against the track that is playing. Admin
+          only, because it writes the canonical sections every listener sees. */}
+      {editingSections && (
+        <div className="px-3 pb-2 sm:px-4">
+          <SectionEditor
+            trackId={trackId}
+            sections={(sections ?? []).map((s) => ({
+              label: s.type,
+              start_ms: Math.round(s.start_time * 1000),
+            }))}
+            onClose={() => setEditingSections(false)}
+          />
+        </div>
+      )}
+
       {(orderedSections.length > 1 || sync.isLiveSynced) && (
         <div className="flex items-center gap-1.5 overflow-x-auto px-2.5 pt-2.5 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {sync.isLiveSynced && (
@@ -461,6 +480,30 @@ export function HarmonicHUD({
               after review anyway, so there is no reason to submit anything
               they have not looked at. Needs a real catalog track to attach
               to, and a signed-in account to attribute it to. */}
+          {/* Marking sections by hand. Admin only: it rewrites the canonical
+              structure, which is what every listener sees. Hidden while
+              capturing, since detection is proposing its own boundaries. */}
+          {isAdmin && isUuid(trackId) && live.status !== 'capturing' && (
+            <button
+              type="button"
+              onClick={() => setEditingSections((open) => !open)}
+              aria-pressed={editingSections}
+              aria-label="Edit song sections"
+              title="Mark the sections of this song by ear"
+              className={cn(
+                'inline-flex items-center justify-center gap-1.5 rounded-full transition-colors shrink-0',
+                'h-8 px-2.5 text-[11px] font-medium',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                editingSections
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted/60 text-muted-foreground hover:bg-muted'
+              )}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              {editingSections ? 'Editing' : 'Edit'}
+            </button>
+          )}
+
           {hasSavableAnalysis && (
             <button
               type="button"

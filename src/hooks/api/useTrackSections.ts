@@ -5,7 +5,7 @@
  * for seek-based playback across providers.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { TrackSection } from '@/types';
 
@@ -65,4 +65,32 @@ export function findSectionAtTime(
   timeMs: number
 ): TrackSection | undefined {
   return sections.find(s => timeMs >= s.start_ms && timeMs < s.end_ms);
+}
+
+/**
+ * Save a hand-marked set of sections for a track.
+ *
+ * Structure only: the RPC deliberately drops any chord data, because moving a
+ * boundary changes which chords fall inside a section and carrying them over
+ * would attach them to the wrong part while still looking exact. Chords come
+ * back by promoting a detection run.
+ */
+export function useSaveTrackSections() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      trackId: string;
+      sections: Array<{ label: string; ordinal: number; start_ms: number; end_ms: number }>;
+    }) => {
+      const { data, error } = await supabase.rpc('save_track_sections' as never, {
+        p_track_id: args.trackId,
+        p_sections: args.sections,
+      } as never);
+      if (error) throw new Error(error.message);
+      return (data as unknown as number) ?? 0;
+    },
+    onSuccess: (_count, args) => {
+      queryClient.invalidateQueries({ queryKey: ['track-sections', args.trackId] });
+    },
+  });
 }
