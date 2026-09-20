@@ -100,6 +100,9 @@ export function UniversalPlayerHost({ request, className, onEmbedError }: Univer
   // because the caller passed a fresh arrow function this render.
   const onEmbedErrorRef = useRef(onEmbedError);
   onEmbedErrorRef.current = onEmbedError;
+  // Read by the error handler, which must not re-subscribe per track.
+  const loadStartSecRef = useRef<number | undefined>(loadStartSec);
+  loadStartSecRef.current = loadStartSec;
 
   // A failure must not stick to the next track.
   useEffect(() => {
@@ -240,7 +243,17 @@ export function UniversalPlayerHost({ request, className, onEmbedError }: Univer
         const code = typeof payload.code === 'number' ? payload.code : null;
         const nextError = { code };
         setEmbedError(nextError);
-        updatePlaybackState({ isPlaying: false, positionMs: 0, durationMs: 0 });
+        // Back to where this load was ASKED to start, not flat zero. Nothing
+        // played, so any position past that was the clock's optimistic drift
+        // and should go - but the start offset itself is the listener's real
+        // place in the track, carried in from a quicklink handoff, and the next
+        // handoff reads it. Zeroing it would silently send them back to 0:00
+        // on the provider they switch to next.
+        updatePlaybackState({
+          isPlaying: false,
+          positionMs: Math.max(0, (loadStartSecRef.current ?? 0) * 1000),
+          durationMs: 0,
+        });
 
         // Reported UP to the caller as well as shown here. This component
         // renders inside the collapsed video panel, which is aria-hidden and
