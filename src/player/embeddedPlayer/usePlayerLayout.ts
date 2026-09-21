@@ -9,16 +9,23 @@ export interface UsePlayerLayoutOptions {
 }
 
 /**
- * The video/details panel's open state and the chord-readout collapse state
- * (both persisted across sessions), plus the cinema/fullscreen plumbing. The
- * bar itself is always docked full-width to the bottom edge - there's no
- * position/size state left to remember beyond what was left open or collapsed.
+ * The video/details panel's open state (persisted across sessions) and the
+ * chord-readout collapse state (deliberately NOT persisted - see hudCollapsed
+ * below), plus the cinema/fullscreen plumbing. The bar itself is always
+ * docked full-width to the bottom edge - there's no position/size state left
+ * to remember beyond what was left open.
  */
 export function usePlayerLayout({ isCinema, enterCinema, exitCinema }: UsePlayerLayoutOptions) {
   const cinemaRef = useRef<HTMLDivElement | null>(null);
   const [showVideo, setShowVideo] = useState(false);
-  // The chord readout above the bar can be collapsed to reclaim the vertical
-  // space it takes (200-350px); the choice sticks across sessions.
+  // The chord readout is the player's headline feature (HarmonicHUD calls
+  // itself "the dominant, always-visible harmonic display") and must default
+  // to visible on every load, on every page. It used to persist to
+  // localStorage alongside showVideo - one collapse, anywhere, silently
+  // stayed collapsed on every future load forever, which is exactly what
+  // read as "chords aren't always showing". The chevron above the readout
+  // still collapses it for the current view; that choice just no longer
+  // outlives it.
   const [hudCollapsed, setHudCollapsed] = useState(false);
 
   const toggleFullscreen = useCallback(() => {
@@ -47,16 +54,15 @@ export function usePlayerLayout({ isCinema, enterCinema, exitCinema }: UsePlayer
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, [enterCinema, exitCinema]);
 
-  // Hydrate/persist whether the details panel was left open and whether the
-  // chord readout was left collapsed.
+  // Hydrate/persist whether the details panel was left open. hudCollapsed is
+  // intentionally excluded - see its declaration above.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<{ showVideo: boolean; hudCollapsed: boolean }>;
+      const parsed = JSON.parse(raw) as Partial<{ showVideo: boolean }>;
       if (typeof parsed.showVideo === 'boolean') setShowVideo(parsed.showVideo);
-      if (typeof parsed.hudCollapsed === 'boolean') setHudCollapsed(parsed.hudCollapsed);
     } catch (err) {
       console.warn('Failed to hydrate player layout', err);
     }
@@ -65,11 +71,11 @@ export function usePlayerLayout({ isCinema, enterCinema, exitCinema }: UsePlayer
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ showVideo, hudCollapsed }));
+      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ showVideo }));
     } catch (err) {
       console.warn('Failed to persist player layout', err);
     }
-  }, [showVideo, hudCollapsed]);
+  }, [showVideo]);
 
   useEffect(() => {
     if (!isCinema) return;

@@ -134,4 +134,22 @@ describe('EmbeddedPlayerDrawer chord readout', () => {
       expect(screen.getAllByText(numeral).length).toBeGreaterThan(0);
     }
   });
+
+  // Regression: hudCollapsed used to persist to localStorage alongside
+  // showVideo, so collapsing the chord readout once - in any session, on any
+  // page - left it collapsed on every future load forever. That is exactly
+  // what read as "chords aren't always showing" despite the readout being
+  // documented as always-visible by default.
+  it('shows the chord readout even when a past session left it collapsed', () => {
+    localStorage.setItem('player_layout_v2', JSON.stringify({ showVideo: false, hudCollapsed: true }));
+
+    renderPlayer();
+
+    const progression = ['I', 'V', 'vi', 'IV'];
+    for (const numeral of progression) {
+      expect(screen.getAllByText(numeral).length).toBeGreaterThan(0);
+    }
+
+    localStorage.removeItem('player_layout_v2');
+  });
 });
