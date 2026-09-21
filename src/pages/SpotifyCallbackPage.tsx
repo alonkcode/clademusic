@@ -145,6 +145,11 @@ export default function SpotifyCallbackPage() {
         );
 
         let profile: SpotifyUserProfile | null = null;
+        // Set alongside `profile` staying null, so the warning below can name
+        // what actually happened instead of guessing - this used to always
+        // say "(403)" even when the real status was something else entirely.
+        let profileErrorStatus: number | null = null;
+        let profileErrorDetail: string | null = null;
         console.log('[Spotify Callback] Fetching Spotify profile...');
         // Get user's Spotify profile (best-effort). Some Spotify apps in dev mode return 403 for non-whitelisted users.
         // We still store tokens so the user can retry/reconnect after fixing Spotify dashboard settings.
@@ -156,6 +161,8 @@ export default function SpotifyCallbackPage() {
 
         if (!profileResponse.ok) {
           const details = await profileResponse.json().catch(() => null);
+          profileErrorStatus = profileResponse.status;
+          profileErrorDetail = details?.error?.message ?? null;
           console.error('[Spotify Callback] Profile fetch failed:', profileResponse.status, details);
           // Continue; store tokens with a placeholder provider_user_id.
         } else {
@@ -213,8 +220,13 @@ export default function SpotifyCallbackPage() {
           console.warn(
             '[Spotify Callback] Connected, but profile fetch failed. This often means the Spotify app is in dev mode and the user is not added as an allowed user in the Spotify dashboard.'
           );
+          const statusSuffix = profileErrorStatus != null ? ` (${profileErrorStatus})` : '';
           setWarningMessage(
-            'Connected, but Spotify profile fetch was blocked (403). If your Spotify app is in dev mode, add your account as an allowed user in the Spotify dashboard, then reconnect.'
+            profileErrorStatus === 403
+              ? `Connected, but Spotify profile fetch was blocked${statusSuffix}. If your Spotify app is in dev mode, add your account as an allowed user in the Spotify dashboard, then reconnect.`
+              : `Connected, but fetching your Spotify profile failed${statusSuffix}${
+                  profileErrorDetail ? `: ${profileErrorDetail}` : ''
+                }. Try reconnecting from your profile page.`
           );
         }
 
