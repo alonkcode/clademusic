@@ -239,6 +239,63 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     canPrev,
   });
 
+  // Horizontal swipe on the title/artist block for prev/next track. Mirrors
+  // FeedPage.tsx's vertical swipe-to-advance pattern, but deliberately on the
+  // X axis instead of Y - a vertical swipe here would fight the browser's
+  // native pull-to-refresh gesture, which this bar sits on top of on every
+  // page.
+  //
+  // handlePrev/handleNext are recreated on every positionMs tick (they need
+  // the live position to decide restart-vs-previous), so reading them via a
+  // ref updated on every render - rather than depending on them directly -
+  // keeps the listeners from being torn down and re-attached several times a
+  // second while a track plays. The effect itself only needs to re-run when
+  // the element mounts/unmounts, which tracks isIdle.
+  const transportRef = useRef({ handlePrev, handleNext, effectiveCanPrev, effectiveCanNext });
+  transportRef.current = { handlePrev, handleNext, effectiveCanPrev, effectiveCanNext };
+
+  const titleSwipeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = titleSwipeRef.current;
+    if (!el) return;
+
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      startTime = Date.now();
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      const endX = e.changedTouches[0].clientX;
+      const endY = e.changedTouches[0].clientY;
+      const diffX = startX - endX;
+      const diffY = Math.abs(startY - endY);
+      const timeDiff = Date.now() - startTime;
+
+      // Swipe threshold: at least 50px horizontal, mostly horizontal (not vertical), completed within 500ms
+      if (Math.abs(diffX) > 50 && Math.abs(diffX) > diffY && timeDiff < 500) {
+        const { effectiveCanNext, effectiveCanPrev, handleNext, handlePrev } = transportRef.current;
+        if (diffX > 0) {
+          if (effectiveCanNext) handleNext();
+        } else {
+          if (effectiveCanPrev) handlePrev();
+        }
+      }
+    };
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: true });
+    el.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [isIdle]);
+
   // NOT an early return on isIdle: UniversalPlayerHost mounts a single,
   // persistent <iframe id="universal-player"> that every provider switch
   // reuses via postMessage rather than remounting - CI's own E2E test
@@ -260,7 +317,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
       <div
         ref={cinemaRef}
         data-player="universal"
-        className={`fixed inset-x-0 bottom-0 z-[110] border-t border-border/60 bg-gradient-to-t ${meta.color} shadow-[0_-18px_60px_-30px_rgba(0,0,0,0.75)] backdrop-blur-xl`}
+        className={`fixed inset-x-0 bottom-0 z-[110] max-h-[100dvh] overflow-y-auto overflow-x-hidden border-t border-border/60 bg-gradient-to-t ${meta.color} shadow-[0_-18px_60px_-30px_rgba(0,0,0,0.75)] backdrop-blur-xl pb-[env(safe-area-inset-bottom)]`}
       >
         {/* Chord readout and section jump chips: visible by default whenever a
             track is loaded, not just when the video panel below is expanded.
@@ -282,7 +339,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             onClick={() => setHudCollapsed(!hudCollapsed)}
             aria-expanded={!hudCollapsed}
             aria-label={hudCollapsed ? 'Show chord readout' : 'Hide chord readout'}
-            className="flex w-full items-center justify-center gap-1.5 border-b border-border/60 bg-background/95 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+            className="flex w-full items-center justify-center gap-1.5 border-b border-border/60 bg-background/95 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
           >
             {hudCollapsed ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             {hudCollapsed ? 'Chords' : 'Hide chords'}
@@ -290,7 +347,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
         )}
 
         {!isIdle && !hudCollapsed && hasHarmonyPanel && (
-          <div className="max-h-[45vh] overflow-y-auto border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
+          <div className="max-h-[45dvh] overflow-y-auto [overscroll-behavior-y:contain] border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
             <HarmonicHUD
               trackId={canonicalTrackId ?? ''}
               progression={harmony.progression}
@@ -377,7 +434,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           className="overflow-hidden"
           aria-hidden={!showVideo}
         >
-          <div className="max-h-[70vh] overflow-y-auto border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
+          <div className="max-h-[70dvh] overflow-y-auto [overscroll-behavior-y:contain] border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
             {useSpotifySdk ? (
               // Audio-only - Premium SDK playback has no picture to show,
               // just real transport control via the docked bar.
@@ -449,7 +506,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/80 text-lg shadow-inner md:h-10 md:w-10">
             {meta.Icon ? <meta.Icon className="h-4 w-4 md:h-5 md:w-5" /> : meta.badge}
           </span>
-          <div className="flex min-w-0 flex-col leading-tight" style={{ flexBasis: '9rem' }}>
+          <div ref={titleSwipeRef} className="flex min-w-0 flex-col leading-tight [touch-action:pan-y]" style={{ flexBasis: '9rem' }}>
             {resolvedTitle && (
               <span className="truncate text-xs font-bold text-foreground md:text-sm" aria-label="Track title">{resolvedTitle}</span>
             )}
