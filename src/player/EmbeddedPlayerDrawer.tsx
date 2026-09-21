@@ -5,6 +5,7 @@ import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, Sk
 import { QueueSheet } from './QueueSheet';
 import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
 import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
+import { useIsAdmin } from '@/hooks/api/useAdmin';
 import { getSectionDisplayLabel } from '@/lib/sections';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
@@ -72,8 +73,9 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const navigate = useNavigate();
   const { data: isSpotifyConnected } = useSpotifyConnected();
   const connectSpotify = useConnectSpotify();
+  const { data: isAdmin } = useIsAdmin();
 
-  const { sections, harmony, hudSections } = usePlayerHarmony(canonicalTrackId);
+  const { sections, harmony, hudSections, isLoading: isHarmonyLoading } = usePlayerHarmony(canonicalTrackId);
 
   const safeQueue = Array.isArray(queue) ? queue : [];
   const safeQueueIndex = typeof queueIndex === 'number' ? queueIndex : -1;
@@ -151,7 +153,12 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const isIdle = !isOpen || !provider || !trackId;
   const authoritativePositionMs = safeMs(positionMs);
   // Is there anything in the chord readout worth showing / collapsing?
-  const hasHarmonyPanel = harmony.progression.length > 0 || sections.length > 0;
+  // isHarmonyLoading keeps this true across the gap between a track switch
+  // and its data arriving - without it, switching tracks flipped this false
+  // (both progression and sections briefly empty for the new track) and back
+  // true a moment later, which is what made the whole panel look like it
+  // kept disappearing on every switch instead of just refreshing in place.
+  const hasHarmonyPanel = harmony.progression.length > 0 || sections.length > 0 || isHarmonyLoading;
 
   // Where the embed should start when it loads, so handing a track from one
   // provider to another (the Spotify/YouTube quicklinks) resumes where the
@@ -445,8 +452,9 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   onFallback={(reason) => {
                     setSpotifySdkFailed(true);
                     const lower = reason.toLowerCase();
+                    const isDevModeBlock = lower.includes('403') || lower.includes('developer dashboard');
                     toast({
-                      title: lower.includes('403') || lower.includes('developer dashboard')
+                      title: isDevModeBlock
                         ? 'Spotify app in Development Mode'
                         : lower.includes('premium')
                           ? 'Spotify Premium required'
@@ -455,7 +463,14 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                       // TOAST_REMOVE_DELAY) specifically so actionable detail
                       // like the 403/dev-mode guidance below doesn't flash
                       // past before it can be read.
-                      description: reason,
+                      //
+                      // The raw reason tells the LISTENER to go add their own
+                      // account in the Spotify Developer Dashboard - fine
+                      // advice for the app's own admin, a dead end for
+                      // everyone else who has no access to that dashboard.
+                      description: isDevModeBlock && !isAdmin
+                        ? "Full-track playback isn't available for this account yet. Playing a preview instead."
+                        : reason,
                     });
                   }}
                 />

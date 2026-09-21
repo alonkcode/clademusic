@@ -117,5 +117,13 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
     [sections]
   );
 
-  return { sections, harmony, hudSections };
+  // True only for the FIRST fetch of a brand-new track (no cached data yet),
+  // not a background refetch of one already shown once. EmbeddedPlayerDrawer
+  // uses this to keep the chord panel mounted across a track switch instead
+  // of hiding it while sections/progression are both momentarily empty, only
+  // to pop back in once the new track's data lands a moment later - which is
+  // what made switching tracks look like the panel kept disappearing.
+  const isLoading = sectionsQuery.isLoading || trackQuery.isLoading;
+
+  return { sections, harmony, hudSections, isLoading };
 }

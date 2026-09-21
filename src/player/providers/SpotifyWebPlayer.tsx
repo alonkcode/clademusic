@@ -219,6 +219,10 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     setError(null);
     setReady(false);
     setAutoplayBlocked(false);
+    // Mark the newly-requested track as current right away, before the
+    // /play PUT below has even been sent - the poll below reads this to
+    // reject state for whatever track the device is still reporting.
+    lastTrackIdRef.current = providerTrackId;
     updatePlaybackState({
       durationMs: 0,
       isPlaying: shouldAutoplayRef.current,
@@ -440,6 +444,13 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
             const state = await player.getCurrentState().catch(() => null);
             if (!state) return;
             const track = state.track_window?.current_track;
+            // The device keeps reporting the OUTGOING track for a moment
+            // after a switch - the /play PUT that actually changes it is a
+            // real network round trip, not instant. Relaying that here
+            // overwrote the just-set new title/artist/position with the
+            // track being replaced, which is what made switching songs look
+            // like it "jumped back" to whatever was playing before.
+            if (track?.id && lastTrackIdRef.current && track.id !== lastTrackIdRef.current) return;
             const artistNames = Array.isArray(track?.artists)
               ? track.artists.map((a: any) => a?.name).filter(Boolean).join(', ')
               : null;
