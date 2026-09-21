@@ -62,7 +62,7 @@ export function TrackComments({ trackId, className = '' }: TrackCommentsProps) {
     try {
       const { data, error } = await supabase
         .from('track_comments')
-        .select('*')
+        .select('*, profiles_public(display_name, avatar_url)')
         .eq('track_id', trackId)
         .order('created_at', { ascending: true })
         .limit(50);
@@ -73,7 +73,13 @@ export function TrackComments({ trackId, className = '' }: TrackCommentsProps) {
         return;
       }
 
-      setComments(data || []);
+      setComments(
+        (data || []).map((comment: any) => ({
+          ...comment,
+          user_display_name: comment.profiles_public?.display_name || 'Anonymous',
+          user_avatar_url: comment.profiles_public?.avatar_url || undefined,
+        }))
+      );
     } catch (error) {
       console.error('Error loading comments:', error);
     } finally {

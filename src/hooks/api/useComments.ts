@@ -22,7 +22,7 @@ export function useTrackComments(trackId: string) {
       try {
         const { data, error } = await supabase
           .from('track_comments')
-          .select('*')
+          .select('*, profiles_public(display_name, avatar_url)')
           .eq('track_id', trackId)
           .order('created_at', { ascending: true });
 
@@ -33,8 +33,8 @@ export function useTrackComments(trackId: string) {
 
         return (data || []).map((comment: any) => ({
           ...comment,
-          user_display_name: 'Anonymous',
-          user_avatar_url: undefined,
+          user_display_name: comment.profiles_public?.display_name || 'Anonymous',
+          user_avatar_url: comment.profiles_public?.avatar_url || undefined,
         })) as Comment[];
       } catch (error) {
         console.error('Failed to load track comments:', error);

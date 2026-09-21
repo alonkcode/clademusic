@@ -284,3 +284,25 @@
 body.clade-player-open {
   padding-bottom: calc(var(--clade-player-height, 4.5rem) + env(safe-area-inset-bottom));
 }
+
+/* The toast viewport docks bottom-right at sm+ widths (same corner as the
+   player bar below it - see toast.tsx). Without this, toasts render behind
+   the player until closed. z-index alone (raised in toast.tsx) keeps them
+   visible but overlapping the transport controls; this shifts the viewport
+   up by the player's real height so toasts sit cleanly above it instead. */
+@media (min-width: 640px) {
+  body.clade-player-open .clade-toast-viewport {
+    bottom: calc(var(--clade-player-height, 4.5rem) + env(safe-area-inset-bottom) + 1rem);
+  }
+}
+
+/* FeedPage is a full-viewport, one-track-per-screen layout that already
+   reserves its own player clearance (see its `pb-24` + dvh card sizing) -
+   the body-level reservation above is for ordinary scrolling pages that
+   don't. Applying both stacked the page past 100dvh, which turned the feed
+   scrollable (dead space between the last button row and the docked
+   player) when it should never scroll at all - swiping/scrolling there is
+   supposed to change tracks instead. */
+body.clade-player-open:has([data-feed]) {
+  padding-bottom: 0;
+}

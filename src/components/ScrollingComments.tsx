@@ -78,13 +78,13 @@ export function ScrollingComments({
         const query = trackId
           ? supabase
               .from('track_comments')
-              .select('id, content, profiles(full_name), created_at')
+              .select('id, content, profiles_public(display_name), created_at')
               .eq('track_id', trackId)
               .order('created_at', { ascending: false })
               .limit(20)
           : supabase
               .from('chat_messages')
-              .select('id, message, profiles(full_name), created_at')
+              .select('id, message, profiles_public(display_name), created_at')
               .eq('room_id', resolvedRoomId)
               .order('created_at', { ascending: false })
               .limit(20);
@@ -109,7 +109,7 @@ export function ScrollingComments({
           const formattedComments: Comment[] = data.map((item: any) => ({
             id: item.id,
             content: item.content ?? item.message ?? '',
-            author: item.profiles?.full_name || 'Anonymous',
+            author: item.profiles_public?.display_name || 'Anonymous',
             created_at: item.created_at,
           }));
           setComments(formattedComments.reverse());
@@ -140,8 +140,8 @@ export function ScrollingComments({
             try {
               // Fetch the author name
               const { data: profileData, error } = await supabase
-                .from('profiles')
-                .select('full_name')
+                .from('profiles_public')
+                .select('display_name')
                 .eq('id', payload.new.user_id)
                 .single();
               if (error) throw error;
@@ -149,7 +149,7 @@ export function ScrollingComments({
               const newComment: Comment = {
                 id: payload.new.id,
                 content: payload.new.content ?? payload.new.message ?? '',
-                author: profileData?.full_name || 'Anonymous',
+                author: profileData?.display_name || 'Anonymous',
                 created_at: payload.new.created_at,
               };
 
