@@ -221,12 +221,11 @@ export default function SpotifyCallbackPage() {
             '[Spotify Callback] Connected, but profile fetch failed. This often means the Spotify app is in dev mode and the user is not added as an allowed user in the Spotify dashboard.'
           );
           const statusSuffix = profileErrorStatus != null ? ` (${profileErrorStatus})` : '';
+          const detailSuffix = profileErrorDetail ? `: ${profileErrorDetail}` : '';
           setWarningMessage(
             profileErrorStatus === 403
-              ? `Connected, but Spotify profile fetch was blocked${statusSuffix}. If your Spotify app is in dev mode, add your account as an allowed user in the Spotify dashboard, then reconnect.`
-              : `Connected, but fetching your Spotify profile failed${statusSuffix}${
-                  profileErrorDetail ? `: ${profileErrorDetail}` : ''
-                }. Try reconnecting from your profile page.`
+              ? `Connected, but Spotify profile fetch was blocked${statusSuffix}${detailSuffix}. If your Spotify app is in dev mode, add your account as an allowed user in the Spotify dashboard, then reconnect.`
+              : `Connected, but fetching your Spotify profile failed${statusSuffix}${detailSuffix}. Try reconnecting from your profile page.`
           );
         }
 

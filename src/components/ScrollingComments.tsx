@@ -31,8 +31,7 @@ export function ScrollingComments({
   maxVisible = 5,
   scrollSpeed = 5000,
 }: ScrollingCommentsProps) {
-  const chatDisabled = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
-  const disabled = chatDisabled || (!trackId && chatSchemaMissing);
+  const disabled = !trackId && chatSchemaMissing;
   const [comments, setComments] = useState<Comment[]>([]);
   const [visibleComments, setVisibleComments] = useState<Comment[]>(() =>
     IS_TEST

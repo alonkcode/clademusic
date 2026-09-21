@@ -229,29 +229,43 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     });
   }, [provider, providerTrackId, updatePlaybackState]);
 
-  // Once the browser has blocked the automatic /play call, resume from the
-  // very next real interaction anywhere on the page rather than requiring
-  // the listener to specifically find and press the transport bar's play
-  // button - activateElement() is the SDK's own documented unlock for this
-  // (see https://developer.spotify.com/documentation/web-playback-sdk),
-  // separate from and in addition to the actual resume() call.
+  // The very first real gesture after a new autoplay-intended track loads
+  // unlocks playback if the browser ends up blocking the automatic /play
+  // call - activateElement() is the SDK's own documented unlock for this
+  // (see https://developer.spotify.com/documentation/web-playback-sdk).
+  // This used to only start listening once autoplayBlocked (set from the
+  // SDK's autoplay_failed event) went true - so a gesture made earlier, e.g.
+  // tapping the chevron to expand the player while the SDK was still
+  // connecting, didn't count: nothing was listening for it yet. Playback
+  // then sat stuck until a second, later gesture arrived after the block was
+  // actually detected, which is what made a single tap feel like it required
+  // two - open the panel, then separately press play. Listening from the
+  // moment autoplay is intended, rather than waiting for confirmation it was
+  // blocked, means whichever gesture comes first is the one that unlocks it,
+  // as soon as a player instance exists to unlock (an even earlier gesture
+  // just no-ops and leaves the listener attached for the next one).
   useEffect(() => {
-    if (!autoplayBlocked) return;
+    if (provider !== 'spotify' || !providerTrackId || !shouldAutoplay) return;
 
-    const resume = () => {
-      setAutoplayBlocked(false);
+    let unlocked = false;
+    const unlock = () => {
       const player = playerRef.current;
-      void player?.activateElement?.();
-      void player?.resume();
+      if (!player || unlocked) return;
+      unlocked = true;
+      setAutoplayBlocked(false);
+      void player.activateElement?.();
+      void player.resume();
+      window.removeEventListener('pointerdown', unlock, { capture: true });
+      window.removeEventListener('keydown', unlock, { capture: true });
     };
 
-    window.addEventListener('pointerdown', resume, { once: true, capture: true });
-    window.addEventListener('keydown', resume, { once: true, capture: true });
+    window.addEventListener('pointerdown', unlock, { capture: true });
+    window.addEventListener('keydown', unlock, { capture: true });
     return () => {
-      window.removeEventListener('pointerdown', resume, { capture: true });
-      window.removeEventListener('keydown', resume, { capture: true });
+      window.removeEventListener('pointerdown', unlock, { capture: true });
+      window.removeEventListener('keydown', unlock, { capture: true });
     };
-  }, [autoplayBlocked]);
+  }, [provider, providerTrackId, shouldAutoplay]);
 
   // Starts the CURRENT play request on the connected device, at most once.
   // Two callers funnel through it: the setup effect below (the ordinary path,
