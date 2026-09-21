@@ -7,35 +7,19 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { getTrackSections } from '@/api/trackSections';
 import type { TrackSection } from '@/types';
 
 /**
- * Fetch all sections for a track, ordered by start time
- * 
- * Note: Uses rpc/raw approach until track_sections table is added to Supabase types
- * after running the migration and regenerating types.
- */
-async function getTrackSections(trackId: string): Promise<TrackSection[]> {
-  // Direct query using rpc to avoid type checking issues with new table
-  const { data, error } = await supabase.rpc('get_track_sections' as never, { 
-    p_track_id: trackId 
-  } as never);
-
-  if (error) {
-    // Table/function might not exist yet - return empty array gracefully
-    // This is expected until migration is applied
-    console.debug('track_sections not available yet:', error.message);
-    return [];
-  }
-  
-  // If rpc doesn't exist, fallback to returning empty
-  if (!data) return [];
-  
-  return (data as unknown as TrackSection[]) ?? [];
-}
-
-/**
- * React Query hook for fetching track sections
+ * React Query hook for fetching track sections.
+ *
+ * Delegates to the API-layer getTrackSections, which tries the canonical
+ * track_sections table (populated by promoted live-detection runs) and
+ * falls back to the tracks.sections JSONB column (hand-curated structural
+ * boundaries seeded into the catalog) when that table has no rows. Without
+ * the fallback, the persistent player bar's HarmonicHUD gets an empty
+ * sections array for every catalog track, so useSectionSync's
+ * liveChordIndex hard-returns 0 and the chord readout never rotates.
  */
 export function useTrackSections(trackId: string | undefined) {
   return useQuery({

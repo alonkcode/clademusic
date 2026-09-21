@@ -10,6 +10,8 @@ export interface SongSection {
   label?: string; // e.g., "Verse 1", "Chorus", "Bridge"
   start_time: number; // in seconds
   end_time?: number; // in seconds (optional)
+  chords?: string[]; // Roman numerals specific to this section (when available)
+  chord_timings?: number[]; // Millisecond offsets for each chord within the section
 }
 
 // Track section from database (canonical, provider-agnostic)
