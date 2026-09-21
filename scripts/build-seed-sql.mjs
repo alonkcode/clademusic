@@ -64,13 +64,13 @@ for (const t of tracks) {
   lines.push(`INSERT INTO public.tracks (
   external_id, provider, title, artist, album, duration_ms, isrc, cover_url,
   detected_key, detected_mode, progression_roman, loop_length_bars,
-  spotify_id, youtube_id, sections, energy, danceability, valence, analysis_source
+  spotify_id, youtube_id, sections, energy, danceability, valence, tempo, analysis_source
 ) VALUES (
   ${q(externalId)}, ${q(provider)}, ${q(t.title)}, ${q(t.artist)}, ${q(t.album)},
   ${num(t.duration_ms)}, ${q(t.isrc)}, ${q(t.cover_url)},
   ${q(t.detected_key)}, ${q(t.detected_mode)}, ${arr(t.progression_roman)}, ${num(t.loop_length_bars)},
   ${q(t.spotify_id)}, ${q(t.youtube_id)}, ${json(t.sections)},
-  ${num(t.energy)}, ${num(t.danceability)}, ${num(t.valence)}, 'metadata'
+  ${num(t.energy)}, ${num(t.danceability)}, ${num(t.valence)}, ${num(t.tempo)}, 'metadata'
 )
 ON CONFLICT (external_id, provider) DO UPDATE SET
   title = EXCLUDED.title,
@@ -78,7 +78,8 @@ ON CONFLICT (external_id, provider) DO UPDATE SET
   progression_roman = EXCLUDED.progression_roman,
   detected_key = EXCLUDED.detected_key,
   detected_mode = EXCLUDED.detected_mode,
-  sections = EXCLUDED.sections;`);
+  sections = EXCLUDED.sections,
+  tempo = COALESCE(EXCLUDED.tempo, public.tracks.tempo);`);
   lines.push('');
 }
 

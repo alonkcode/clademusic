@@ -20,6 +20,11 @@ export interface SeedTrack {
   energy?: number;
   danceability?: number;
   valence?: number;
+  /** Beats per minute. Real, published tempo - not inferred. Optional because
+   *  most entries below don't have a sourced value yet; leave unset rather
+   *  than guess (the player falls back to estimating from section timing,
+   *  and a wrong "real" number is worse than an honest estimate). */
+  tempo?: number;
 }
 
 export const seedTracksWithProviders: SeedTrack[] = [
@@ -49,6 +54,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.73,
     danceability: 0.51,
     valence: 0.33,
+    tempo: 171,
   },
   {
     title: "Shape of You",
@@ -78,6 +84,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.65,
     danceability: 0.83,
     valence: 0.93,
+    tempo: 96,
   },
   {
     title: "Bohemian Rhapsody",
@@ -95,6 +102,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.40,
     danceability: 0.24,
     valence: 0.22,
+    tempo: 144,
   },
   {
     title: "Uptown Funk",
@@ -112,6 +120,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.89,
     danceability: 0.86,
     valence: 0.93,
+    tempo: 115,
   },
   {
     title: "Someone Like You",
@@ -129,6 +138,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.30,
     danceability: 0.50,
     valence: 0.19,
+    tempo: 67,
   },
   {
     title: "Bad Guy",
@@ -146,6 +156,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.43,
     danceability: 0.70,
     valence: 0.56,
+    tempo: 135,
   },
   {
     title: "Stairway to Heaven",
@@ -163,6 +174,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.34,
     danceability: 0.23,
     valence: 0.18,
+    tempo: 82,
   },
   {
     title: "Dance Monkey",
@@ -180,6 +192,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.59,
     danceability: 0.82,
     valence: 0.54,
+    tempo: 98,
   },
   {
     title: "Levitating",
@@ -197,6 +210,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.83,
     danceability: 0.70,
     valence: 0.91,
+    tempo: 103,
   },
   {
     title: "Hotel California",
@@ -214,6 +228,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.51,
     danceability: 0.56,
     valence: 0.41,
+    tempo: 74,
   },
   {
     title: "Wonderwall",
@@ -231,6 +246,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.59,
     danceability: 0.41,
     valence: 0.29,
+    tempo: 87,
   },
   {
     title: "Smells Like Teen Spirit",
@@ -248,6 +264,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.91,
     danceability: 0.50,
     valence: 0.39,
+    tempo: 117,
   },
   {
     title: "Sweet Child O' Mine",
@@ -265,6 +282,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.65,
     danceability: 0.40,
     valence: 0.48,
+    tempo: 125,
   },
   {
     title: "Rolling in the Deep",
@@ -282,6 +300,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.74,
     danceability: 0.73,
     valence: 0.53,
+    tempo: 105,
   },
   {
     title: "Thriller",
@@ -299,6 +318,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.73,
     danceability: 0.70,
     valence: 0.66,
+    tempo: 118,
   },
   {
     title: "Billie Jean",
@@ -316,6 +336,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.80,
     danceability: 0.90,
     valence: 0.66,
+    tempo: 117,
   },
   {
     title: "Don't Stop Believin'",
@@ -333,6 +354,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.76,
     danceability: 0.61,
     valence: 0.81,
+    tempo: 118,
   },
   {
     title: "Take On Me",
@@ -350,6 +372,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.90,
     danceability: 0.57,
     valence: 0.87,
+    tempo: 169,
   },
   {
     title: "Lose Yourself",
@@ -367,6 +390,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.80,
     danceability: 0.75,
     valence: 0.47,
+    tempo: 171,
   },
   {
     title: "Starboy",
@@ -384,6 +408,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.59,
     danceability: 0.68,
     valence: 0.49,
+    tempo: 186,
   },
   {
     title: "Shallow",
@@ -401,6 +426,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.39,
     danceability: 0.57,
     valence: 0.32,
+    tempo: 96,
   },
   {
     title: "Old Town Road",
@@ -418,6 +444,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.61,
     danceability: 0.88,
     valence: 0.64,
+    tempo: 136,
   },
   {
     title: "Royals",
@@ -435,6 +462,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.39,
     danceability: 0.63,
     valence: 0.21,
+    tempo: 85,
   },
   {
     title: "Watermelon Sugar",
@@ -452,6 +480,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.82,
     danceability: 0.55,
     valence: 0.56,
+    tempo: 95,
   },
   {
     title: "Happier",
@@ -469,6 +498,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.73,
     danceability: 0.69,
     valence: 0.66,
+    tempo: 100,
   },
   {
     title: "Perfect",
@@ -486,6 +516,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.45,
     danceability: 0.60,
     valence: 0.47,
+    tempo: 97,
   },
   {
     title: "Circles",
@@ -503,6 +534,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.51,
     danceability: 0.70,
     valence: 0.55,
+    tempo: 120,
   },
   {
     title: "Señorita",
@@ -520,6 +552,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.54,
     danceability: 0.76,
     valence: 0.75,
+    tempo: 117,
   },
   {
     title: "Heat Waves",
@@ -537,6 +570,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.52,
     danceability: 0.76,
     valence: 0.47,
+    tempo: 81,
   },
   {
     title: "Drivers License",
@@ -554,6 +588,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.36,
     danceability: 0.59,
     valence: 0.13,
+    tempo: 144,
   },
   {
     title: "Stay",
@@ -571,6 +606,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.76,
     danceability: 0.59,
     valence: 0.48,
+    tempo: 170,
   },
   {
     title: "Sicko Mode",
@@ -588,6 +624,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.73,
     danceability: 0.83,
     valence: 0.45,
+    tempo: 155,
   },
   {
     title: "Believer",
@@ -605,6 +642,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.78,
     danceability: 0.77,
     valence: 0.67,
+    tempo: 125,
   },
   {
     title: "Despacito",
@@ -622,6 +660,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.82,
     danceability: 0.66,
     valence: 0.82,
+    tempo: 89,
   },
   {
     title: "Attention",
@@ -639,6 +678,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.80,
     danceability: 0.74,
     valence: 0.48,
+    tempo: 100,
   },
   {
     title: "Havana",
@@ -656,6 +696,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.52,
     danceability: 0.77,
     valence: 0.39,
+    tempo: 105,
   },
   {
     title: "God's Plan",
@@ -673,6 +714,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.45,
     danceability: 0.75,
     valence: 0.36,
+    tempo: 77,
   },
   {
     title: "Rockstar",
@@ -690,6 +732,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.52,
     danceability: 0.59,
     valence: 0.13,
+    tempo: 160,
   },
   {
     title: "Sunflower",
@@ -707,6 +750,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.48,
     danceability: 0.76,
     valence: 0.91,
+    tempo: 90,
   },
   {
     title: "Without Me",
@@ -724,6 +768,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.49,
     danceability: 0.73,
     valence: 0.27,
+    tempo: 136,
   },
   {
     title: "bad guy",
@@ -741,6 +786,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.43,
     danceability: 0.70,
     valence: 0.56,
+    tempo: 135,
   },
   {
     title: "Thank U, Next",
@@ -758,6 +804,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.65,
     danceability: 0.72,
     valence: 0.67,
+    tempo: 108,
   },
   {
     title: "Lovely",
@@ -775,6 +822,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.30,
     danceability: 0.35,
     valence: 0.12,
+    tempo: 115,
   },
   {
     title: "Kill Bill",
@@ -792,6 +840,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.44,
     danceability: 0.64,
     valence: 0.39,
+    tempo: 89,
   },
   {
     title: "Flowers",
@@ -809,6 +858,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.68,
     danceability: 0.71,
     valence: 0.64,
+    tempo: 118,
   },
   {
     title: "Anti-Hero",
@@ -826,6 +876,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.64,
     danceability: 0.64,
     valence: 0.53,
+    tempo: 97,
   },
   {
     title: "As It Was",
@@ -843,6 +894,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.73,
     danceability: 0.52,
     valence: 0.66,
+    tempo: 174,
   },
   {
     title: "About Damn Time",
@@ -860,6 +912,7 @@ export const seedTracksWithProviders: SeedTrack[] = [
     energy: 0.81,
     danceability: 0.97,
     valence: 0.90,
+    tempo: 109,
   },
 ];
 
