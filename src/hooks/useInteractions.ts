@@ -13,6 +13,7 @@ export interface TrackInteraction {
   liked: boolean;
   harmonySaved: boolean;
   bookmarked: boolean;
+  vibed: boolean;
   playCount: number;
   lastPlayedAt: string | null;
 }
@@ -20,11 +21,12 @@ export interface TrackInteraction {
 export function useInteractions(trackId: string | null) {
   const { user } = useAuth();
   const { toast } = useToast();
-  
+
   const [interaction, setInteraction] = useState<TrackInteraction>({
     liked: false,
     harmonySaved: false,
     bookmarked: false,
+    vibed: false,
     playCount: 0,
     lastPlayedAt: null,
   });
@@ -53,6 +55,7 @@ export function useInteractions(trackId: string | null) {
           liked: state.liked || false,
           harmonySaved: state.harmony_saved || false,
           bookmarked: state.bookmarked || false,
+          vibed: state.vibed || false,
           playCount: state.play_count || 0,
           lastPlayedAt: state.last_played_at,
         });
@@ -197,6 +200,58 @@ export function useInteractions(trackId: string | null) {
     }
   }, [user, trackId, interaction.bookmarked, toast]);
 
+  // Toggle vibe (DRY implementation)
+  const toggleVibe = useCallback(async () => {
+    if (!user || !trackId) {
+      toast({
+        title: 'Authentication required',
+        description: 'Please sign in to vibe with tracks',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const previousState = interaction.vibed;
+    setInteraction((prev) => ({ ...prev, vibed: !prev.vibed }));
+
+    try {
+      const { data, error } = await supabase
+        .rpc('toggle_vibe', {
+          p_user_id: user.id,
+          p_track_id: trackId,
+        });
+
+      if (error) throw error;
+
+      setInteraction((prev) => ({ ...prev, vibed: data }));
+    } catch (error) {
+      setInteraction((prev) => ({ ...prev, vibed: previousState }));
+      console.error('Error toggling vibe:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update vibe status',
+        variant: 'destructive',
+      });
+    }
+  }, [user, trackId, interaction.vibed, toast]);
+
+  // Record a share event (analytics counter, not a toggle - guests can still
+  // use the share sheet itself, they just don't get a persisted count)
+  const recordShare = useCallback(async () => {
+    if (!user || !trackId) return;
+
+    try {
+      const { error } = await supabase.rpc('record_share', {
+        p_user_id: user.id,
+        p_track_id: trackId,
+      });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error recording share:', error);
+    }
+  }, [user, trackId]);
+
   // Record play event (analytics)
   const recordPlay = useCallback(async (durationMs = 0, skipped = false) => {
     if (!user || !trackId) return;
@@ -226,6 +281,8 @@ export function useInteractions(trackId: string | null) {
     toggleLike,
     toggleHarmonySave,
     toggleBookmark,
+    toggleVibe,
+    recordShare,
     recordPlay,
     refetch: fetchInteraction,
   };

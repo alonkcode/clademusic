@@ -20,22 +20,27 @@ export function useUserInteractionStats(userId: string | undefined) {
     queryFn: async (): Promise<UserInteractionStats> => {
       if (!userId) return { likes: 0, saves: 0, shares: 0 };
 
+      // liked/bookmarked/share_count are the live columns the toggle_like,
+      // toggle_bookmark and record_share RPCs actually write (one row per
+      // user+track). interaction_type is a legacy column from the older
+      // one-row-per-interaction-type design and nothing writes it anymore -
+      // see bundle-fixes/00-compat-prelude.sql.
       const [likesResult, savesResult, sharesResult] = await Promise.all([
         supabase
           .from('user_interactions')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', userId)
-          .eq('interaction_type', 'like'),
+          .eq('liked', true),
         supabase
           .from('user_interactions')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', userId)
-          .eq('interaction_type', 'save'),
+          .eq('bookmarked', true),
         supabase
           .from('user_interactions')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', userId)
-          .eq('interaction_type', 'share'),
+          .gt('share_count', 0),
       ]);
 
       return {

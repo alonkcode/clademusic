@@ -58,11 +58,14 @@ export async function computeTasteDNA(userId: string): Promise<TasteDNAProfile |
         .eq('user_id', userId)
         .order('played_at', { ascending: false })
         .limit(200),
+      // liked/bookmarked are the live columns toggle_like/toggle_bookmark
+      // write (one row per user+track) - interaction_type is a legacy column
+      // nothing writes anymore, see bundle-fixes/00-compat-prelude.sql.
       supabase
         .from('user_interactions')
         .select('track_id')
         .eq('user_id', userId)
-        .in('interaction_type', ['like', 'save'])
+        .or('liked.eq.true,bookmarked.eq.true')
         .order('created_at', { ascending: false })
         .limit(100)
     ]);

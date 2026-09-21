@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { useRecordListeningActivity } from '@/hooks/api/useNearbyListeners';
 import { useRecordPlay } from '@/hooks/api/useFollowing';
 import { useAuth } from '@/hooks/useAuth';
+import { useInteractions } from '@/hooks/useInteractions';
 import { SectionSelectionProvider } from '@/hooks/useSectionSelection';
 import { usePlayer } from '@/player/PlayerContext';
 import { useTrackComments } from '@/hooks/api/useComments';
@@ -46,6 +47,7 @@ export function TrackCard({
   const playStartTimeRef = useRef<number | null>(null);
   const recordActivity = useRecordListeningActivity();
   const recordPlay = useRecordPlay();
+  const { interaction, toggleLike, toggleHarmonySave, toggleBookmark, toggleVibe, recordShare } = useInteractions(track.id);
   const { openPlayer, canonicalTrackId: dockedTrackId } = usePlayer();
   // The docked player (EmbeddedPlayerDrawer) is fixed to the bottom of every
   // route and shows its own HarmonicHUD for whatever track is loaded into
@@ -154,7 +156,21 @@ export function TrackCard({
   };
 
   const handleShare = () => {
+    if (user) {
+      recordShare();
+    }
     onInteraction('share');
+  };
+
+  // Like/Save/Harmonic/Vibe persist to the DB via useInteractions once signed
+  // in; signed out, fall through to onInteraction so FeedPage's existing
+  // "sign in to interact" prompt still fires.
+  const handleToggle = (type: InteractionType, toggleFn: () => void) => {
+    if (!user) {
+      onInteraction(type);
+      return;
+    }
+    toggleFn();
   };
 
   return (
@@ -369,8 +385,8 @@ export function TrackCard({
           <ActionButton
             icon={Sparkles}
             label="Harmonic"
-            isActive={interactions.has('more_harmonic')}
-            onClick={() => onInteraction('more_harmonic')}
+            isActive={interaction.harmonySaved}
+            onClick={() => handleToggle('more_harmonic', toggleHarmonySave)}
             variant="primary"
           />
 
@@ -378,8 +394,8 @@ export function TrackCard({
           <ActionButton
             icon={Heart}
             label="Like"
-            isActive={interactions.has('like')}
-            onClick={() => onInteraction('like')}
+            isActive={interaction.liked}
+            onClick={() => handleToggle('like', toggleLike)}
             variant="accent"
           />
 
@@ -387,8 +403,8 @@ export function TrackCard({
           <ActionButton
             icon={Waves}
             label="Vibe"
-            isActive={interactions.has('more_vibe')}
-            onClick={() => onInteraction('more_vibe')}
+            isActive={interaction.vibed}
+            onClick={() => handleToggle('more_vibe', toggleVibe)}
             variant="primary"
           />
 
@@ -396,8 +412,8 @@ export function TrackCard({
           <ActionButton
             icon={Bookmark}
             label="Save"
-            isActive={interactions.has('save')}
-            onClick={() => onInteraction('save')}
+            isActive={interaction.bookmarked}
+            onClick={() => handleToggle('save', toggleBookmark)}
             variant="muted"
           />
         </motion.div>
