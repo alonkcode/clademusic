@@ -72,9 +72,12 @@ Copy `.env.example` to `.env.local`. Only `VITE_`-prefixed variables reach the b
 | `VITE_SUPABASE_ANON_KEY` | — | Legacy fallback, used only when the publishable key is unset |
 | `VITE_SPOTIFY_CLIENT_ID` | optional | Spotify OAuth / Web Playback |
 | `VITE_SPOTIFY_REDIRECT_URI` | optional | `http://localhost:8080/clademusic/spotify-callback` in dev |
-| `VITE_YOUTUBE_API_KEY` | optional | YouTube search |
 | `VITE_LASTFM_API_KEY` | optional | Last.fm metadata and history import |
 | `VITE_BASE_PATH` | optional | Overrides the deploy base path (see [Deployment](#-deployment)) |
+
+YouTube search runs server-side (`supabase/functions/search-youtube`), not through
+a `VITE_` variable — set it as a function secret instead:
+`supabase secrets set YOUTUBE_API_KEY=your_youtube_api_key`.
 
 ### Database
 

@@ -1,10 +1,14 @@
 /**
  * YouTube Search Service
- * 
- * Automatically search for music videos on YouTube
+ *
+ * Automatically search for music videos on YouTube, via the search-youtube
+ * Supabase Edge Function (server-side YOUTUBE_API_KEY - see that function's
+ * header comment for why this doesn't call googleapis.com directly).
  */
 
-const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
+import { supabase } from '@/integrations/supabase/client';
+
+const YT_FUNCTION = 'search-youtube';
 
 // If we encounter auth/quota errors, disable further YouTube API calls for this session
 let youtubeSearchDisabled = false;
@@ -18,6 +22,29 @@ function disableYouTubeSearch(reason: string) {
     console.warn('[YouTubeSearch] disabled:', reason);
     youtubeWarningLogged = true;
   }
+}
+
+// search-youtube forwards YouTube's own 401/403 as-is and everything else as
+// 502, specifically so this can tell "not going to work again this session"
+// apart from "transient, worth retrying next call".
+function isAuthOrQuotaError(error: unknown): boolean {
+  const status = (error as { context?: { status?: number } } | null)?.context?.status;
+  return status === 401 || status === 403;
+}
+
+async function invokeYouTube<T>(body: Record<string, unknown>): Promise<T | null> {
+  if (youtubeSearchDisabled) return null;
+
+  const { data, error } = await supabase.functions.invoke(YT_FUNCTION, { body });
+  if (error) {
+    if (isAuthOrQuotaError(error)) {
+      disableYouTubeSearch(`search-youtube returned an auth/quota error: ${error.message}`);
+    } else {
+      console.error('search-youtube invoke error', error);
+    }
+    return null;
+  }
+  return data as T;
 }
 
 function extractYouTubeId(input: string): string | null {
@@ -48,6 +75,22 @@ interface YouTubeSearchResult {
   }>;
 }
 
+interface YouTubeVideosResult {
+  items?: Array<{
+    snippet?: {
+      title?: string;
+      channelTitle?: string;
+      thumbnails?: {
+        high?: { url: string };
+        default?: { url: string };
+      };
+    };
+    contentDetails?: {
+      duration?: string;
+    };
+  }>;
+}
+
 export interface VideoResult {
   videoId: string;
   title: string;
@@ -59,37 +102,17 @@ export interface VideoResult {
  * Fetch a single YouTube video by ID and return minimal metadata as a Track-like object
  */
 export async function getYouTubeVideo(videoId: string) {
-  if (youtubeSearchDisabled) {
-    return null;
-  }
-
-  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY;
-
-  if (!apiKey) {
-    disableYouTubeSearch('YouTube API key not configured');
-    return null;
-  }
-
-  const params = new URLSearchParams({
-    part: 'snippet,contentDetails',
-    id: videoId,
-    key: apiKey,
-  });
-
   try {
-    const res = await fetch(`${YOUTUBE_API_BASE}/videos?${params}`);
-    if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
-        disableYouTubeSearch(`YouTube API returned ${res.status} for video lookup`);
-      }
-      return null;
-    }
-    const data = await res.json();
-    const item = data.items?.[0];
+    const data = await invokeYouTube<YouTubeVideosResult>({
+      endpoint: 'videos',
+      ids: videoId,
+      part: 'snippet,contentDetails',
+    });
+    const item = data?.items?.[0];
     if (!item) return null;
 
     // Rough parse of title into artist - title when possible
-    const titleText: string = item.snippet.title || '';
+    const titleText: string = item.snippet?.title || '';
     const [maybeArtist, maybeTitle] = titleText.includes(' - ') ? titleText.split(' - ', 2) : [undefined, titleText];
 
     // Convert ISO 8601 duration to ms
@@ -99,8 +122,8 @@ export async function getYouTubeVideo(videoId: string) {
     return {
       id: `youtube:${videoId}`,
       title: maybeTitle || titleText,
-      artist: maybeArtist || item.snippet.channelTitle,
-      cover_url: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.default?.url,
+      artist: maybeArtist || item.snippet?.channelTitle,
+      cover_url: item.snippet?.thumbnails?.high?.url || item.snippet?.thumbnails?.default?.url,
       youtube_id: videoId,
       duration_ms: durationMs,
       provider: 'youtube' as const,
@@ -141,20 +164,13 @@ export async function searchYouTubeVideos(
     return [];
   }
 
-  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY;
-  
-  if (!apiKey) {
-    disableYouTubeSearch('YouTube API key not configured');
-    return [];
-  }
-
   try {
     const results: VideoResult[] = [];
 
     // If user typed/pasted a YouTube URL or direct video ID, short-circuit to a single fetch
     const directId = extractYouTubeId(title ? `${artist} ${title}` : artist);
     if (directId) {
-      const directMeta = await fetchYouTubeVideoSnippet(directId, apiKey);
+      const directMeta = await fetchYouTubeVideoSnippet(directId);
       if (directMeta) {
         return [{ videoId: directId, title: directMeta.title, channel: directMeta.channel, type: 'official' }];
       }
@@ -162,24 +178,24 @@ export async function searchYouTubeVideos(
 
     // Search 1: Official video/audio
     const officialQuery = `${artist} ${title} official`.trim();
-    const officialResults = await searchYouTube(officialQuery, apiKey, 3);
+    const officialResults = await searchYouTube(officialQuery, 3);
     results.push(...officialResults.map(r => ({ ...r, type: 'official' as const })));
-    
+
     // Search 2: Live performances
     const liveQuery = `${artist} ${title} live`.trim();
-    const liveResults = await searchYouTube(liveQuery, apiKey, 2);
+    const liveResults = await searchYouTube(liveQuery, 2);
     results.push(...liveResults.map(r => ({ ...r, type: 'live' as const })));
-    
+
     // Search 3: Covers
     const coverQuery = `${title || artist} cover`.trim();
-    const coverResults = await searchYouTube(coverQuery, apiKey, 2);
+    const coverResults = await searchYouTube(coverQuery, 2);
     results.push(...coverResults.map(r => ({ ...r, type: 'cover' as const })));
-    
+
     // Remove duplicates by videoId
-    const unique = results.filter((v, i, arr) => 
+    const unique = results.filter((v, i, arr) =>
       arr.findIndex(x => x.videoId === v.videoId) === i
     );
-    
+
     return unique;
   } catch (error) {
     console.error('Error searching YouTube:', error);
@@ -192,32 +208,11 @@ export async function searchYouTubeVideos(
  */
 async function searchYouTube(
   query: string,
-  apiKey: string,
   maxResults: number
 ): Promise<Omit<VideoResult, 'type'>[]> {
-  if (youtubeSearchDisabled) return [];
+  const data = await invokeYouTube<YouTubeSearchResult>({ endpoint: 'search', query, maxResults });
+  if (!data) return [];
 
-  const params = new URLSearchParams({
-    part: 'snippet',
-    q: query,
-    type: 'video',
-    videoCategoryId: '10', // Music category
-    maxResults: maxResults.toString(),
-    key: apiKey,
-  });
-
-  const response = await fetch(`${YOUTUBE_API_BASE}/search?${params}`);
-  
-  if (!response.ok) {
-    console.error('YouTube API error:', response.status);
-    if (response.status === 401 || response.status === 403) {
-      disableYouTubeSearch(`YouTube API returned ${response.status} for search`);
-    }
-    return [];
-  }
-
-  const data: YouTubeSearchResult = await response.json();
-  
   return data.items.map(item => ({
     videoId: item.id.videoId,
     title: item.snippet.title,
@@ -225,24 +220,9 @@ async function searchYouTube(
   }));
 }
 
-async function fetchYouTubeVideoSnippet(videoId: string, apiKey: string): Promise<{ title: string; channel: string } | null> {
-  if (youtubeSearchDisabled) return null;
-
-  const params = new URLSearchParams({
-    part: 'snippet',
-    id: videoId,
-    key: apiKey,
-  });
-
-  const res = await fetch(`${YOUTUBE_API_BASE}/videos?${params}`);
-  if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
-      disableYouTubeSearch(`YouTube API returned ${res.status} for snippet fetch`);
-    }
-    return null;
-  }
-  const data = await res.json();
-  const item = data.items?.[0];
+async function fetchYouTubeVideoSnippet(videoId: string): Promise<{ title: string; channel: string } | null> {
+  const data = await invokeYouTube<YouTubeVideosResult>({ endpoint: 'videos', ids: videoId, part: 'snippet' });
+  const item = data?.items?.[0];
   if (!item) return null;
   return {
     title: item.snippet?.title || 'YouTube video',

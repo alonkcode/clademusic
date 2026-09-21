@@ -12,7 +12,10 @@ This repo deploys automatically on every push to `main` via GitHub Actions:
 2. Ensure build-time env vars exist (GitHub **Secrets/Variables**):
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY` (or `VITE_SUPABASE_PUBLISHABLE_KEY`)
-   - Optional providers: `VITE_SPOTIFY_CLIENT_ID`, `VITE_SPOTIFY_REDIRECT_URI`, `VITE_YOUTUBE_API_KEY`, `VITE_LASTFM_API_KEY`
+   - Optional providers: `VITE_SPOTIFY_CLIENT_ID`, `VITE_SPOTIFY_REDIRECT_URI`, `VITE_LASTFM_API_KEY`
+   - YouTube search needs `YOUTUBE_API_KEY` set as a Supabase Edge Function secret
+     (`supabase secrets set YOUTUBE_API_KEY=...`), not a GitHub/Vite variable — see
+     `supabase/functions/search-youtube/index.ts`
 3. Confirm base path alignment:
    - Vite: `base` is resolved per host (see [Base path](#base-path) below); GitHub Pages gets `/clademusic/`
    - Router: `basename={import.meta.env.BASE_URL}` in `src/App.tsx`
@@ -62,7 +65,9 @@ and asset caching. The rewrite matters: without it, a refresh on any deep link
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_PUBLISHABLE_KEY` (or `VITE_SUPABASE_ANON_KEY`)
    - Optional: `VITE_SPOTIFY_CLIENT_ID`, `VITE_SPOTIFY_REDIRECT_URI`,
-     `VITE_YOUTUBE_API_KEY`, `VITE_LASTFM_API_KEY`
+     `VITE_LASTFM_API_KEY`
+   - YouTube search needs `YOUTUBE_API_KEY` set as a Supabase Edge Function secret,
+     not a Vercel env var — see `supabase/functions/search-youtube/index.ts`
 3. Update `VITE_SPOTIFY_REDIRECT_URI` to the Vercel origin **without** the
    `/clademusic/` segment, and add the same URL to the Spotify app's allowed
    redirect URIs. A mismatch fails OAuth with `INVALID_CLIENT`.
