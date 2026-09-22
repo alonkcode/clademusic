@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo, useState, lazy, Suspense } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TrackCard } from '@/components/TrackCard';
 import { FeedSkeleton } from '@/components/FeedSkeleton';
@@ -130,7 +130,50 @@ export default function FeedPage() {
   const [interactions, setInteractions] = useState<Map<string, Set<InteractionType>>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
   const [showAuthPrompt, setShowAuthPrompt] = useState(!user);
-  const { openPlayer } = usePlayer();
+  const { openPlayer, canonicalTrackId } = usePlayer();
+
+  // The guest-mode prompt sits in normal flow above the card, so its real
+  // height (which varies with text wrapping/viewport width) has to come out
+  // of the card's own dvh budget below - otherwise the card claims its usual
+  // full height on top of the banner's, overflowing the viewport and adding
+  // a scroll that reaches nothing but blank space. A plain ref wouldn't do
+  // here: the banner's dependencies (showAuthPrompt, user) are already true/
+  // null during the earlier loading-skeleton render, where nothing is
+  // mounted yet, so an effect keyed on them never re-fires once the real
+  // banner node shows up later with the same values. A callback ref fires
+  // exactly when the node itself is attached/detached, sidestepping that.
+  const [authPromptEl, setAuthPromptEl] = useState<HTMLDivElement | null>(null);
+  const [authPromptOffset, setAuthPromptOffset] = useState(0);
+
+  // The docked player's own transport (its prev/next buttons, the queue
+  // sheet, a track opened from search/profile/etc.) can change what's
+  // playing independently of this page's own swipe position. Without this,
+  // the feed kept showing whatever card the listener last swiped to even
+  // after playback moved on elsewhere, so the card on screen and the chords
+  // in the docked bar below it stopped matching the audio actually playing.
+  useEffect(() => {
+    if (!canonicalTrackId) return;
+    const playingIndex = tracks.findIndex((t) => t.id === canonicalTrackId);
+    if (playingIndex !== -1 && playingIndex !== currentIndex) {
+      setCurrentIndex(playingIndex);
+    }
+    // Only react to the playing track (or the feed list) changing - not to
+    // currentIndex itself, or every manual swipe would immediately be
+    // fought back to wherever the player last was.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalTrackId, tracks]);
+
+  useLayoutEffect(() => {
+    if (!authPromptEl) {
+      setAuthPromptOffset(0);
+      return;
+    }
+    const update = () => setAuthPromptOffset(authPromptEl.offsetHeight + 16 /* mb-4 */);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(authPromptEl);
+    return () => observer.disconnect();
+  }, [authPromptEl]);
 
   useEffect(() => {
     if (user || guestMode) {
@@ -161,23 +204,25 @@ export default function FeedPage() {
       return next;
     });
 
-    // Auto-advance on skip
-    if (type === 'skip' && currentIndex < tracks.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
+    // Auto-advance on skip - wraps like the rest of the feed's navigation.
+    if (type === 'skip' && tracks.length > 0) {
+      setCurrentIndex((prev) => (prev + 1) % tracks.length);
     }
   };
 
+  // Endless feed: wraps at both ends instead of stopping, so the up/down
+  // chevrons (and keyboard/swipe) are only ever disabled when there's
+  // nothing to loop through (0 or 1 tracks) rather than "greyed out" every
+  // time you land on the first or last card.
   const goToNext = useCallback(() => {
-    if (currentIndex < tracks.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    }
-  }, [currentIndex, tracks.length]);
+    if (tracks.length === 0) return;
+    setCurrentIndex((prev) => (prev + 1) % tracks.length);
+  }, [tracks.length]);
 
   const goToPrevious = useCallback(() => {
-    if (currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
-    }
-  }, [currentIndex]);
+    if (tracks.length === 0) return;
+    setCurrentIndex((prev) => (prev - 1 + tracks.length) % tracks.length);
+  }, [tracks.length]);
 
   // Handle keyboard navigation
   useEffect(() => {
@@ -236,6 +281,37 @@ export default function FeedPage() {
       container.removeEventListener('touchstart', handleTouchStart);
       container.removeEventListener('touchend', handleTouchEnd);
     };
+  }, [goToNext, goToPrevious]);
+
+  // Desktop mouse-wheel / trackpad scroll: the feed is one full-viewport
+  // card at a time, so a scroll gesture here advances/retreats through
+  // tracks the same way a touch swipe does on mobile, rather than scrolling
+  // the page. preventDefault blocks the page itself from ever moving; the
+  // lockout collapses a single trackpad gesture's burst of small deltaY
+  // events (and any inertial tail) into one track change instead of several.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let locked = false;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (locked || Math.abs(e.deltaY) < 10) return;
+
+      locked = true;
+      if (e.deltaY > 0) {
+        goToNext();
+      } else {
+        goToPrevious();
+      }
+      window.setTimeout(() => {
+        locked = false;
+      }, 500);
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
   }, [goToNext, goToPrevious]);
 
   if (authLoading || tracksLoading || recommendationsLoading) {
@@ -322,7 +398,7 @@ export default function FeedPage() {
           size="icon"
           className="glass rounded-full"
           onClick={goToPrevious}
-          disabled={currentIndex === 0}
+          disabled={tracks.length <= 1}
           aria-label="Previous track"
         >
           <ChevronUp className="w-5 h-5" />
@@ -332,7 +408,7 @@ export default function FeedPage() {
           size="icon"
           className="glass rounded-full"
           onClick={goToNext}
-          disabled={currentIndex === tracks.length - 1}
+          disabled={tracks.length <= 1}
           aria-label="Next track"
         >
           <ChevronDown className="w-5 h-5" />
@@ -347,9 +423,19 @@ export default function FeedPage() {
             own real height. pb-6 for breathing room above pb-24's player-bar
             clearance is kept; just the top half was the dead space. */}
         <ResponsiveContainer maxWidth="full" className="pt-2 pb-6">
-          {/* One guest prompt, not three - dismissible, and it never pushes the feed */}
+          {/* The guest prompt sits above the card in normal flow, so its real
+              height comes out of the card's dvh budget below via
+              authPromptOffset (measured, not guessed) - it does push the
+              feed down, however the comment this replaced claimed otherwise.
+              Without that offset the card kept its usual full height on top
+              of the banner's, overflowing the viewport by the banner's
+              height and leaving a scroll that reached nothing but blank
+              space below the last row of controls. */}
           {showAuthPrompt && !user && (
-            <div className="mx-auto mb-4 w-full max-w-lg lg:max-w-2xl rounded-xl border border-border/60 bg-background/70 px-4 py-3 shadow-md backdrop-blur">
+            <div
+              ref={setAuthPromptEl}
+              className="mx-auto mb-4 w-full max-w-lg lg:max-w-2xl rounded-xl border border-border/60 bg-background/70 px-4 py-3 shadow-md backdrop-blur"
+            >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-foreground">Exploring as a guest</p>
@@ -377,10 +463,15 @@ export default function FeedPage() {
           )}
           {/*
             Center-focused stage. Uses dvh so the card is not cut off by mobile
-            browser chrome, with a min-height floor so short landscape viewports
-            scroll instead of squashing the card.
+            browser chrome, minus authPromptOffset so the guest banner above
+            (when shown) doesn't push this past the viewport, with a
+            min-height floor so short landscape viewports scroll instead of
+            squashing the card.
           */}
-          <div className="mx-auto w-full max-w-lg lg:max-w-2xl min-h-[32rem] h-[calc(100dvh-13rem)]">
+          <div
+            className="mx-auto w-full max-w-lg lg:max-w-2xl min-h-[32rem]"
+            style={{ height: `calc(100dvh - 13rem - ${authPromptOffset}px)` }}
+          >
             <AnimatePresence mode="wait">
               {currentTrack && (
                 <motion.div
