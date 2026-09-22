@@ -11,8 +11,8 @@ export const PLAN_COPY = {
     name: 'Free',
     price: '₪0',
     interval: 'month',
-    credits: 50,
-    features: ['Limited monthly credits', 'No card required', 'Basic access'],
+    credits: 2500,
+    features: ['Monthly credits', 'No card required', 'Basic access'],
   },
   starter: {
     name: 'Starter',

@@ -53,7 +53,7 @@ webhook signature) updates `subscriptions` and grants credits.
 
 | Plan | Price | Billing period | Credit allowance |
 |---|---|---|---|
-| **Free** | ₪0 | — | 50 |
+| **Free** | ₪0 | — | 2,500 |
 | **Starter** | ₪149 | / month | 500 |
 | **Pro** | ₪349 | / month | 2,000 |
 

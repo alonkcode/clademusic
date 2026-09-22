@@ -38,5 +38,5 @@ VITE_SPOTIFY_CLIENT_ID=...
 VITE_SPOTIFY_REDIRECT_URI=http://localhost:8080/clademusic/spotify-callback
 
 # Production (GitHub Pages)
-# VITE_SPOTIFY_REDIRECT_URI=https://kaospan.github.io/clademusic/spotify-callback
+# VITE_SPOTIFY_REDIRECT_URI=https://www.clademusic.com/spotify-callback
 ```

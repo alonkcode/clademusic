@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "homepage": "https://alonkcode.github.io/clademusic/",
+  "homepage": "https://www.clademusic.com/",
   "version": "1.0.1",
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,7 @@
     "dev": "vite",
     "build": "vite build",
     "predeploy": "bun run build && echo . > dist/.nojekyll",
-    "deploy": "bun run build && gh-pages -d dist",
+    "deploy": "bun run build && gh-pages -d dist --cname www.clademusic.com",
     "build:dev": "vite build --mode development",
     "dev:e2e": "vite --host 127.0.0.1 --port 8090 --base /clademusic/",
     "lint": "eslint .",

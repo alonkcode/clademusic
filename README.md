@@ -11,7 +11,7 @@ A TikTok-style music discovery platform that finds songs by **harmonic progressi
 ![TailwindCSS](https://img.shields.io/badge/Tailwind-CSS-cyan?logo=tailwindcss)
 ![Bun](https://img.shields.io/badge/Bun-required-black?logo=bun)
 
-Live: **https://kaospan.github.io/clademusic/**
+Live: **https://www.clademusic.com**
 
 ## ✨ Features
 

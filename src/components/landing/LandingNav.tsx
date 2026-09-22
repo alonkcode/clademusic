@@ -23,6 +23,15 @@ export function LandingNav() {
     ['blur(0px)', 'blur(12px)']
   );
 
+  // HeroSection renders its own, much larger Clade logo + wordmark right
+  // below this nav. At the top of the page this nav's background is
+  // transparent (it "appears on scroll", per the design), but its brand
+  // mark used to stay fully opaque regardless - so on load it sat right on
+  // top of the hero's mark, reading as a duplicated logo/wordmark. Fading
+  // it in over the same scroll range as the background keeps that appear-
+  // on-scroll intent while only the hero's mark shows at the very top.
+  const brandOpacity = useTransform(scrollY, [0, 100], [0, 1]);
+
   useEffect(() => {
     const handleScroll = () => {
       setIsVisible(window.scrollY > 100);
@@ -71,6 +80,7 @@ export function LandingNav() {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.99 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
+              style={{ opacity: brandOpacity }}
               className="flex items-center space-x-3 ml-12 md:ml-16"
             >
               <CladeMark className="w-9 h-9 text-white" />

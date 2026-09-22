@@ -16,7 +16,7 @@ const service = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 });
 
 const CREDIT_ALLOWANCE: Record<string, number> = {
-  free: 50,
+  free: 2500,
   starter: 500,
   pro: 2000,
 };

@@ -103,6 +103,11 @@ interface PlayerContextValue extends PlayerState {
   setMiniPosition: (pos: { x: number; y: number }) => void;
   enterCinema: () => void;
   exitCinema: () => void;
+  /** Visually hides the docked player's chrome without unmounting it, so
+   *  playback (the Spotify SDK / iframe embed) keeps running in the
+   *  background instead of restarting when it reappears. */
+  readonly isHidden: boolean;
+  toggleHidden: () => void;
   registerProviderControls: (provider: MusicProvider, controls: ProviderControls) => void;
   updatePlaybackState: (updates: Partial<Pick<PlayerState, 'positionMs' | 'durationMs' | 'isPlaying' | 'volume' | 'isMuted' | 'trackTitle' | 'trackArtist' | 'trackAlbum' | 'lastKnownTitle' | 'lastKnownArtist' | 'lastKnownAlbum'>>) => void;
   enqueueNext: (track: import('@/types').Track) => void;
@@ -525,6 +530,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const setMinimized = useCallback((value: boolean) => {
     setState((prev) => ({ ...prev, isMinimized: value }));
   }, []);
+
+  // Kept out of the `state`/`setState` reducer above deliberately: it's a
+  // standalone display preference, not playback state, and doesn't need
+  // resetting on track/provider changes the way isMinimized does.
+  const [isHidden, setIsHidden] = useState(false);
+  const toggleHidden = useCallback(() => setIsHidden((prev) => !prev), []);
 
   const collapseToMini = useCallback(() => {
     setState((prev) => ({ ...prev, isMini: true, isMinimized: true }));
@@ -1053,6 +1064,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setMiniPosition,
     enterCinema,
     exitCinema,
+    isHidden,
+    toggleHidden,
     registerProviderControls,
     updatePlaybackState,
     enqueueNext,
@@ -1065,7 +1078,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     shuffleQueue,
     nextTrack,
     previousTrack,
-  }), [state, isOpen, openPlayer, play, pause, stop, closePlayer, closeSpotify, closeYoutube, switchProvider, seekTo, seekToMs, clearSeek, togglePlayPause, setVolumeLevel, toggleMute, setCurrentSection, setLoopSection, setIsPlaying, setMinimized, collapseToMini, restoreFromMini, setMiniPosition, enterCinema, exitCinema, registerProviderControls, updatePlaybackState, enqueueNext, enqueueLater, addToQueue, playFromQueue, removeFromQueue, reorderQueue, clearQueue, shuffleQueue, nextTrack, previousTrack]);
+  }), [state, isOpen, openPlayer, play, pause, stop, closePlayer, closeSpotify, closeYoutube, switchProvider, seekTo, seekToMs, clearSeek, togglePlayPause, setVolumeLevel, toggleMute, setCurrentSection, setLoopSection, setIsPlaying, setMinimized, collapseToMini, restoreFromMini, setMiniPosition, enterCinema, exitCinema, isHidden, toggleHidden, registerProviderControls, updatePlaybackState, enqueueNext, enqueueLater, addToQueue, playFromQueue, removeFromQueue, reorderQueue, clearQueue, shuffleQueue, nextTrack, previousTrack]);
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
 }

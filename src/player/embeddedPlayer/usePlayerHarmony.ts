@@ -123,7 +123,19 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
   // of hiding it while sections/progression are both momentarily empty, only
   // to pop back in once the new track's data lands a moment later - which is
   // what made switching tracks look like the panel kept disappearing.
-  const isLoading = sectionsQuery.isLoading || trackQuery.isLoading;
+  //
+  // fingerprintQuery only counts here when the track has no progression_roman
+  // of its own - harmony.progression falls back to it in that case, and it's
+  // a separate round-trip from trackQuery with its own timing. Without this,
+  // trackQuery could resolve (with no progression_roman) before fingerprint
+  // does, isLoading would drop to false while progression was still empty,
+  // and the panel would wink out and reappear a moment later once fingerprint
+  // finally landed - exactly the flicker this hook exists to prevent. Tracks
+  // that already have progression_roman skip this wait entirely, so they
+  // don't pick up a spurious loading flash for data they don't need.
+  const hasTrackProgression = Array.isArray(trackQuery.data?.progression_roman) && trackQuery.data.progression_roman.length > 0;
+  const isLoading =
+    sectionsQuery.isLoading || trackQuery.isLoading || (!hasTrackProgression && fingerprintQuery.isLoading);
 
   return { sections, harmony, hudSections, isLoading };
 }

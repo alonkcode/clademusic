@@ -20,11 +20,17 @@ export interface SignUpResult {
   alreadyRegistered: boolean;
 }
 
+export interface ResendResult {
+  error: Error | null;
+  emailed: boolean;
+}
+
 interface AuthContextType extends AuthState {
   signUp: (email: string, password: string, displayName?: string) => Promise<SignUpResult>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
   sendPasswordReset: (email: string) => Promise<{ error: Error | null }>;
+  resendConfirmationEmail: (email: string) => Promise<ResendResult>;
   signOut: () => Promise<void>;
   enterGuestMode: () => void;
 }
@@ -183,6 +189,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   };
 
+  const resendConfirmationEmail = async (email: string): Promise<ResendResult> => {
+    // Same redirect target as signUp above - the resent link has to land
+    // somewhere that actually handles it.
+    const base = import.meta.env.BASE_URL || '/';
+    const redirectUrl = `${window.location.origin}${base.endsWith('/') ? base : `${base}/`}`;
+
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: redirectUrl },
+    });
+    return { error: error as Error | null, emailed: !error };
+  };
+
   const signOut = async () => {
     clearSpotifyCredentialCache(user?.id);
     await supabase.auth.signOut();
@@ -215,6 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signInWithGoogle,
       sendPasswordReset,
+      resendConfirmationEmail,
       signOut,
       enterGuestMode,
     }),

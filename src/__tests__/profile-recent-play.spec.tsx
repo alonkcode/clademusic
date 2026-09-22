@@ -70,7 +70,7 @@ vi.mock('@/hooks/api/useAdmin', () => ({ useIsAdmin: () => ({ data: false }) }))
 // "No QueryClient set" before anything can be asserted.
 vi.mock('@/hooks/api/useCredits', () => ({
   useCredits: () => ({ data: 0 }),
-  usePlan: () => ({ data: { plan: 'free', allowance: 50 } }),
+  usePlan: () => ({ data: { plan: 'free', allowance: 2500 } }),
 }));
 vi.mock('@/hooks/api/useTasteDNA', () => ({ useTasteDNA: () => ({ data: null, isLoading: false }) }));
 

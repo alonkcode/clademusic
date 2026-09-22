@@ -40,12 +40,11 @@ function calculateDistance(
 
 export function useUserLocation() {
   const { user } = useAuth();
-  const supabaseDisabled = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
 
   return useQuery({
     queryKey: ['user-location', user?.id],
     queryFn: async () => {
-      if (!user || supabaseDisabled) return null;
+      if (!user) return null;
 
       const { data, error } = await supabase
         .from('user_locations')
@@ -56,7 +55,7 @@ export function useUserLocation() {
       if (error) throw error;
       return data as UserLocation | null;
     },
-    enabled: !!user && !supabaseDisabled,
+    enabled: !!user,
   });
 }
 

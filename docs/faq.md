@@ -8,7 +8,7 @@ A: Check all of the following:
 
 **Q: The app is blank on GitHub Pages!**  
 A: Usually one of these:
-- You opened the wrong path. The app lives under: `https://kaospan.github.io/clademusic/`
+- You opened the wrong path. The app lives under: `https://www.clademusic.com`
 - Your Vite `base` is wrong. It must be `"/clademusic/"` in `vite.config.ts`.
 - Your router basename is wrong. It should be `basename={import.meta.env.BASE_URL}`.
 - A stale cached build is trying to load missing hashed chunks. Hard-refresh (Ctrl+F5). The app also attempts a one-time cache-busting reload automatically.

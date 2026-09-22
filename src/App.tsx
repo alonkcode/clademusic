@@ -1,9 +1,9 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { PlayerProvider, usePlayer } from "@/player/PlayerContext";
 import { EmbeddedPlayerDrawer } from "@/player/EmbeddedPlayerDrawer";
@@ -11,6 +11,7 @@ import { ErrorBoundary, GlobalErrorHandlers, LoadingSpinner } from "@/components
 import { AdminRoute } from "@/components/AdminRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
+import { parseAuthHashError, stashAuthRedirectError } from "@/lib/authHashError";
 
 // Lazy load pages for code splitting
 const Index = lazy(() => import("./pages/Index")); // Landing Page
@@ -19,6 +20,7 @@ const AuthGatePage = lazy(() => import("./pages/AuthGatePage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const SignUpPage = lazy(() => import("./pages/SignUpPage"));
+const ConfirmEmailPage = lazy(() => import("./pages/ConfirmEmailPage"));
 const SearchPage = lazy(() => import("./pages/SearchPage"));
 const ComparePage = lazy(() => import("./pages/ComparePage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
@@ -61,6 +63,29 @@ const PageLoader = () => (
 const RouteErrorBoundary = ({ children }: { children: ReactNode }) => {
   const location = useLocation();
   return <ErrorBoundary resetKeys={[location.pathname]}>{children}</ErrorBoundary>;
+};
+
+// Supabase's redirect target for an expired/invalid email link depends on the
+// dashboard's Site URL / Redirect URL config, so it can land anywhere - not
+// just /login or /signup, which are the only pages that display it. Those
+// pages handle the hash themselves when it's already there; this only steps
+// in when the user lands somewhere else, stashing the message and sending
+// them to /login so it isn't silently lost.
+const AuthLinkErrorRedirect = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const message = parseAuthHashError(window.location.hash);
+    if (!message) return;
+    if (location.pathname === '/login' || location.pathname === '/signup') return;
+
+    window.history.replaceState({}, '', window.location.pathname + window.location.search);
+    stashAuthRedirectError(message);
+    navigate('/login', { replace: true });
+  }, [navigate, location.pathname]);
+
+  return null;
 };
 
 // The player now docks as a fixed, full-width bar at the bottom of the
@@ -112,6 +137,7 @@ const App = () => (
                 future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
               >
                 <GlobalErrorHandlers />
+                <AuthLinkErrorRedirect />
                 <PlayerBottomPadding>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageLoader />}>
@@ -124,6 +150,7 @@ const App = () => (
                       <Route path="/login" element={<LoginPage />} />
                       <Route path="/reset-password" element={<ResetPasswordPage />} />
                       <Route path="/signup" element={<SignUpPage />} />
+                      <Route path="/confirm-email" element={<ConfirmEmailPage />} />
                       <Route path="/search" element={<SearchPage />} />
                       <Route path="/compare" element={<ComparePage />} />
                       <Route path="/profile" element={<ProfilePage />} />

@@ -1,7 +1,7 @@
 import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { usePlayer } from './PlayerContext';
-import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Repeat } from 'lucide-react';
+import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Repeat, Loader2 } from 'lucide-react';
 import { QueueSheet } from './QueueSheet';
 import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
 import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
@@ -68,6 +68,8 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     shuffleQueue,
     nextTrack,
     previousTrack,
+    isHidden,
+    toggleHidden,
   } = usePlayer();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -324,7 +326,11 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
       <div
         ref={cinemaRef}
         data-player="universal"
-        className={`fixed inset-x-0 bottom-0 z-[110] max-h-[100dvh] overflow-y-auto overflow-x-hidden border-t border-border/60 bg-gradient-to-t ${meta.color} shadow-[0_-18px_60px_-30px_rgba(0,0,0,0.75)] backdrop-blur-xl pb-[env(safe-area-inset-bottom)]`}
+        // isHidden hides the chrome via CSS rather than unmounting this
+        // subtree - UniversalPlayerHost/SpotifyWebPlayer live inside it and
+        // must keep running (so playback continues in the background) while
+        // the listener has the player hidden, not restart when it reappears.
+        className={`fixed inset-x-0 bottom-0 z-[110] max-h-[100dvh] overflow-y-auto overflow-x-hidden border-t border-border/60 bg-gradient-to-t ${meta.color} shadow-[0_-18px_60px_-30px_rgba(0,0,0,0.75)] backdrop-blur-xl pb-[env(safe-area-inset-bottom)]${isHidden ? ' hidden' : ''}`}
       >
         {/* Chord readout and section jump chips: visible by default whenever a
             track is loaded, not just when the video panel below is expanded.
@@ -355,74 +361,90 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
 
         {!isIdle && !hudCollapsed && hasHarmonyPanel && (
           <div className="max-h-[45dvh] overflow-y-auto [overscroll-behavior-y:contain] border-b border-border/60 bg-background/95 px-3 py-3 md:px-4">
-            <HarmonicHUD
-              trackId={canonicalTrackId ?? ''}
-              progression={harmony.progression}
-              detectedKey={harmony.detectedKey ?? undefined}
-              detectedMode={harmony.detectedMode ?? undefined}
-              bpm={harmony.bpm}
-              loopLengthBars={harmony.loopLengthBars}
-              sections={hudSections}
-            />
+            {/* isHarmonyLoading alone keeps hasHarmonyPanel (and this container)
+                mounted across a track switch so the panel doesn't flicker
+                closed-then-open - but progression/sections are both still
+                empty at that point, and HarmonicHUD renders nothing for an
+                empty progression. Without this branch that gap showed as a
+                blank padded box instead of any indication data was on the
+                way. */}
+            {harmony.progression.length === 0 && sections.length === 0 && isHarmonyLoading ? (
+              <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading chords...
+              </div>
+            ) : (
+              <>
+                <HarmonicHUD
+                  trackId={canonicalTrackId ?? ''}
+                  progression={harmony.progression}
+                  detectedKey={harmony.detectedKey ?? undefined}
+                  detectedMode={harmony.detectedMode ?? undefined}
+                  bpm={harmony.bpm}
+                  loopLengthBars={harmony.loopLengthBars}
+                  sections={hudSections}
+                />
 
-            {sections.length > 0 && (
-              <div className="mt-3 flex items-center gap-2">
-                <div className="flex-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-                  {sections.map((section) => {
-                    const isActive = currentSectionId === section.id;
-                    return (
+                {sections.length > 0 && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="flex-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                      {sections.map((section) => {
+                        const isActive = currentSectionId === section.id;
+                        return (
+                          <button
+                            key={section.id}
+                            type="button"
+                            onClick={() => {
+                              if (typeof setCurrentSection === 'function') {
+                                setCurrentSection(section.id);
+                              }
+                              if (canSeekInEmbed) {
+                                seekToMs(section.start_ms);
+                                return;
+                              }
+                              if (provider && trackId) {
+                                const url = buildProviderDeepLink(provider, trackId, { startSec: Math.floor(section.start_ms / 1000) });
+                                window.open(url, '_blank', 'noopener,noreferrer');
+                              }
+                            }}
+                            className={[
+                              'flex-shrink-0 rounded-full px-3 py-1 text-[11px] md:text-xs font-semibold transition border',
+                              isActive
+                                ? 'bg-primary text-primary-foreground border-primary/50'
+                                : 'bg-muted/60 text-muted-foreground border-border/60 hover:bg-muted',
+                            ].join(' ')}
+                            aria-label={`Jump to ${getSectionDisplayLabel(section.label)}`}
+                            title={`Jump to ${getSectionDisplayLabel(section.label)}${sectionWhy && isActive ? ` — ${sectionWhy}` : ''}`}
+                          >
+                            {getSectionDisplayLabel(section.label)}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {activeSection && (
                       <button
-                        key={section.id}
                         type="button"
                         onClick={() => {
-                          if (typeof setCurrentSection === 'function') {
-                            setCurrentSection(section.id);
-                          }
-                          if (canSeekInEmbed) {
-                            seekToMs(section.start_ms);
-                            return;
-                          }
-                          if (provider && trackId) {
-                            const url = buildProviderDeepLink(provider, trackId, { startSec: Math.floor(section.start_ms / 1000) });
-                            window.open(url, '_blank', 'noopener,noreferrer');
-                          }
+                          if (typeof setLoopSection !== 'function') return;
+                          const next = loopSectionId === activeSection.id ? null : activeSection.id;
+                          setLoopSection(next);
                         }}
                         className={[
-                          'flex-shrink-0 rounded-full px-3 py-1 text-[11px] md:text-xs font-semibold transition border',
-                          isActive
-                            ? 'bg-primary text-primary-foreground border-primary/50'
-                            : 'bg-muted/60 text-muted-foreground border-border/60 hover:bg-muted',
+                          'inline-flex h-8 w-8 items-center justify-center rounded-full border transition',
+                          loopSectionId === activeSection.id
+                            ? 'border-primary/50 bg-primary/20 text-primary'
+                            : 'border-border/60 bg-muted/60 text-muted-foreground hover:bg-muted',
                         ].join(' ')}
-                        aria-label={`Jump to ${getSectionDisplayLabel(section.label)}`}
-                        title={`Jump to ${getSectionDisplayLabel(section.label)}${sectionWhy && isActive ? ` — ${sectionWhy}` : ''}`}
+                        aria-label={loopSectionId === activeSection.id ? 'Disable section loop' : 'Loop section'}
+                        title={loopSectionId === activeSection.id ? 'Disable section loop' : 'Loop section'}
                       >
-                        {getSectionDisplayLabel(section.label)}
+                        <Repeat className="h-4 w-4" />
                       </button>
-                    );
-                  })}
-                </div>
-
-                {activeSection && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (typeof setLoopSection !== 'function') return;
-                      const next = loopSectionId === activeSection.id ? null : activeSection.id;
-                      setLoopSection(next);
-                    }}
-                    className={[
-                      'inline-flex h-8 w-8 items-center justify-center rounded-full border transition',
-                      loopSectionId === activeSection.id
-                        ? 'border-primary/50 bg-primary/20 text-primary'
-                        : 'border-border/60 bg-muted/60 text-muted-foreground hover:bg-muted',
-                    ].join(' ')}
-                    aria-label={loopSectionId === activeSection.id ? 'Disable section loop' : 'Loop section'}
-                    title={loopSectionId === activeSection.id ? 'Disable section loop' : 'Loop section'}
-                  >
-                    <Repeat className="h-4 w-4" />
-                  </button>
+                    )}
+                  </div>
                 )}
-              </div>
+              </>
             )}
           </div>
         )}

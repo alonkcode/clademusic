@@ -46,8 +46,7 @@ export function LiveChat({
   trackId,
   className = '' 
 }: LiveChatProps) {
-  const chatDisabled = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
-  const disabled = chatDisabled || chatSchemaMissing;
+  const disabled = chatSchemaMissing;
   const { user } = useAuth();
   const demoEnabled = disabled || !user;
   const [messages, setMessages] = useState<ChatMessage[]>([]);

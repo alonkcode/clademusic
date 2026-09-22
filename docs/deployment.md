@@ -17,7 +17,7 @@ This repo deploys automatically on every push to `main` via GitHub Actions:
      (`supabase secrets set YOUTUBE_API_KEY=...`), not a GitHub/Vite variable — see
      `supabase/functions/search-youtube/index.ts`
 3. Confirm base path alignment:
-   - Vite: `base` is resolved per host (see [Base path](#base-path) below); GitHub Pages gets `/clademusic/`
+   - Vite: `base` is resolved per host (see [Base path](#base-path) below); GitHub Pages gets `/` once the `CUSTOM_DOMAIN` repo variable is set (serving from www.clademusic.com's root)
    - Router: `basename={import.meta.env.BASE_URL}` in `src/App.tsx`
 
 ### Deploy
@@ -25,26 +25,26 @@ This repo deploys automatically on every push to `main` via GitHub Actions:
 - Watch the **Deploy** workflow in GitHub Actions.
 
 ### Verify
-- Site: https://kaospan.github.io/clademusic/
-- Feed: https://kaospan.github.io/clademusic/feed
+- Site: https://www.clademusic.com
+- Feed: https://www.clademusic.com/feed
 
 ---
 
 ## Base path
 
-The app is served from different paths depending on the host, so `base` is
-resolved at build time in `vite.config.mjs` / `vite.config.ts`:
+The app serves from the domain root everywhere now (`www.clademusic.com`,
+Vercel, Netlify), so `base` defaults to `/`. `base` is resolved at build time
+in `vite.config.mjs` / `vite.config.ts`:
 
 ```js
-const basePath =
-  process.env.VITE_BASE_PATH ?? (process.env.VERCEL ? "/" : "/clademusic/");
+const basePath = process.env.VITE_BASE_PATH ?? "/";
 ```
 
 | Host | Base | How it resolves |
 |------|------|-----------------|
-| GitHub Pages | `/clademusic/` | default |
-| Vercel | `/` | `VERCEL` is set automatically by Vercel |
-| Anything else | your choice | set `VITE_BASE_PATH` explicitly |
+| GitHub Pages (custom domain) | `/` | default — needs the `CUSTOM_DOMAIN` repo variable set so `deploy.yml` writes the CNAME file |
+| Vercel / Netlify | `/` | default |
+| Bare `username.github.io/clademusic/` (no custom domain) | `/clademusic/` | set `VITE_BASE_PATH=/clademusic/` explicitly |
 
 The router reads `import.meta.env.BASE_URL`, so it follows automatically. Any
 code that builds an absolute URL must respect `BASE_URL` too — `useAuth.signUp`
@@ -91,3 +91,8 @@ If you want to deploy without GitHub Actions (not recommended for this repo), yo
 bun run predeploy
 bun run deploy
 ```
+
+`deploy` passes `--cname www.clademusic.com` so the manual path writes the
+same CNAME file the CI workflow does — `gh-pages -d dist` replaces the whole
+branch by default, so without it a manual deploy would delete the CNAME file
+CI had written and silently break the custom domain until the next CI run.
