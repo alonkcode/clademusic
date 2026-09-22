@@ -12,7 +12,7 @@ test('the docked player keeps playing the same track across a client-side route 
     route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>spotify</body></html>' })
   );
 
-  await page.goto('/clademusic/__e2e__/player');
+  await page.goto('/__e2e__/player');
 
   const spotifyButtons = page.locator('[data-provider="spotify"]');
   await spotifyButtons.first().click();

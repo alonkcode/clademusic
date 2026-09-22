@@ -13,11 +13,11 @@ import { test, expect } from '@playwright/test';
  *   - the ErrorBoundary fallback must NOT have taken over, and
  *   - the 404 page must NOT have taken over on a route that does exist.
  *
- * The app is served under /clademusic/, matching vite.config.ts's base and
- * the goto() calls in the player specs alongside this file.
+ * clademusic.com is served from the domain root (vite.config.ts's base),
+ * matching the goto() calls in the player specs alongside this file.
  */
 
-const BASE = '/clademusic';
+const BASE = '';
 
 const ERROR_BOUNDARY_TEXT = 'Something went wrong';
 const NOT_FOUND_TEXT = 'Oops! Page not found';

@@ -13,7 +13,7 @@ test('Spotify quickstream swaps provider src deterministically (singleton univer
     route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>youtube</body></html>' })
   );
 
-  await page.goto('/clademusic/__e2e__/player');
+  await page.goto('/__e2e__/player');
 
   await expect(page.locator('iframe#universal-player')).toHaveCount(1);
 

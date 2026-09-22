@@ -12,7 +12,7 @@ import { test, expect } from '@playwright/test';
 // so even a correct position never reached buildEmbedSrc.
 test.describe('Quicklink provider handoff', () => {
   test('resumes at the position it was handed, and does not churn the embed', async ({ page }) => {
-    await page.goto('/clademusic/__e2e__/player');
+    await page.goto('/__e2e__/player');
 
     const trackA = page.locator('.rounded-lg.border').first();
     const providerSrc = () =>
