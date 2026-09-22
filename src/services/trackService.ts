@@ -11,13 +11,24 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { Track, SongSection } from '@/types';
-import { shuffle } from '@/lib/utils';
+import { shuffle, seededShuffle } from '@/lib/utils';
 
 // Re-exported for existing importers (e.g. this file's own tests) - the
 // implementation itself moved to lib/utils so non-service code (a component
 // shuffling a static list, say) isn't reaching into a data-fetching service
 // for a generic array utility.
 export { shuffle };
+
+// The feed's random pick is reshuffled once a day, not on every call - it
+// used to use plain shuffle() (a fresh Math.random() order every single
+// fetch), so simply reloading the page span a brand new set of tracks out
+// from under whatever the listener had just been looking at, including a
+// track they'd just interacted with. Same UTC day -> same mulberry32 seed ->
+// the same order every call; the next day gets a new one, so the feed still
+// looks freshly picked without churning on every refresh.
+function dailySeed(): number {
+  return Math.floor(Date.now() / 86_400_000); // days since the Unix epoch, UTC
+}
 let seedTracksCache: Track[] | null = null;
 
 async function getSeedTracks(): Promise<Track[]> {
@@ -110,6 +121,14 @@ async function fetchFromDatabase(query: TrackQuery): Promise<Track[] | null> {
       ? Math.min(Math.max((query.limit || 20) * 4, 150), 300)
       : query.limit;
 
+    // An unordered query has no guaranteed row order across calls - without
+    // this, seededShuffle below could still produce a different-looking feed
+    // from one load to the next simply because Postgres hands back the same
+    // 150-300 rows in a different order, not because the seed changed.
+    if (randomizing) {
+      supabaseQuery = supabaseQuery.order('id', { ascending: true });
+    }
+
     if (dbLimit) {
       supabaseQuery = supabaseQuery.limit(dbLimit);
     }
@@ -129,7 +148,7 @@ async function fetchFromDatabase(query: TrackQuery): Promise<Track[] | null> {
     const tracks = data ? data.map(row => transformDbRowToTrack(row as Record<string, unknown>)) : null;
     if (!tracks) return null;
 
-    return randomizing ? shuffle(tracks).slice(0, query.limit ?? tracks.length) : tracks;
+    return randomizing ? seededShuffle<Track>(tracks, dailySeed()).slice(0, query.limit ?? tracks.length) : tracks;
   } catch (error) {
     console.warn('Database fetch error:', error);
     return null;
@@ -165,7 +184,7 @@ async function filterSeedTracks(query: TrackQuery): Promise<Track[]> {
   }
 
   if (query.randomize && !query.offset) {
-    results = shuffle(results);
+    results = seededShuffle(results, dailySeed());
   }
 
   const offset = query.offset || 0;

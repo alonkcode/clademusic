@@ -10,6 +10,7 @@ vi.mock('@/integrations/supabase/client', () => {
     select: () => chain,
     eq: () => chain,
     or: () => chain,
+    order: () => chain,
     limit: () => chain,
     range: () => chain,
     then: (resolve: (v: typeof response) => void) => resolve(response),
@@ -55,12 +56,20 @@ describe('fetchTracks randomize', () => {
     expect(new Set(result.tracks.map((t) => t.id)).size).toBe(5);
   });
 
-  it('produces a different order across calls (statistical - seed set is well over 5 tracks)', async () => {
-    const orders = new Set<string>();
-    for (let i = 0; i < 8; i++) {
-      const { tracks } = await fetchTracks({ limit: 8, randomize: true });
-      orders.add(tracks.map((t) => t.id).join(','));
-    }
-    expect(orders.size).toBeGreaterThan(1);
+  it('returns the same order across calls on the same day (a refresh should not reshuffle the feed)', async () => {
+    const first = await fetchTracks({ limit: 8, randomize: true });
+    const second = await fetchTracks({ limit: 8, randomize: true });
+    expect(second.tracks.map((t) => t.id)).toEqual(first.tracks.map((t) => t.id));
+  });
+
+  it('reshuffles on a new day', async () => {
+    const first = await fetchTracks({ limit: 8, randomize: true });
+
+    const oneDayMs = 86_400_000;
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + oneDayMs);
+    const second = await fetchTracks({ limit: 8, randomize: true });
+    vi.restoreAllMocks();
+
+    expect(second.tracks.map((t) => t.id)).not.toEqual(first.tracks.map((t) => t.id));
   });
 });
