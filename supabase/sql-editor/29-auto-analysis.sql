@@ -330,8 +330,11 @@ $$;
 -- ------------------------------------------------------------
 revoke all on function public.resolve_or_create_track(text, text, text, text, text, integer, text)
   from public, anon, authenticated;
+-- The core is reachable only through the two definer functions that call it -
+-- not even the service role runs it directly, because it has no eligibility
+-- check of its own.
 revoke all on function public._promote_detection_run_core(uuid, uuid, boolean)
-  from public, anon, authenticated;
+  from public, anon, authenticated, service_role;
 revoke all on function public.auto_promote_detection_run(uuid)
   from public, anon, authenticated;
 
