@@ -135,6 +135,9 @@ export function useConnectSpotify() {
         state,
         code_challenge_method: 'S256',
         code_challenge: codeChallenge,
+        // Without this Spotify silently reuses whichever account is logged in
+        // at accounts.spotify.com; in dev mode a non-allowlisted one 403s on /me.
+        show_dialog: 'true',
       });
 
       // Redirect to Spotify
