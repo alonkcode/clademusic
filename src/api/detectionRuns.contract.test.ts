@@ -139,3 +139,60 @@ describe('ingest payload contract (client builder -> server validator)', () => {
     expect(() => validate(broken)).toThrow(BadRequest);
   });
 });
+
+describe('ingest payload contract: tracks the catalog has not seen', () => {
+  const SPOTIFY_ID = '0VjIjW4GlUZAMYd2vXMi3b';
+  const YOUTUBE_ID = 'dQw4w9WgXcQ';
+  const SECTIONS = [progression('verse', 0, 8, [span(0, 'major', 0, 4), span(7, 'major', 4, 8)])];
+
+  const build = (over: Partial<Parameters<typeof buildDetectionRunPayload>[0]> = {}) =>
+    buildDetectionRunPayload({ sectionProgressions: SECTIONS, detectedKey: C_MAJOR, ...over });
+  const wire = (payload: unknown) => JSON.parse(JSON.stringify(payload));
+
+  it('accepts a capture identified only by a YouTube reference, plus a tempo', () => {
+    const payload = build({
+      trackRef: { provider: 'youtube', providerTrackId: YOUTUBE_ID, title: 'A song', artist: 'Someone', durationMs: 215000 },
+      tempo: { bpm: 121.96, confidence: 0.83 },
+    });
+    expect(payload).not.toBeNull();
+    expect(payload).not.toHaveProperty('trackId');
+
+    const result = validate(wire(payload));
+    expect(result.trackId).toBeUndefined();
+    expect(result.trackRef).toMatchObject({ provider: 'youtube', providerTrackId: YOUTUBE_ID, durationMs: 215000 });
+    expect(result.tempo).toEqual({ bpm: 122, confidence: 0.83 });
+  });
+
+  it('accepts a Spotify reference alongside a seed-style id that is not a real row', () => {
+    const payload = build({
+      trackId: '00000000-0000-4000-8000-000000000012',
+      trackRef: { provider: 'spotify', providerTrackId: SPOTIFY_ID, title: 'Blinding Lights', artist: 'The Weeknd', isrc: 'usug11904665' },
+    });
+    const result = validate(wire(payload));
+    expect(result.trackId).toBe('00000000-0000-4000-8000-000000000012');
+    expect(result.trackRef?.isrc).toBe('USUG11904665');
+  });
+
+  it('rejects a payload that names no track at all', () => {
+    const payload = wire(build({ trackId: TRACK }));
+    delete payload.trackId;
+    expect(() => validate(payload)).toThrow(/trackId or trackRef/);
+  });
+
+  it.each([
+    ['a provider id of the wrong shape', { provider: 'youtube', providerTrackId: 'short', title: 't', artist: 'a' }],
+    ['a Spotify id that is a YouTube id', { provider: 'spotify', providerTrackId: YOUTUBE_ID, title: 't', artist: 'a' }],
+    ['an unsupported provider', { provider: 'apple_music', providerTrackId: YOUTUBE_ID, title: 't', artist: 'a' }],
+    ['a title with a NUL byte', { provider: 'youtube', providerTrackId: YOUTUBE_ID, title: 'bad\u0000', artist: 'a' }],
+    ['an over-long artist', { provider: 'youtube', providerTrackId: YOUTUBE_ID, title: 't', artist: 'x'.repeat(301) }],
+    ['a missing title', { provider: 'youtube', providerTrackId: YOUTUBE_ID, artist: 'a' }],
+  ])('rejects %s', (_label, trackRef) => {
+    const payload = { ...wire(build({ trackId: TRACK })), trackRef };
+    expect(() => validate(payload)).toThrow(BadRequest);
+  });
+
+  it('rejects a tempo outside the range a song can have', () => {
+    const payload = { ...wire(build({ trackId: TRACK })), tempo: { bpm: 400, confidence: 0.9 } };
+    expect(() => validate(payload)).toThrow(BadRequest);
+  });
+});

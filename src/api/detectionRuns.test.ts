@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildDetectionRunPayload, DETECTION_ANALYSIS_VERSION } from './detectionRuns';
+import { buildDetectionRunPayload, estimateLoopBars, DETECTION_ANALYSIS_VERSION } from './detectionRuns';
 import type { SectionProgression, ChordSpan } from '@/lib/harmony/chordTimeline';
 import type { KeyEstimate } from '@/lib/harmony/keyEstimation';
 import type { DetectedSectionType } from '@/lib/harmony/sectionDetection';
@@ -226,5 +226,95 @@ describe('buildDetectionRunPayload', () => {
     expect(buildDetectionRunPayload(args)!.idempotencyKey).not.toBe(
       buildDetectionRunPayload(args)!.idempotencyKey
     );
+  });
+});
+
+describe('buildDetectionRunPayload: tracks without a catalog row', () => {
+  const ref = { provider: 'youtube' as const, providerTrackId: 'dQw4w9WgXcQ', title: 'A song', artist: 'Someone' };
+  const verse = [progression('verse', 0, 8, [span(0, 'major', 0, 4)])];
+
+  it('accepts a track reference in place of a track id', () => {
+    const payload = buildDetectionRunPayload({ trackRef: ref, sectionProgressions: verse, detectedKey: C_MAJOR });
+    expect(payload!.trackRef).toEqual(ref);
+    expect('trackId' in payload!).toBe(false);
+  });
+
+  it('still returns null when it has neither an id nor a reference', () => {
+    expect(buildDetectionRunPayload({ sectionProgressions: verse, detectedKey: C_MAJOR })).toBeNull();
+  });
+
+  it('never sends an empty trackId next to a reference', () => {
+    const payload = buildDetectionRunPayload({ trackId: '', trackRef: ref, sectionProgressions: verse, detectedKey: C_MAJOR });
+    expect('trackId' in payload!).toBe(false);
+  });
+
+  it('sends a tempo in range, rounded, and drops one that is not', () => {
+    const args = { trackId: TRACK, sectionProgressions: verse, detectedKey: C_MAJOR };
+    expect(buildDetectionRunPayload({ ...args, tempo: { bpm: 127.96, confidence: 0.7 } })!.tempo).toEqual({
+      bpm: 128,
+      confidence: 0.7,
+    });
+    expect(buildDetectionRunPayload({ ...args, tempo: { bpm: 12, confidence: 0.9 } })!.tempo).toBeUndefined();
+    expect(buildDetectionRunPayload({ ...args, tempo: { bpm: NaN, confidence: 0.9 } })!.tempo).toBeUndefined();
+    expect(buildDetectionRunPayload({ ...args, tempo: null })!.tempo).toBeUndefined();
+  });
+
+  it('fills loop length in bars from a confident tempo', () => {
+    // A 4-chord loop, 2 s per chord: 8 s per cycle = 4 bars at 120 BPM.
+    const chords = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
+      span([0, 7, 9, 5][i % 4], i % 4 === 2 ? 'minor' : 'major', i * 2, i * 2 + 2)
+    );
+    const args = {
+      trackId: TRACK,
+      detectedKey: C_MAJOR,
+      sectionProgressions: [progression('verse', 0, 16, chords)].map((sp) => ({ ...sp, loop: sp.loop.slice(0, 4) })),
+    };
+    expect(buildDetectionRunPayload({ ...args, tempo: { bpm: 120, confidence: 0.8 } })!.sections[0].loopLengthBars).toBe(4);
+  });
+
+  it('leaves loop length empty when the tempo is not trusted', () => {
+    const chords = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => span(0, 'major', i * 2, i * 2 + 2));
+    const payload = buildDetectionRunPayload({
+      trackId: TRACK,
+      detectedKey: C_MAJOR,
+      sectionProgressions: [{ ...progression('verse', 0, 16, chords), loop: chords.slice(0, 4).map((c) => ({ root: c.root, quality: c.quality })) }],
+      tempo: { bpm: 120, confidence: 0.3 },
+    });
+    expect(payload!.tempo).toBeDefined();
+    expect(payload!.sections[0].loopLengthBars).toBeNull();
+  });
+});
+
+describe('estimateLoopBars', () => {
+  /** n chords, each `sec` long, back to back. */
+  const run = (n: number, sec: number) => Array.from({ length: n }, (_, i) => span(0, 'major', i * sec, (i + 1) * sec));
+
+  it('measures whole bars: 4 chords x 2 s at 120 BPM is 4 bars', () => {
+    expect(estimateLoopBars(run(12, 2), 4, 120)).toBe(4);
+  });
+
+  it('measures a two-bar loop', () => {
+    // 2 chords x 2 s = 4 s per cycle = 2 bars at 120 BPM
+    expect(estimateLoopBars(run(8, 2), 2, 120)).toBe(2);
+  });
+
+  it('needs two full cycles before it will say anything', () => {
+    expect(estimateLoopBars(run(4, 2), 4, 120)).toBeNull();
+    expect(estimateLoopBars(run(7, 2), 4, 120)).toBeNull();
+  });
+
+  it('returns null when the cycle is not a whole number of bars', () => {
+    // 4 x 1.8 s = 7.2 s = 3.6 bars at 120 BPM: the tempo or the loop is off.
+    expect(estimateLoopBars(run(12, 1.8), 4, 120)).toBeNull();
+  });
+
+  it('is not moved by one stretched repeat', () => {
+    const chords = run(12, 2).map((c, i) => (i === 5 ? { ...c, endSec: c.endSec + 0.4 } : c));
+    // Only the shifted spans' own start times move the later cycles; the median cycle stays 8 s.
+    expect(estimateLoopBars(chords, 4, 120)).toBe(4);
+  });
+
+  it.each([0, -5, NaN])('rejects a nonsense tempo (%s)', (bpm) => {
+    expect(estimateLoopBars(run(8, 2), 4, bpm)).toBeNull();
   });
 });

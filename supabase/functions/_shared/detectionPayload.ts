@@ -46,10 +46,34 @@ export interface SectionInput {
   chords: ChordInput[];
 }
 
+/**
+ * How to find (or create) the catalog row for a track the player is holding
+ * only a provider id for. Sent whenever the client has no real tracks UUID -
+ * a search result nobody has analysed before - and also alongside a UUID that
+ * may not exist server-side (the client's built-in seed ids).
+ */
+export interface TrackRefInput {
+  provider: 'spotify' | 'youtube';
+  providerTrackId: string;
+  title: string;
+  artist: string;
+  album?: string | null;
+  durationMs?: number | null;
+  isrc?: string | null;
+}
+
+export interface TempoInput {
+  bpm: number;
+  confidence: number;
+}
+
 export interface IngestPayload {
-  trackId: string;
+  /** Optional when `trackRef` is present. */
+  trackId?: string;
+  trackRef?: TrackRefInput | null;
   analysisVersion: string;
   key?: { tonic: number; mode: 'major' | 'minor'; confidence: number } | null;
+  tempo?: TempoInput | null;
   coveredFromMs: number;
   coveredToMs: number;
   idempotencyKey?: string;
@@ -59,6 +83,89 @@ export interface IngestPayload {
 export class BadRequest extends Error {}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Provider id shapes. Strict on purpose: a valid trackRef makes the server
+ * create a row in the shared catalog, so the id has to look like something
+ * the provider could actually have issued.
+ */
+const SPOTIFY_ID_RE = /^[A-Za-z0-9]{22}$/;
+const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+const ISRC_RE = /^[A-Za-z0-9]{12}$/;
+export const MAX_TEXT_LEN = 300;
+const MIN_TRACK_DURATION_MS = 1000;
+export const MIN_TEMPO_BPM = 40;
+export const MAX_TEMPO_BPM = 240;
+
+function boundedText(value: unknown, field: string, required: boolean): string | null {
+  if (value === undefined || value === null || value === '') {
+    if (required) throw new BadRequest(`${field} is required`);
+    return null;
+  }
+  // Postgres text cannot hold a NUL byte, and control characters have no
+  // business in a title.
+  if (typeof value !== 'string' || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new BadRequest(`${field} must be plain text`);
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    if (required) throw new BadRequest(`${field} is required`);
+    return null;
+  }
+  if (trimmed.length > MAX_TEXT_LEN) throw new BadRequest(`${field} must be at most ${MAX_TEXT_LEN} characters`);
+  return trimmed;
+}
+
+function validateTrackRef(raw: unknown): TrackRefInput {
+  if (!raw || typeof raw !== 'object') throw new BadRequest('trackRef must be an object');
+  const r = raw as Record<string, unknown>;
+
+  if (r.provider !== 'spotify' && r.provider !== 'youtube') {
+    throw new BadRequest('trackRef.provider must be spotify or youtube');
+  }
+  const provider = r.provider;
+  const providerTrackId = r.providerTrackId;
+  const idRe = provider === 'spotify' ? SPOTIFY_ID_RE : YOUTUBE_ID_RE;
+  if (typeof providerTrackId !== 'string' || !idRe.test(providerTrackId)) {
+    throw new BadRequest(`trackRef.providerTrackId is not a valid ${provider} id`);
+  }
+
+  let durationMs: number | null = null;
+  if (r.durationMs !== undefined && r.durationMs !== null) {
+    durationMs = intInRange(r.durationMs, MIN_TRACK_DURATION_MS, MAX_TRACK_MS, 'trackRef.durationMs');
+  }
+
+  let isrc: string | null = null;
+  if (r.isrc !== undefined && r.isrc !== null && r.isrc !== '') {
+    if (typeof r.isrc !== 'string' || !ISRC_RE.test(r.isrc)) throw new BadRequest('trackRef.isrc is not valid');
+    isrc = r.isrc.toUpperCase();
+  }
+
+  return {
+    provider,
+    providerTrackId,
+    title: boundedText(r.title, 'trackRef.title', true) as string,
+    artist: boundedText(r.artist, 'trackRef.artist', true) as string,
+    album: boundedText(r.album, 'trackRef.album', false),
+    durationMs,
+    isrc,
+  };
+}
+
+function validateTempo(raw: unknown): TempoInput | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object') throw new BadRequest('tempo must be an object');
+  const t = raw as Record<string, unknown>;
+  if (typeof t.bpm !== 'number' || !Number.isFinite(t.bpm) || t.bpm < MIN_TEMPO_BPM || t.bpm > MAX_TEMPO_BPM) {
+    throw new BadRequest(`tempo.bpm must be between ${MIN_TEMPO_BPM} and ${MAX_TEMPO_BPM}`);
+  }
+  return {
+    // The column is numeric(5,2); one decimal is more than the detector can
+    // honestly claim.
+    bpm: Math.round(t.bpm * 10) / 10,
+    confidence: optionalUnitInterval(t.confidence, 'tempo.confidence') ?? 0,
+  };
+}
 
 function intInRange(value: unknown, min: number, max: number, field: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value)) {
@@ -83,10 +190,20 @@ export function validate(raw: unknown): IngestPayload {
   if (!raw || typeof raw !== 'object') throw new BadRequest('body must be a JSON object');
   const body = raw as Record<string, unknown>;
 
-  const trackId = body.trackId;
-  if (typeof trackId !== 'string' || !UUID_RE.test(trackId)) {
-    throw new BadRequest('trackId must be a uuid');
+  // A real tracks UUID, a reference the server can resolve one from, or both.
+  // Both is the client's seed ids: they look like UUIDs but are not rows.
+  let trackId: string | undefined;
+  if (body.trackId !== undefined && body.trackId !== null) {
+    if (typeof body.trackId !== 'string' || !UUID_RE.test(body.trackId)) {
+      throw new BadRequest('trackId must be a uuid');
+    }
+    trackId = body.trackId;
   }
+  const trackRef =
+    body.trackRef !== undefined && body.trackRef !== null ? validateTrackRef(body.trackRef) : null;
+  if (!trackId && !trackRef) throw new BadRequest('trackId or trackRef is required');
+
+  const tempo = validateTempo(body.tempo);
 
   const analysisVersion = body.analysisVersion;
   if (typeof analysisVersion !== 'string' || !analysisVersion || analysisVersion.length > 32) {
@@ -206,8 +323,10 @@ export function validate(raw: unknown): IngestPayload {
 
   return {
     trackId,
+    trackRef,
     analysisVersion,
     key,
+    tempo,
     coveredFromMs,
     coveredToMs,
     idempotencyKey,
