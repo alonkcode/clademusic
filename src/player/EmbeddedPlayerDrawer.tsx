@@ -1,7 +1,7 @@
 import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { usePlayer } from './PlayerContext';
-import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Repeat, Loader2 } from 'lucide-react';
+import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Repeat, Loader2, EyeOff } from 'lucide-react';
 import { QueueSheet } from './QueueSheet';
 import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
 import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
@@ -211,6 +211,13 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   }, [provider, trackId]);
 
   useDevPlayerInvariants(isOpen, resolvedTitle);
+
+  // Starting a new track brings a hidden player back: playing something from
+  // the page and hearing it with no controls anywhere is never what was meant.
+  useEffect(() => {
+    if (isHidden) toggleHidden();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playRequestId]);
 
   // Publish the docked player's real rendered height so the page reserves
   // exactly that much bottom space (see body.clade-player-open in index.css).
@@ -780,6 +787,16 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
 
           <button
             type="button"
+            onClick={toggleHidden}
+            className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
+            aria-label="Hide player (keeps playing)"
+            title="Hide player (keeps playing)"
+          >
+            <EyeOff className="h-4 w-4" />
+          </button>
+
+          <button
+            type="button"
             onClick={closePlayer}
             className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
             aria-label="Close player"
@@ -790,6 +807,23 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
         </div>
         )}
       </div>
+
+      {/* The bar above is display:none while hidden, taking every transport
+          control with it - this tab is the only way back, so it must render
+          whenever a track is loaded and the bar is hidden. */}
+      {isHidden && !isIdle && (
+        <button
+          type="button"
+          onClick={toggleHidden}
+          className="fixed bottom-3 right-3 z-[110] inline-flex h-10 touch-manipulation items-center gap-2 rounded-full border border-border/60 bg-background/95 px-4 text-xs font-semibold text-foreground shadow-lg backdrop-blur-xl transition hover:bg-muted mb-[env(safe-area-inset-bottom)]"
+          aria-label="Show player"
+          title="Show player"
+        >
+          {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+          <span className="max-w-[10rem] truncate">{resolvedTitle || 'Show player'}</span>
+          <ChevronUp className="h-3.5 w-3.5" />
+        </button>
+      )}
 
       {/* Queue sheet */}
       <QueueSheet
