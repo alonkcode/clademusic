@@ -31,12 +31,15 @@ export function useAdminUsers(search?: string, limit = 20, offset = 0) {
   return useQuery({
     queryKey: ['adminUsers', search, limit, offset],
     queryFn: async () => {
+      // No user_roles(role) embed here. user_roles.user_id points at
+      // auth.users, which the API does not expose, so there is no
+      // profiles -> user_roles relationship for it to follow - the embed
+      // failed the whole query with PGRST200 and the Users tab could only
+      // ever show "Failed to load users." Roles are looked up separately
+      // below and merged back in under the same `user_roles` key.
       let query = supabase
         .from('profiles')
-        .select(`
-          *,
-          user_roles(role)
-        `, { count: 'exact' })
+        .select('*', { count: 'exact' })
         .range(offset, offset + limit - 1)
         .order('created_at', { ascending: false });
 
@@ -46,8 +49,25 @@ export function useAdminUsers(search?: string, limit = 20, offset = 0) {
 
       const { data, error, count } = await query;
       if (error) throw error;
+      const profiles = data ?? [];
 
-      return { users: data, total: count || 0 };
+      // Best-effort: if the roles lookup fails, the rows still render with
+      // "—" in the Roles column rather than taking the whole tab down again.
+      const rolesByUser = new Map<string, { role: string }[]>();
+      if (profiles.length) {
+        const { data: roleRows } = await supabase
+          .from('user_roles')
+          .select('user_id, role')
+          .in('user_id', profiles.map((p) => p.id));
+        for (const r of roleRows ?? []) {
+          const list = rolesByUser.get(r.user_id) ?? [];
+          list.push({ role: r.role });
+          rolesByUser.set(r.user_id, list);
+        }
+      }
+
+      const users = profiles.map((p) => ({ ...p, user_roles: rolesByUser.get(p.id) ?? [] }));
+      return { users, total: count || 0 };
     },
     staleTime: 1 * 60 * 1000, // 1 minute
   });
