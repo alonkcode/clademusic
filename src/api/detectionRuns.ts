@@ -12,8 +12,9 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
-import type { SectionProgression } from '@/lib/harmony/chordTimeline';
+import type { ChordSpan, SectionProgression } from '@/lib/harmony/chordTimeline';
 import { toRomanNumeral, toRomanProgression, type KeyEstimate } from '@/lib/harmony/keyEstimation';
+import { AUTO_PROMOTION } from '@/lib/harmony/autoPromotion';
 
 /** Bumped whenever the detection pipeline changes shape enough to invalidate
  *  older runs. Stored on every run so they can be found and re-derived. */
@@ -39,10 +40,32 @@ export interface DetectionSectionPayload {
   chords: DetectionChordPayload[];
 }
 
+/**
+ * How the server finds - or creates - the catalog row for a track the player
+ * only holds a provider id for. See TrackRefInput in the ingest validator.
+ */
+export interface DetectionTrackRef {
+  provider: 'spotify' | 'youtube';
+  providerTrackId: string;
+  title: string;
+  artist: string;
+  album?: string | null;
+  durationMs?: number | null;
+  isrc?: string | null;
+}
+
+export interface DetectionTempo {
+  bpm: number;
+  confidence: number;
+}
+
 export interface DetectionRunPayload {
-  trackId: string;
+  /** Omitted for a track with no catalog row yet; `trackRef` identifies it instead. */
+  trackId?: string;
+  trackRef?: DetectionTrackRef;
   analysisVersion: string;
   key: { tonic: number; mode: 'major' | 'minor'; confidence: number } | null;
+  tempo?: DetectionTempo;
   coveredFromMs: number;
   coveredToMs: number;
   idempotencyKey: string;
@@ -51,12 +74,48 @@ export interface DetectionRunPayload {
 
 export interface IngestResult {
   runId: string;
+  /** The catalog row the capture was attached to - created by the server if it was new. */
+  trackId?: string;
   sectionCount?: number;
   chordCount?: number;
   deduplicated?: boolean;
+  /** True when the capture became the track's saved analysis. */
+  promoted?: boolean;
+  /** Why not, when it did not: a policy shortfall or 'already_analysed'. */
+  reason?: string;
 }
 
 const toMs = (sec: number) => Math.max(0, Math.round(sec * 1000));
+
+/**
+ * How many 4/4 bars one cycle of a section's loop lasts, from the tempo.
+ *
+ * Only answered when the section really does repeat (two full cycles) and the
+ * measured cycle lands near a whole number of bars: a loop that comes out at
+ * 3.6 bars is a sign the tempo or the loop is wrong, and storing a rounded
+ * guess would be worse than storing nothing. The median cycle is used so one
+ * stretched or clipped repeat cannot move the answer.
+ */
+export function estimateLoopBars(chords: ChordSpan[], loopLength: number, bpm: number): number | null {
+  if (!Number.isFinite(bpm) || bpm <= 0 || loopLength < 1) return null;
+  const cycles = Math.floor(chords.length / loopLength);
+  if (cycles < 2) return null;
+
+  const durations: number[] = [];
+  for (let k = 0; k < cycles; k++) {
+    const first = chords[k * loopLength];
+    const last = chords[(k + 1) * loopLength - 1];
+    durations.push(last.endSec - first.startSec);
+  }
+  durations.sort((a, b) => a - b);
+  const mid = Math.floor(durations.length / 2);
+  const cycleSec = durations.length % 2 ? durations[mid] : (durations[mid - 1] + durations[mid]) / 2;
+
+  const bars = (cycleSec * bpm) / 240;
+  const rounded = Math.round(bars);
+  if (rounded < 1 || rounded > 64 || Math.abs(bars - rounded) > 0.25) return null;
+  return rounded;
+}
 
 function newIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -78,14 +137,28 @@ function newIdempotencyKey(): string {
  * be sent again safely.
  */
 export function buildDetectionRunPayload(args: {
-  trackId: string;
+  /** A real catalog UUID, when the track has one. */
+  trackId?: string;
+  /** Identifies the track when there is no catalog row (or none the client can trust). */
+  trackRef?: DetectionTrackRef | null;
   sectionProgressions: SectionProgression[];
   detectedKey: KeyEstimate | null;
+  /** Measured BPM. Sent as evidence when present; used for loop lengths only when confident. */
+  tempo?: DetectionTempo | null;
   analysisVersion?: string;
   idempotencyKey?: string;
 }): DetectionRunPayload | null {
-  const { trackId, sectionProgressions, detectedKey } = args;
-  if (!trackId || !detectedKey || sectionProgressions.length === 0) return null;
+  const { trackId, trackRef, sectionProgressions, detectedKey } = args;
+  if ((!trackId && !trackRef) || !detectedKey || sectionProgressions.length === 0) return null;
+
+  const tempo =
+    args.tempo && Number.isFinite(args.tempo.bpm) && args.tempo.bpm >= 40 && args.tempo.bpm <= 240
+      ? {
+          bpm: Math.round(args.tempo.bpm * 10) / 10,
+          confidence: Math.round(Math.min(1, Math.max(0, args.tempo.confidence)) * 1000) / 1000,
+        }
+      : null;
+  const trustedBpm = tempo && tempo.confidence >= AUTO_PROMOTION.MIN_TEMPO_CONFIDENCE ? tempo.bpm : null;
 
   // Anything that rounds to zero whole milliseconds is dropped, not stretched.
   //
@@ -140,7 +213,7 @@ export function buildDetectionRunPayload(args: {
       startMs,
       endMs,
       progressionRoman: toRomanProgression(sp.loop, detectedKey),
-      loopLengthBars: null, // needs a tempo to know; see the BPM phase
+      loopLengthBars: trustedBpm ? estimateLoopBars(sp.chords, sp.loop.length, trustedBpm) : null,
       confidence,
       chords,
     };
@@ -153,13 +226,17 @@ export function buildDetectionRunPayload(args: {
   if (coveredToMs <= coveredFromMs) return null;
 
   return {
-    trackId,
+    // Only present keys are sent: the server treats a present-but-empty
+    // trackId as malformed rather than as absent.
+    ...(trackId ? { trackId } : {}),
+    ...(trackRef ? { trackRef } : {}),
     analysisVersion: args.analysisVersion ?? DETECTION_ANALYSIS_VERSION,
     key: {
       tonic: detectedKey.tonic,
       mode: detectedKey.mode,
       confidence: Math.round(Math.min(1, Math.max(0, detectedKey.confidence)) * 1000) / 1000,
     },
+    ...(tempo ? { tempo } : {}),
     coveredFromMs,
     coveredToMs,
     idempotencyKey: args.idempotencyKey ?? newIdempotencyKey(),

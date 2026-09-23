@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { useTrackSections } from '@/hooks/api/useTrackSections';
 import { useTrack } from '@/hooks/api/useTracks';
 import { useHarmonicFingerprint } from '@/hooks/api/useHarmonicFingerprint';
+import { useResolvedTrackId } from '@/hooks/api/useResolvedTrackId';
 import { isTestEnv } from '@/lib/env';
-import { isUuid } from './constants';
 import type { SongSection } from '@/types';
 import { estimateTempoFromSections } from '@/lib/harmony/tempoFromAnalysis';
 
@@ -32,7 +32,12 @@ export interface PlayerHarmony {
  * chips/loop button, and the seekbar's section tick marks.
  */
 export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
-  const analysisTrackId = !isTestEnv && isUuid(canonicalTrackId) ? canonicalTrackId : undefined;
+  // A track reached from search carries a provider id (spotify:<id> /
+  // youtube:<id>), not a catalog UUID. If anyone has analysed it before, the
+  // catalog has a row for it - look that up, so the analysis is found instead
+  // of the track looking unknown to every listener but the first.
+  const resolved = useResolvedTrackId(canonicalTrackId);
+  const analysisTrackId = !isTestEnv ? resolved.trackId : undefined;
 
   const sectionsQuery = useTrackSections(analysisTrackId);
   const sections = useMemo(() => {
@@ -134,8 +139,16 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
   // that already have progression_roman skip this wait entirely, so they
   // don't pick up a spurious loading flash for data they don't need.
   const hasTrackProgression = Array.isArray(trackQuery.data?.progression_roman) && trackQuery.data.progression_roman.length > 0;
+  //
+  // resolved.isResolving is part of it for the same reason: while a provider
+  // id is still being looked up, analysisTrackId is undefined and every query
+  // below is disabled, so without it the track would read as "no analysis" for
+  // a moment before its analysis was found.
   const isLoading =
-    sectionsQuery.isLoading || trackQuery.isLoading || (!hasTrackProgression && fingerprintQuery.isLoading);
+    resolved.isResolving ||
+    sectionsQuery.isLoading ||
+    trackQuery.isLoading ||
+    (!hasTrackProgression && fingerprintQuery.isLoading);
 
-  return { sections, harmony, hudSections, isLoading };
+  return { sections, harmony, hudSections, isLoading, resolvedTrackId: analysisTrackId };
 }

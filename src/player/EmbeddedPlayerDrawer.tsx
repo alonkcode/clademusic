@@ -12,6 +12,8 @@ import { useNavigate } from 'react-router-dom';
 import { UniversalPlayerHost } from '@/player/universal/UniversalPlayerHost';
 import { SpotifyWebPlayer } from '@/player/providers/SpotifyWebPlayer';
 import { HarmonicHUD } from '@/components/HarmonicHUD';
+import { AnalyzeTrackPanel } from '@/components/AnalyzeTrackPanel';
+import { shouldOfferAnalysis } from '@/hooks/useAnalyzeTrack';
 import { buildProviderDeepLink } from '@/player/universal/buildEmbedSrc';
 import { isTestEnv } from '@/lib/env';
 import { toast } from '@/hooks/use-toast';
@@ -77,7 +79,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const connectSpotify = useConnectSpotify();
   const { data: isAdmin } = useIsAdmin();
 
-  const { sections, harmony, hudSections, isLoading: isHarmonyLoading } = usePlayerHarmony(canonicalTrackId);
+  const { sections, harmony, hudSections, isLoading: isHarmonyLoading, resolvedTrackId } = usePlayerHarmony(canonicalTrackId);
 
   const safeQueue = Array.isArray(queue) ? queue : [];
   const safeQueueIndex = typeof queueIndex === 'number' ? queueIndex : -1;
@@ -161,6 +163,20 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   // true a moment later, which is what made the whole panel look like it
   // kept disappearing on every switch instead of just refreshing in place.
   const hasHarmonyPanel = harmony.progression.length > 0 || sections.length > 0 || isHarmonyLoading;
+  // A loaded track with no analysis at all (never seen by the catalog, or seen
+  // but never listened through) is offered a one-click analysis instead of an
+  // empty gap. Never under test: the panel needs real audio capture.
+  const offerAnalysis =
+    !isTestEnv &&
+    shouldOfferAnalysis({
+      isIdle,
+      isLoading: isHarmonyLoading,
+      provider,
+      title: resolvedTitle,
+      artist: resolvedArtist,
+      hasProgression: harmony.progression.length > 0,
+      hasSections: sections.length > 0,
+    });
 
   // Where the embed should start when it loads, so handing a track from one
   // provider to another (the Spotify/YouTube quicklinks) resumes where the
@@ -454,6 +470,22 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               </>
             )}
           </div>
+        )}
+
+        {/* No analysis yet: listen once, and it is saved for everyone. Keyed by
+            track so switching songs stops any capture in progress. */}
+        {offerAnalysis && (
+          <AnalyzeTrackPanel
+            key={canonicalTrackId ?? trackId}
+            provider={provider}
+            providerTrackId={trackId}
+            canonicalTrackId={canonicalTrackId}
+            title={resolvedTitle}
+            artist={resolvedArtist}
+            durationMs={durationMs}
+            resolvedTrackId={resolvedTrackId}
+            onSignIn={() => navigate('/auth')}
+          />
         )}
 
         {/* Video panel: for a video-capable provider, a small fixed-size

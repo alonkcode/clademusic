@@ -15,6 +15,7 @@ import {
 } from '@/lib/harmony/chordTimeline';
 import { estimateKey, type KeyEstimate } from '@/lib/harmony/keyEstimation';
 import { PlaybackClock } from '@/lib/harmony/playbackClock';
+import { OnsetBuffer, estimateTempo, spectralFlux, type TempoReading } from '@/lib/harmony/tempoDetection';
 import { usePlayer } from '@/player/PlayerContext';
 
 export type LiveDetectionStatus = 'idle' | 'requesting' | 'capturing' | 'unsupported' | 'error';
@@ -38,6 +39,10 @@ export interface UseLiveChordDetectionResult {
   /** Tonic and mode inferred from the chords heard, which is what lets the
    *  absolute triads the detector produces be written as Roman numerals. */
   detectedKey: KeyEstimate | null;
+  /** Steady tempo measured from the audio, or null until there are enough
+   *  clear beats to say. Refreshed every few seconds and kept across a stop,
+   *  like the rest of the analysis. */
+  tempo: TempoReading | null;
   /** Whether the timestamps in this analysis line up with the track itself.
    *  False when the player never reported a moving position during capture -
    *  the guest Spotify embed reports none at all - in which case times are
@@ -57,6 +62,19 @@ const SECTION_RECOMPUTE_MS = 3000;
 /** Ceiling on the self-similarity matrix's side length - see recomputeAnalysis.
  *  300 keeps it under 100k cells (a few hundred KB) however long the capture. */
 const MAX_SECTION_BUCKETS = 300;
+
+/**
+ * Beats need a much finer time base than chords do. At the 120ms chord tick a
+ * beat at 120 BPM is only about four samples wide, so the tempo would be read
+ * off a grid too coarse to tell 118 from 124. Onsets are measured on their own
+ * small, fast analyser (23ms frames, polled every 20ms) that takes no part in
+ * chord detection - a long window is what makes chords stable and exactly
+ * what smears a drum hit.
+ */
+const ONSET_FFT_SIZE = 1024;
+const ONSET_TICK_MS = 20;
+/** Cymbal wash above this smears across frames and adds nothing to a beat. */
+const ONSET_MAX_HZ = 8000;
 
 /**
  * Detects the chord in whatever audio the browser lets the user share -
@@ -83,6 +101,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   const [chordSpans, setChordSpans] = useState<ChordSpan[]>([]);
   const [sectionProgressions, setSectionProgressions] = useState<SectionProgression[]>([]);
   const [detectedKey, setDetectedKey] = useState<KeyEstimate | null>(null);
+  const [tempo, setTempo] = useState<TempoReading | null>(null);
   const [timingAligned, setTimingAligned] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -91,6 +110,8 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   const smootherRef = useRef(new ChordSmoother());
   const timelineRef = useRef(new ChordTimeline());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onsetIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onsetBufferRef = useRef(new OnsetBuffer());
   const sectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chromaHistoryRef = useRef<ChromaFrame[]>([]);
   const captureStartedAtRef = useRef<number>(0);
@@ -152,16 +173,23 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
     // is a property of the song, and the more of it that has been heard the
     // better the estimate gets.
     setDetectedKey(estimateKey(spans));
+    // Keep the last good reading through a quiet stretch rather than blanking
+    // it: a null here means "not enough clear beats right now", not "the
+    // tempo went away". reset() is what clears it.
+    const measured = estimateTempo(onsetBufferRef.current.samples());
+    setTempo((previous) => measured ?? previous);
   }, []);
 
   const reset = useCallback(() => {
     timelineRef.current.reset();
     chromaHistoryRef.current = [];
+    onsetBufferRef.current.reset();
     setChord(null);
     setDetectedSections([]);
     setChordSpans([]);
     setSectionProgressions([]);
     setDetectedKey(null);
+    setTempo(null);
   }, []);
 
   /**
@@ -183,6 +211,10 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
       clearInterval(sectionIntervalRef.current);
       sectionIntervalRef.current = null;
     }
+    if (onsetIntervalRef.current) {
+      clearInterval(onsetIntervalRef.current);
+      onsetIntervalRef.current = null;
+    }
     if (chromaHistoryRef.current.length > 0) recomputeAnalysis();
 
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -193,8 +225,9 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
     smootherRef.current.reset();
     // Raw chroma frames are only ever an input to the recompute above, and
     // there are thousands of them by the end of a song - the derived result
-    // is what's worth keeping.
+    // is what's worth keeping. Same for the onset samples.
     chromaHistoryRef.current = [];
+    onsetBufferRef.current.reset();
     setChord(null);
     setStatus('idle');
   }, [recomputeAnalysis]);
@@ -242,6 +275,18 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
       analyser.smoothingTimeConstant = 0.4; // built-in temporal smoothing on top of ChordSmoother
       source.connect(analyser);
       analyserRef.current = analyser;
+
+      // Second, independent analyser for onsets. No smoothing: smoothing is
+      // what makes chords steady and would blur a drum hit into its neighbours.
+      const onsetAnalyser = ctx.createAnalyser();
+      onsetAnalyser.fftSize = ONSET_FFT_SIZE;
+      onsetAnalyser.smoothingTimeConstant = 0;
+      source.connect(onsetAnalyser);
+      const onsetBinHz = ctx.sampleRate / ONSET_FFT_SIZE;
+      const onsetMaxBin = Math.min(onsetAnalyser.frequencyBinCount, Math.floor(ONSET_MAX_HZ / onsetBinHz));
+      let previousOnsetDb = new Float32Array(onsetAnalyser.frequencyBinCount);
+      let currentOnsetDb = new Float32Array(onsetAnalyser.frequencyBinCount);
+      let havePreviousOnsetFrame = false;
 
       const magnitudes = new Float32Array(analyser.frequencyBinCount);
       // Linear magnitudes: dB output would need a costly conversion per bin
@@ -298,6 +343,24 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
         timelineRef.current.push(smoothed, timeSec);
       }, TICK_MS);
 
+      onsetIntervalRef.current = setInterval(() => {
+        onsetAnalyser.getFloatFrequencyData(currentOnsetDb);
+        if (havePreviousOnsetFrame) {
+          // Paused partway through a capture of this player: nothing is
+          // sounding, and a stretch of silence is not evidence about the
+          // beat - same rule as the chord tick above.
+          const paused = !positionRef.current.isPlaying && clockRef.current.aligned;
+          if (!paused) {
+            // Stamped from the audio clock, not performance.now(): timers
+            // drift and get throttled, and the estimator cannot tell a jittery
+            // timestamp from a tempo change.
+            onsetBufferRef.current.push(ctx.currentTime, spectralFlux(previousOnsetDb, currentOnsetDb, 1, onsetMaxBin));
+          }
+        }
+        [previousOnsetDb, currentOnsetDb] = [currentOnsetDb, previousOnsetDb];
+        havePreviousOnsetFrame = true;
+      }, ONSET_TICK_MS);
+
       sectionIntervalRef.current = setInterval(recomputeAnalysis, SECTION_RECOMPUTE_MS);
 
       setStatus('capturing');
@@ -328,6 +391,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
     chordSpans,
     sectionProgressions,
     detectedKey,
+    tempo,
     timingAligned,
     start,
     stop,
