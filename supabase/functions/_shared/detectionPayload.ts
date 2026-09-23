@@ -97,6 +97,15 @@ const MIN_TRACK_DURATION_MS = 1000;
 export const MIN_TEMPO_BPM = 40;
 export const MAX_TEMPO_BPM = 240;
 
+/** Any C0 control character (which includes NUL) or DEL. */
+function hasControlChars(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
 function boundedText(value: unknown, field: string, required: boolean): string | null {
   if (value === undefined || value === null || value === '') {
     if (required) throw new BadRequest(`${field} is required`);
@@ -104,7 +113,7 @@ function boundedText(value: unknown, field: string, required: boolean): string |
   }
   // Postgres text cannot hold a NUL byte, and control characters have no
   // business in a title.
-  if (typeof value !== 'string' || /[\u0000-\u001f\u007f]/.test(value)) {
+  if (typeof value !== 'string' || hasControlChars(value)) {
     throw new BadRequest(`${field} must be plain text`);
   }
   const trimmed = value.trim();
