@@ -11,7 +11,6 @@ import {
   fetchTracks,
   getTrackById,
   searchTracks,
-  getFeedTracks,
   getDataSourceStatus,
   TrackQuery,
 } from '@/services/trackService';
@@ -78,17 +77,6 @@ export function useTrackSearch(
     queryFn: () => searchTracks(searchTerm, options),
     enabled: searchTerm.length >= 2,
     staleTime: 2 * 60 * 1000, // 2 minutes
-  });
-}
-
-/**
- * Hook for feed tracks (main page)
- */
-export function useFeedTracks(limit = 20) {
-  return useQuery({
-    queryKey: [QUERY_KEYS.FEED, limit],
-    queryFn: () => getFeedTracks(limit),
-    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
 

@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { BottomNav } from '@/components/BottomNav';
 import { ProfileCircle } from './ProfileCircle';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 
 interface PageLayoutProps {
   /** Page title shown in header */
@@ -71,6 +72,7 @@ export function PageLayout({
 
               <div className="flex items-center gap-3 justify-self-end">
                 {headerActions}
+                <NotificationBell />
                 <ProfileCircle />
               </div>
             </div>

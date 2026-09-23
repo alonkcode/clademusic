@@ -8,7 +8,7 @@ const ScrollingComments = lazy(() =>
 import { BottomNav } from '@/components/BottomNav';
 import { GuestBanner } from '@/components/GuestBanner';
 import { ResponsiveContainer, DesktopColumns } from '@/components/layout/ResponsiveLayout';
-import { useFeedTracks } from '@/hooks/api/useTracks';
+import { usePersonalizedFeed } from '@/hooks/api/useFeed';
 import { useAuth } from '@/hooks/useAuth';
 import { useLastFmRecentTracks } from '@/hooks/api/useLastFm';
 import { useSpotifyRecommendations } from '@/hooks/api/useSpotifyUser';
@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { usePlayer } from '@/player/PlayerContext';
 import { ProfileCircle } from '@/components/shared';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 
 export default function FeedPage() {
   const { user, loading: authLoading, guestMode, enterGuestMode } = useAuth();
@@ -26,7 +27,7 @@ export default function FeedPage() {
   const navigate = useNavigate();
   
   // Fetch from multiple sources
-  const { data: trackResult, isLoading: tracksLoading, error: tracksError } = useFeedTracks(50);
+  const { data: trackResult, isLoading: tracksLoading, error: tracksError } = usePersonalizedFeed(50);
   const { data: recommendations = [], isLoading: recommendationsLoading } = useSpotifyRecommendations([], [], 50);
   // What this listener has already played, so the feed can push those toward
   // the back instead of opening on the exact same tracks every visit.
@@ -77,7 +78,7 @@ export default function FeedPage() {
     return out;
   }, [lastfmRecentRaw]);
 
-  // Merge in priority order: scrobbles (newest), base feed, personalized recs; dedupe by provider id or title+artist
+  // Merge: top of the ranked feed, scrobbles (newest), rest of the feed, Spotify recs; dedupe by provider id or title+artist
   const tracks: Track[] = useMemo(() => {
     const nameArtistKey = (t: Track) => {
       const title = (t.title || (t as any).name || '').toLowerCase().trim();
@@ -105,8 +106,18 @@ export default function FeedPage() {
       return { ...t, ...match, cover_url: match.cover_url || t.cover_url, album: match.album || t.album };
     });
 
+    // The ranked catalog leads (its first picks are the ones chosen for this
+    // listener), then their scrobbles, then the rest of the ranked feed. With
+    // the scrobbles first - up to 200 of them - a Last.fm user would never
+    // reach the personalization below.
+    const LEADING_PICKS = 10;
     const seen = new Set<string>();
-    const all = [...hydratedLastfm, ...baseFeed, ...personalizedRecs];
+    const all = [
+      ...baseFeed.slice(0, LEADING_PICKS),
+      ...hydratedLastfm,
+      ...baseFeed.slice(LEADING_PICKS),
+      ...personalizedRecs,
+    ];
     const deduped = all.filter((t) => {
       const key = (t.spotify_id || t.youtube_id || nameArtistKey(t)) || t.id;
       if (!key) return false;
@@ -374,6 +385,7 @@ export default function FeedPage() {
                   <span className="hidden sm:inline">Sign in</span>
                 </Button>
               )}
+              <NotificationBell />
               <ProfileCircle />
             </div>
           </div>

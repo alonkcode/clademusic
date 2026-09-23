@@ -1,7 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Bookmark, X, Sparkles, Waves, Play, Pause, Music, Youtube, MessageSquare } from 'lucide-react';
 import { HarmonyCard } from './HarmonyCard';
-import { CommentsSheet } from './CommentsSheet';
 import { TrackComments } from './TrackComments';
 import { NearbyListenersSheet } from './NearbyListenersSheet';
 import { ShareSheet } from './ShareSheet';
@@ -20,7 +19,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useInteractions } from '@/hooks/useInteractions';
 import { SectionSelectionProvider } from '@/hooks/useSectionSelection';
 import { usePlayer } from '@/player/PlayerContext';
-import { useTrackComments } from '@/hooks/api/useComments';
+import { useCommentCount, useCommentCountRealtime } from '@/hooks/api/useComments';
 import { useTrackCoverArt } from '@/hooks/useTrackCoverArt';
 
 interface TrackCardProps {
@@ -56,8 +55,10 @@ export function TrackCard({
   // both existed, whichever card happened to be the one currently playing
   // showed the exact same chord progression twice on screen at once.
   const isDockedTrack = dockedTrackId === track.id;
-  const { data: comments } = useTrackComments(track.id);
-  const commentCount = comments?.length || 0;
+  // Just the number - not every comment (and each author's profile) for a card
+  // that only shows a count until the thread is expanded.
+  const { data: commentCount = 0 } = useCommentCount(track.id);
+  useCommentCountRealtime(track.id);
   const coverUrl = useTrackCoverArt(track);
 
   // Convert SongSection to TrackSection format

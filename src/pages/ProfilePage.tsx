@@ -313,13 +313,10 @@ export default function ProfilePage() {
           className="p-4 glass rounded-2xl"
         >
           {(() => {
-            // Real public.credits balance and the signed-in plan's allowance
-            // (both react-query hooks, cached) - this used to be a hardcoded
-            // "25/100" that never reflected an account's actual balance.
+            // Real public.credits balance. Shown on its own: the balance isn't
+            // capped by the plan allowance, so "balance/allowance" misleads.
             const balance = creditBalance ?? 0;
-            const allowance = planInfo?.allowance ?? PLAN_COPY.free.credits;
             const planName = planInfo ? PLAN_COPY[planInfo.plan].name : PLAN_COPY.free.name;
-            const percent = allowance > 0 ? Math.min(100, (balance / allowance) * 100) : 0;
             return (
               <>
                 <div className="flex items-center justify-between mb-3">
@@ -329,17 +326,7 @@ export default function ProfilePage() {
                   </div>
                   <span className="text-sm text-muted-foreground">{planName} tier</span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-                  <span className="text-sm font-medium">
-                    {balance}/{allowance}
-                  </span>
-                </div>
+                <div className="text-2xl font-semibold">{balance.toLocaleString('en-US')}</div>
                 <p className="text-xs text-muted-foreground mt-2">
                   Spent on live chord &amp; section detection ("Listen"). The balance doesn't reset on its own - upgrade or top up to get more.
                 </p>

@@ -73,6 +73,7 @@ vi.mock('@/hooks/api/useCredits', () => ({
   usePlan: () => ({ data: { plan: 'free', allowance: 2500 } }),
 }));
 vi.mock('@/hooks/api/useTasteDNA', () => ({ useTasteDNA: () => ({ data: null, isLoading: false }) }));
+vi.mock('@/hooks/api/useNotifications', () => ({ useUnreadNotificationCount: () => ({ data: 0 }) }));
 
 vi.mock('@/components/ThemeEditor', () => ({ ThemeEditor: () => null }));
 vi.mock('@/components/ChordBadge', () => ({ ChordBadge: () => null }));

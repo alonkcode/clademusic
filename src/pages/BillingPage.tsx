@@ -161,7 +161,7 @@ export default function BillingPage() {
               <CardDescription className="text-gray-300">Usage resets each renewal</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-gray-200">
-              <div>Balance: {credits?.balance ?? 0}</div>
+              <div>Balance: {(credits?.balance ?? 0).toLocaleString('en-US')}</div>
               <div>Monthly allowance: {PLAN_COPY[currentPlan].credits}</div>
             </CardContent>
           </Card>

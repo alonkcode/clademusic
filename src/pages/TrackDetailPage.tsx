@@ -18,6 +18,7 @@ import { BottomNav } from '@/components/BottomNav';
 import { ChordBadge } from '@/components/ChordBadge';
 import { TrackLineageView } from '@/components/TrackLineageView';
 import { TrackComments } from '@/components/TrackComments';
+import { LiveChat } from '@/components/LiveChat';
 import { TikTokStyleButtons } from '@/components/TikTokStyleButtons';
 import { QuickStreamButtons } from '@/components/QuickStreamButtons';
 import { ScrollingComments } from '@/components/ScrollingComments';
@@ -616,9 +617,20 @@ export default function TrackDetailPage() {
 
           {/* Comments Tab */}
           <TabsContent value="comments" className="space-y-3">
-            <Card className="p-6">
-              <TrackComments trackId={trackId || ''} />
-            </Card>
+            <Tabs defaultValue="discussion" className="w-full">
+              <TabsList className="w-full grid grid-cols-2">
+                <TabsTrigger value="discussion">Discussion</TabsTrigger>
+                <TabsTrigger value="chat">Live chat</TabsTrigger>
+              </TabsList>
+              <TabsContent value="discussion" className="mt-3">
+                <Card className="p-6">
+                  <TrackComments trackId={trackId || ''} />
+                </Card>
+              </TabsContent>
+              <TabsContent value="chat" className="mt-3">
+                {trackId && <LiveChat roomType="track" trackId={trackId} />}
+              </TabsContent>
+            </Tabs>
           </TabsContent>
         </Tabs>
       </main>

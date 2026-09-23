@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { fetchFollowingIds } from '@/services/followService';
 
 interface FollowRecord {
   id: string;
@@ -215,15 +216,8 @@ export function useFollowingFeed(limit = 50) {
       if (!user) return [];
 
       // First get the list of users we're following
-      const { data: follows, error: followsError } = await supabase
-        .from('user_follows')
-        .select('following_id')
-        .eq('follower_id', user.id);
-
-      if (followsError) throw followsError;
-      if (!follows || follows.length === 0) return [];
-
-      const followingIds = follows.map((f) => f.following_id);
+      const followingIds = await fetchFollowingIds(user.id);
+      if (followingIds.length === 0) return [];
 
       // Get play history from followed users
       const { data: history, error: historyError } = await supabase
@@ -255,9 +249,11 @@ export function useFollowingFeed(limit = 50) {
 
       if (tracksError) throw tracksError;
 
-      // Fetch profiles
+      // Fetch profiles - through profiles_public: profiles' own RLS only lets
+      // a user read their own row, so every followed user came back with no
+      // name at all.
       const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
+        .from('profiles_public')
         .select('id, display_name, avatar_url')
         .in('id', userIds);
 

@@ -2,8 +2,47 @@
  * Feed-related hooks for user interactions and stats
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { computeTasteDNA } from '@/api/tasteDNA';
+import { useAuth } from '@/hooks/useAuth';
+import { QUERY_KEYS } from '@/lib/constants';
+import { getPersonalizedFeed } from '@/services/feedService';
+import { getFeedTracks, type TrackResult } from '@/services/trackService';
+
+/**
+ * The feed's tracks, ranked for the signed-in user (their taste, what people
+ * they follow are playing, what they keep skipping). Guests, and users with
+ * nothing to personalize from yet, get the plain daily catalog pick.
+ *
+ * Deliberately not polling: re-ranking while someone is swiping would move
+ * cards out from under them.
+ */
+export function usePersonalizedFeed(limit = 50) {
+  const { user, loading } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useQuery({
+    queryKey: [QUERY_KEYS.FEED, 'personalized', user?.id ?? null, limit],
+    queryFn: async (): Promise<TrackResult> => {
+      if (!user) return getFeedTracks(limit);
+
+      // Shares useTasteDNA's cache entry, so opening the feed after the
+      // profile page (or vice versa) doesn't recompute the profile.
+      const tasteDNA = await queryClient
+        .ensureQueryData({
+          queryKey: ['taste-dna', user.id],
+          queryFn: () => computeTasteDNA(user.id),
+          staleTime: 5 * 60 * 1000,
+        })
+        .catch(() => null);
+
+      return getPersonalizedFeed({ userId: user.id, limit, tasteDNA });
+    },
+    enabled: !loading,
+    staleTime: 5 * 60 * 1000,
+  });
+}
 
 interface UserInteractionStats {
   likes: number;

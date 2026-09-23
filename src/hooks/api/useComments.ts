@@ -1,111 +1,179 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { applyLikeToggle, normalizeComment, type TrackComment } from '@/lib/trackComments';
 
-export interface Comment {
-  id: string;
-  track_id: string;
-  user_id: string;
-  content: string;
-  parent_id: string | null;
-  created_at: string;
-  updated_at: string;
-  // Joined from profiles
-  user_display_name?: string;
-  user_avatar_url?: string;
+// Newest comments, not oldest: a track with more comments than this would
+// otherwise never show anything recent.
+const MAX_COMMENTS = 200;
+
+// Keyed ['track-comments', trackId, userId] (the user matters because each
+// comment carries whether *they* liked it); invalidating the ['track-comments',
+// trackId] prefix refreshes every viewer of the thread.
+const commentsKey = (trackId: string, userId: string | undefined) =>
+  ['track-comments', trackId, userId ?? null] as const;
+
+function invalidateTrackComments(queryClient: QueryClient, trackId: string) {
+  queryClient.invalidateQueries({ queryKey: ['track-comments', trackId] });
+  queryClient.invalidateQueries({ queryKey: ['comment-count', trackId] });
 }
 
+async function fetchLikedIds(userId: string | undefined, commentIds: string[]): Promise<Set<string>> {
+  const liked = new Set<string>();
+  if (!userId || commentIds.length === 0) return liked;
+
+  const { data, error } = await supabase
+    .from('track_comment_likes')
+    .select('comment_id')
+    .eq('user_id', userId)
+    .in('comment_id', commentIds);
+  // Heart state decorates the thread; failing to load it shouldn't blank it.
+  if (error) {
+    console.warn('[Comments] could not load your likes:', error.message ?? error);
+    return liked;
+  }
+
+  for (const row of data ?? []) liked.add(row.comment_id);
+  return liked;
+}
+
+/** A track's comments (top-level and replies together), oldest first. */
 export function useTrackComments(trackId: string) {
+  const { user } = useAuth();
+
   return useQuery({
-    queryKey: ['track-comments', trackId],
-    queryFn: async () => {
-      try {
-        const { data, error } = await supabase
-          .from('track_comments')
-          .select('*, profiles_public(display_name, avatar_url)')
-          .eq('track_id', trackId)
-          .order('created_at', { ascending: true });
+    queryKey: commentsKey(trackId, user?.id),
+    queryFn: async (): Promise<TrackComment[]> => {
+      // Authors come through profiles_public - profiles' own RLS only lets a
+      // user read their own row, which made everyone else "Anonymous".
+      const { data, error } = await supabase
+        .from('track_comments')
+        .select('*, profiles_public(display_name, avatar_url)')
+        .eq('track_id', trackId)
+        .order('created_at', { ascending: false })
+        .limit(MAX_COMMENTS);
 
-        if (error) {
-          console.warn('[Comments] track_comments fetch skipped due to schema error', error);
-          return [];
-        }
-
-        return (data || []).map((comment: any) => ({
-          ...comment,
-          user_display_name: comment.profiles_public?.display_name || 'Anonymous',
-          user_avatar_url: comment.profiles_public?.avatar_url || undefined,
-        })) as Comment[];
-      } catch (error) {
-        console.error('Failed to load track comments:', error);
+      if (error) {
+        console.warn('[Comments] track_comments fetch skipped due to schema error', error);
         return [];
       }
+
+      const rows = [...(data ?? [])].reverse();
+      const liked = await fetchLikedIds(user?.id, rows.map((r: { id: string }) => r.id));
+      return rows.map((row: unknown) => normalizeComment(row, liked));
     },
     enabled: !!trackId,
   });
 }
 
-export function useAddComment() {
-  const queryClient = useQueryClient();
+export function usePostTrackComment(trackId: string) {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ 
-      trackId, 
-      content, 
-      parentId 
-    }: { 
-      trackId: string; 
-      content: string; 
-      parentId?: string;
-    }) => {
-      try {
-        if (!user) throw new Error('Must be logged in to comment');
+    mutationFn: async ({ comment, replyTo }: { comment: string; replyTo?: string | null }) => {
+      if (!user) throw new Error('Must be logged in to comment');
 
-        const { data, error } = await supabase
-          .from('track_comments')
-          .insert({
-            track_id: trackId,
-            user_id: user.id,
-            content,
-            parent_id: parentId || null,
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-        return data;
-      } catch (error) {
-        console.error('Failed to add comment:', error);
-        return null;
-      }
+      const { error } = await supabase.from('track_comments').insert({
+        track_id: trackId,
+        user_id: user.id,
+        comment: comment.trim(),
+        reply_to: replyTo ?? null,
+      });
+      if (error) throw error;
     },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['track-comments', variables.trackId] });
-    },
+    onSuccess: () => invalidateTrackComments(queryClient, trackId),
   });
 }
 
-export function useDeleteComment() {
+export function useEditTrackComment(trackId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ commentId, trackId }: { commentId: string; trackId: string }) => {
-      try {
-        const { error } = await supabase
-          .from('track_comments')
-          .delete()
-          .eq('id', commentId);
+    mutationFn: async ({ commentId, comment }: { commentId: string; comment: string }) => {
+      const { error } = await supabase
+        .from('track_comments')
+        .update({ comment: comment.trim(), edited_at: new Date().toISOString() })
+        .eq('id', commentId);
+      if (error) throw error;
+    },
+    onSuccess: () => invalidateTrackComments(queryClient, trackId),
+  });
+}
 
+export function useDeleteTrackComment(trackId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (commentId: string) => {
+      const { error } = await supabase.from('track_comments').delete().eq('id', commentId);
+      if (error) throw error;
+    },
+    onSuccess: () => invalidateTrackComments(queryClient, trackId),
+  });
+}
+
+/** Optimistic: the heart and count flip at once and roll back if the write fails. */
+export function useToggleCommentLike(trackId: string) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const key = commentsKey(trackId, user?.id);
+
+  return useMutation({
+    mutationFn: async ({ commentId, liked }: { commentId: string; liked: boolean }) => {
+      if (!user) throw new Error('Must be logged in to like');
+
+      if (liked) {
+        const { error } = await supabase
+          .from('track_comment_likes')
+          .delete()
+          .eq('comment_id', commentId)
+          .eq('user_id', user.id);
         if (error) throw error;
-      } catch (error) {
-        console.error('Failed to delete comment:', error);
+      } else {
+        const { error } = await supabase
+          .from('track_comment_likes')
+          .insert({ comment_id: commentId, user_id: user.id });
+        // 23505: already liked (a double tap) - the end state is what was asked for.
+        if (error && (error as { code?: string }).code !== '23505') throw error;
       }
     },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['track-comments', variables.trackId] });
+    onMutate: async ({ commentId, liked }) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<TrackComment[]>(key);
+      queryClient.setQueryData<TrackComment[]>(key, (old) =>
+        old ? applyLikeToggle(old, commentId, liked) : old
+      );
+      return { previous };
     },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['track-comments', trackId] }),
   });
+}
+
+/** Refreshes the thread and the count whenever anyone posts, edits or deletes. */
+export function useTrackCommentsRealtime(trackId: string) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!trackId) return;
+
+    const channel = supabase
+      .channel(`track-comments:${trackId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'track_comments', filter: `track_id=eq.${trackId}` },
+        () => invalidateTrackComments(queryClient, trackId)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [trackId, queryClient]);
 }
 
 export function useCommentCount(trackId: string) {
@@ -127,4 +195,28 @@ export function useCommentCount(trackId: string) {
     },
     enabled: !!trackId,
   });
+}
+
+/** Keeps just the count current, for cards that don't show the thread itself. */
+export function useCommentCountRealtime(trackId: string) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!trackId) return;
+
+    const channel = supabase
+      .channel(`comment-count:${trackId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'track_comments', filter: `track_id=eq.${trackId}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['comment-count', trackId] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [trackId, queryClient]);
 }

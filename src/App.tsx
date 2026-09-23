@@ -8,6 +8,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { PlayerProvider, usePlayer } from "@/player/PlayerContext";
 import { EmbeddedPlayerDrawer } from "@/player/EmbeddedPlayerDrawer";
 import { ErrorBoundary, GlobalErrorHandlers, LoadingSpinner } from "@/components/shared";
+import { NotificationsRealtimeBridge } from "@/components/notifications/NotificationsRealtimeBridge";
 import { AdminRoute } from "@/components/AdminRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
@@ -26,6 +27,8 @@ const ComparePage = lazy(() => import("./pages/ComparePage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const ConnectionsPage = lazy(() => import("./pages/ConnectionsPage"));
 const FollowingPage = lazy(() => import("./pages/FollowingPage"));
+const ChatPage = lazy(() => import("./pages/ChatPage"));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
 const SpotifyCallbackPage = lazy(() => import("./pages/SpotifyCallbackPage"));
 const PricingPage = lazy(() => import("./pages/PricingPage"));
 const BillingPage = lazy(() => import("./pages/BillingPage"));
@@ -138,6 +141,7 @@ const App = () => (
               >
                 <GlobalErrorHandlers />
                 <AuthLinkErrorRedirect />
+                <NotificationsRealtimeBridge />
                 <PlayerBottomPadding>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageLoader />}>
@@ -162,6 +166,8 @@ const App = () => (
                       <Route path="/track/:trackId" element={<TrackDetailPage />} />
                       <Route path="/playlists" element={<PlaylistsPage />} />
                       <Route path="/playlist/:playlistId" element={<PlaylistDetailPage />} />
+                      <Route path="/chat" element={<ChatPage />} />
+                      <Route path="/notifications" element={<NotificationsPage />} />
                       <Route path="/forum" element={<ForumHomePage />} />
                       <Route path="/forum/:forumName" element={<ForumHomePage />} />
                       <Route path="/forum/post/:postId" element={<ForumHomePage />} />

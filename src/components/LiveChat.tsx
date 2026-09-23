@@ -8,6 +8,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { toast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { useLocalBotChat } from '@/chat/useLocalBotChat';
 
@@ -40,6 +41,35 @@ interface LiveChatProps {
 // If the backend environment doesn't provision chat_messages/chat_rooms, avoid repeated 404 spam
 let chatSchemaMissing = false;
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function getOrCreateTrackRoom(trackId: string): Promise<string | null> {
+  const find = async () => {
+    const { data } = await supabase
+      .from('chat_rooms')
+      .select('id')
+      .eq('type', 'track')
+      .eq('track_id', trackId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    return data?.id ?? null;
+  };
+
+  const existing = await find();
+  if (existing) return existing;
+
+  const { data: created, error } = await supabase
+    .from('chat_rooms')
+    .insert({ name: 'Track Chat', type: 'track', track_id: trackId })
+    .select('id')
+    .single();
+  if (!error && created) return created.id;
+  // Another client created the same track room first (unique index): use theirs.
+  if ((error as any)?.code === '23505') return find();
+  throw error;
+}
+
 export function LiveChat({ 
   roomId = 'global', 
   roomType = 'global',
@@ -54,6 +84,10 @@ export function LiveChat({
   const [isLoading, setIsLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([]);
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  // chat_messages.room_id is a uuid, so the 'global' room type is resolved to
+  // its real id before any query, subscription or insert uses it.
+  const [resolvedRoomId, setResolvedRoomId] = useState<string | null>(null);
+  const selfProfileRef = useRef<ChatMessage['user'] | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -68,76 +102,67 @@ export function LiveChat({
     localDisplayName: (user as any)?.user_metadata?.full_name || (user as any)?.email || 'You',
   });
 
-  // Get or create room
+  // Resolve the room, then load its history
   useEffect(() => {
     if (demoEnabled) return;
     if (disabled) return;
     if (!user) return;
 
+    let cancelled = false;
+    setResolvedRoomId(null);
+    setMessages([]);
+    setIsLoading(true);
+
     const initRoom = async () => {
       try {
-        // For global room, use default
-        if (roomType === 'global') {
-          loadMessages('global');
-          return;
-        }
+        let id: string | null = null;
 
-        // For track-specific rooms, create if doesn't exist
-        if (roomType === 'track' && trackId) {
-          const { data: existingRoom } = await supabase
+        if (UUID_PATTERN.test(roomId)) {
+          id = roomId;
+        } else if (roomType === 'global') {
+          const { data: room } = await supabase
             .from('chat_rooms')
             .select('id')
-            .eq('type', 'track')
-            .eq('track_id', trackId)
-            .single();
-
-          if (existingRoom) {
-            loadMessages(existingRoom.id);
-          } else {
-            const { data: newRoom } = await supabase
-              .from('chat_rooms')
-              .insert({
-                name: `Track Chat`,
-                type: 'track',
-                track_id: trackId,
-              })
-              .select('id')
-              .single();
-
-            if (newRoom) {
-              loadMessages(newRoom.id);
-            }
-          }
+            .eq('type', 'global')
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          id = room?.id ?? null;
+        } else if (roomType === 'track' && trackId) {
+          id = await getOrCreateTrackRoom(trackId);
         }
+
+        if (cancelled) return;
+        if (!id) {
+          setIsLoading(false);
+          return;
+        }
+        setResolvedRoomId(id);
+        await loadMessages(id, () => cancelled);
       } catch (error) {
         console.error('Error initializing chat room:', error);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     initRoom();
-  }, [user, roomType, trackId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, roomId, roomType, trackId, disabled, demoEnabled]);
 
-  // Load messages
-  const loadMessages = async (chatRoomId: string) => {
+  // Load the most recent messages, oldest first
+  const loadMessages = async (chatRoomId: string, isCancelled: () => boolean = () => false) => {
     setIsLoading(true);
     try {
       const { data, error } = await supabase
         .from('chat_messages')
-        .select(`
-          id,
-          user_id,
-          message,
-          created_at,
-          reply_to,
-          user:profiles!chat_messages_user_id_fkey (
-            id,
-            display_name,
-            avatar_url
-          )
-        `)
+        .select('id, user_id, message, created_at, reply_to, profiles_public(display_name, avatar_url)')
         .eq('room_id', chatRoomId)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })
         .limit(100);
+
+      if (isCancelled()) return;
 
       if (error) {
         if ((error as any)?.code === 'PGRST205' || (error as any)?.message?.includes("Could not find the table 'public.chat_messages'")) {
@@ -149,12 +174,23 @@ export function LiveChat({
         }
         throw error;
       }
-      setMessages(data || []);
+      setMessages(
+        (data || [])
+          .map((m: any) => ({
+            id: m.id,
+            user_id: m.user_id,
+            message: m.message,
+            created_at: m.created_at,
+            reply_to: m.reply_to,
+            user: m.profiles_public ? { id: m.user_id, ...m.profiles_public } : undefined,
+          }))
+          .reverse()
+      );
       scrollToBottom();
     } catch (error) {
       console.error('Error loading messages:', error);
     } finally {
-      setIsLoading(false);
+      if (!isCancelled()) setIsLoading(false);
     }
   };
 
@@ -163,32 +199,33 @@ export function LiveChat({
     if (demoEnabled) return;
     if (disabled) return;
     if (!user) return;
+    if (!resolvedRoomId) return;
 
     const channel = supabase
-      .channel(`chat:${roomId}`)
+      .channel(`chat:${resolvedRoomId}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'chat_messages',
-          filter: `room_id=eq.${roomId}`,
+          filter: `room_id=eq.${resolvedRoomId}`,
         },
         async (payload) => {
-          // Fetch user info for the new message
+          const incoming = payload.new as ChatMessage;
+          // profiles' RLS only lets a user read their own row, so authors are
+          // looked up through the public view or every other user is anonymous.
           const { data: userData } = await supabase
-            .from('profiles')
+            .from('profiles_public')
             .select('id, display_name, avatar_url')
-            .eq('id', payload.new.user_id)
-            .single();
+            .eq('id', incoming.user_id)
+            .maybeSingle();
 
-          setMessages((prev) => [
-            ...prev,
-            {
-              ...payload.new,
-              user: userData,
-            } as ChatMessage,
-          ]);
+          setMessages((prev) =>
+            prev.some((m) => m.id === incoming.id)
+              ? prev
+              : [...prev, { ...incoming, user: userData ?? undefined }]
+          );
           scrollToBottom();
         }
       )
@@ -197,15 +234,16 @@ export function LiveChat({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, roomId]);
+  }, [user?.id, resolvedRoomId]);
 
-  // Subscribe to user presence
+  // Subscribe to user presence (per room, so the count reflects this room)
   useEffect(() => {
     if (demoEnabled) return;
     if (disabled) return;
     if (!user) return;
+    if (!resolvedRoomId) return;
 
-    const presenceChannel = supabase.channel('online-users', {
+    const presenceChannel = supabase.channel(`presence:${resolvedRoomId}`, {
       config: { presence: { key: user.id } },
     });
 
@@ -228,7 +266,7 @@ export function LiveChat({
     return () => {
       supabase.removeChannel(presenceChannel);
     };
-  }, [user]);
+  }, [user?.id, resolvedRoomId]);
 
   // Update presence on mount/unmount
   useEffect(() => {
@@ -272,23 +310,49 @@ export function LiveChat({
       return;
     }
 
-    if (!user) return;
+    if (!user || !resolvedRoomId) return;
 
     try {
-      const { error } = await supabase.from('chat_messages').insert({
-        room_id: roomId,
-        user_id: user.id,
-        message: newMessage.trim(),
-        reply_to: replyingTo?.id || null,
-      });
+      const { data: inserted, error } = await supabase
+        .from('chat_messages')
+        .insert({
+          room_id: resolvedRoomId,
+          user_id: user.id,
+          message: newMessage.trim(),
+          reply_to: replyingTo?.id || null,
+        })
+        .select('id, user_id, message, created_at, reply_to')
+        .single();
 
       if (error) throw error;
+
+      // The realtime subscription echoes this row back too, but only where the
+      // table is published to realtime. Show it now regardless; the echo is
+      // dropped as a duplicate by id.
+      if (inserted) {
+        if (!selfProfileRef.current) {
+          const { data: me } = await supabase
+            .from('profiles_public')
+            .select('id, display_name, avatar_url')
+            .eq('id', user.id)
+            .maybeSingle();
+          selfProfileRef.current = me ?? { id: user.id };
+        }
+        const self = selfProfileRef.current;
+        setMessages((prev) =>
+          prev.some((m) => m.id === inserted.id)
+            ? prev
+            : [...prev, { ...(inserted as ChatMessage), user: self }]
+        );
+        scrollToBottom();
+      }
 
       setNewMessage('');
       setReplyingTo(null);
       inputRef.current?.focus();
     } catch (error) {
       console.error('Error sending message:', error);
+      toast({ title: "Message not sent", description: 'Please try again.', variant: 'destructive' });
     }
   };
 
@@ -376,7 +440,7 @@ export function LiveChat({
 
                     <div
                       className={`inline-block px-3 py-2 rounded-lg max-w-[80%] break-words ${
-                        msg.user_id === user.id
+                        activeUserId && msg.user_id === activeUserId
                           ? 'bg-primary text-primary-foreground'
                           : 'bg-muted'
                       }`}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, Search, User, ListMusic, MessageSquare, Menu } from 'lucide-react';
+import { Bell, Home, Search, User, Users, ListMusic, MessageSquare, MessagesSquare, Menu } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -12,7 +12,10 @@ import { CladeMark } from '@/components/CladeMark';
 // landing page (or per-track entry points, e.g. from TrackCard) for it.
 const navItems = [
   { to: '/feed', icon: Home, label: 'Feed' },
+  { to: '/following', icon: Users, label: 'Following' },
   { to: '/forum', icon: MessageSquare, label: 'Forums' },
+  { to: '/chat', icon: MessagesSquare, label: 'Chat' },
+  { to: '/notifications', icon: Bell, label: 'Activity' },
   { to: '/search', icon: Search, label: 'Search' },
   { to: '/playlists', icon: ListMusic, label: 'Lists' },
   { to: '/profile', icon: User, label: 'Profile' },
