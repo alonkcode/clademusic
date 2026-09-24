@@ -244,10 +244,10 @@ build runs, not at runtime.
 
 | Workflow | Trigger | Does |
 |----------|---------|------|
-| `ci.yml` | push to `main`/`develop`, PRs to `main` | lint, typecheck, Playwright + Vitest, build artifact |
+| `ci.yml` | push to `develop`, PRs to `main` | lint, typecheck, Playwright + Vitest, build artifact |
 | `pr.yml` | PRs | path-filtered quality checks for `src/` and `supabase/` changes |
-| `deploy.yml` | push to `main`, PRs, manual | full test suite, then production deploy |
-| `qa-hourly.yml` | hourly cron, manual | scheduled smoke/sanity/performance runs |
+| `deploy.yml` | push to `main`, PRs, manual | full test suite, then production deploy (this is the push-to-`main` check) |
+| `qa-hourly.yml` | every 6 hours, manual | scheduled smoke/sanity/performance runs |
 
 ## 📚 Documentation
 

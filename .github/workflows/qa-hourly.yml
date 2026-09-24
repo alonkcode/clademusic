@@ -7,8 +7,14 @@
 name: QA Hourly Orchestrated
 
 on:
+  # Every 6 hours, not hourly (the file and workflow names predate this). The
+  # sanity suite tests whatever is on main, which only changes when someone
+  # pushes, and every push already runs the full suite via deploy.yml - so an
+  # hourly run of an unchanged commit only repeated a failure: one broken spec
+  # produced six failure runs in a row. The odd minute avoids the top of the
+  # hour, when GitHub delays or drops scheduled runs.
   schedule:
-    - cron: '0 * * * *'
+    - cron: '17 */6 * * *'
   workflow_dispatch:
 
 concurrency:

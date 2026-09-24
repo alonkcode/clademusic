@@ -1,10 +1,19 @@
 name: CI
 
 on:
+  # Not push-to-main: deploy.yml runs the same lint, typecheck, unit and
+  # Playwright suites on every push to main and gates the release on them, so
+  # running them here too doubled every run and every failure notification.
   push:
-    branches: [main, develop]
+    branches: [develop]
   pull_request:
     branches: [main]
+
+# A newer push supersedes an older run of the same ref, so rapid pushes do not
+# stack up runs that report on commits nobody is looking at any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   NODE_VERSION: '20'
