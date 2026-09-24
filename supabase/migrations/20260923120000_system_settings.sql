@@ -20,8 +20,15 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
   updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL
 );
 
+-- The schema bundle ships the table without updated_by or the key CHECK
+-- (it has id PK + key UNIQUE + no updated_by). If the table already exists
+-- from the bundle, add the missing column so the trigger below can write it.
+ALTER TABLE public.system_settings
+  ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL;
+
 ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Admins can view settings" ON public.system_settings;
 DROP POLICY IF EXISTS "System settings are publicly readable" ON public.system_settings;
 CREATE POLICY "System settings are publicly readable"
   ON public.system_settings FOR SELECT

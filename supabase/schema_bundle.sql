@@ -107,19 +107,24 @@ CREATE TABLE public.chord_submissions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Create system settings table for admin budget controls
+-- Admin-controlled system settings: feature flags, rate limits and site
+-- preferences, edited from the Settings tab of the Admin Dashboard.
+--
+-- One row per setting, keyed by a namespaced name (flag.*, limit.*, pref.*).
+-- There is deliberately NO seed data: the app ships its own defaults
+-- (src/lib/systemSettings.ts), and a key with no row means "use the default".
+-- Rows appear the first time an admin changes a setting, so the defaults live
+-- in exactly one place and cannot drift from a copy here.
+--
+-- Everyone can READ this table - guests need the flags to know whether the
+-- sign-up form is open or the site is in maintenance - so it must never hold
+-- anything secret. Only admins can write.
 CREATE TABLE public.system_settings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  key TEXT NOT NULL UNIQUE,
-  value JSONB NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  key        text PRIMARY KEY CHECK (key ~ '^(flag|limit|pref)\.[a-z0-9_]+$'),
+  value      jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL
 );
-
--- Insert default system settings
-INSERT INTO public.system_settings (key, value) VALUES
-  ('max_analyses_per_day', '{"limit": 1000, "current": 0}'::jsonb),
-  ('max_comparisons_per_day', '{"limit": 500, "current": 0}'::jsonb),
-  ('global_rate_limit', '{"requests_per_minute": 60}'::jsonb);
 
 -- Enable RLS on all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -193,11 +198,32 @@ CREATE POLICY "Users can create submissions" ON public.chord_submissions
 CREATE POLICY "Moderators can manage submissions" ON public.chord_submissions
   FOR UPDATE USING (public.has_role(auth.uid(), 'moderator') OR public.has_role(auth.uid(), 'admin'));
 
--- System settings policies (admin only)
-CREATE POLICY "Admins can view settings" ON public.system_settings
-  FOR SELECT USING (public.has_role(auth.uid(), 'admin'));
+-- System settings policies: public read, admin-only write
+CREATE POLICY "System settings are publicly readable" ON public.system_settings
+  FOR SELECT
+  USING (true);
 CREATE POLICY "Admins can manage settings" ON public.system_settings
-  FOR ALL USING (public.has_role(auth.uid(), 'admin'));
+  FOR ALL
+  USING (public.has_role(auth.uid(), 'admin'::app_role))
+  WITH CHECK (public.has_role(auth.uid(), 'admin'::app_role));
+
+-- Stamp who changed a row and when on the server, so the client cannot
+-- claim someone else made the change.
+CREATE OR REPLACE FUNCTION public.stamp_system_settings()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  NEW.updated_by := auth.uid();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER stamp_system_settings
+  BEFORE INSERT OR UPDATE ON public.system_settings
+  FOR EACH ROW EXECUTE FUNCTION public.stamp_system_settings();
 
 -- Trigger for profile creation on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
