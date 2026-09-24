@@ -576,25 +576,21 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
         </DetailsPanel>
 
         {/* Bar row - visible whenever a track is loaded. Absent (not just
-            visually hidden) while idle, so there's no empty-looking strip
+            visually hidden) while idle, so there is no empty-looking strip
             reserved at the bottom of every page before anything has played;
             the iframe host above keeps mounting regardless (see isIdle
-            comment above the DetailsPanel setup). Below lg the row wraps: the
-            seekbar block (order-last, w-full) takes its own line under the
-            controls, so the track gets the full bar width instead of whatever
-            is left beside the buttons. In one row the track measured ~40px
-            wide anywhere from 640px to ~850px (phones in landscape, tablets),
-            so the wrap can't stop at the phone breakpoint. lg+ is one
-            non-wrapping row. */}
+            comment above the DetailsPanel setup). The transport stays a
+            single row at every width so the seekbar is always directly
+            controllable beside play/pause and the other bar actions. */}
         {!isIdle && (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 lg:flex-nowrap md:gap-3 md:px-4 md:py-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/80 text-lg shadow-inner md:h-10 md:w-10">
+        <div className="flex min-w-0 flex-nowrap items-center gap-1 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2 md:gap-3 md:px-4 md:py-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background/80 text-base shadow-inner sm:h-9 sm:w-9 md:h-10 md:w-10 md:text-lg">
             {meta.Icon ? <meta.Icon className="h-4 w-4 md:h-5 md:w-5" /> : meta.badge}
           </span>
           {/* Below lg the title has a zero basis and grows to fill the first
               line, so it can never push a control onto the wrapped line (a
               fixed 9rem basis counts toward wrapping); lg+ keeps 9rem. */}
-          <div ref={titleSwipeRef} className="flex min-w-0 flex-1 flex-col leading-tight [touch-action:pan-y] lg:flex-[0_1_9rem]">
+          <div ref={titleSwipeRef} className="flex min-w-[2rem] flex-[0_1_8rem] flex-col leading-tight [touch-action:pan-y] sm:flex-1 lg:flex-[0_1_9rem]">
             {resolvedTitle && (
               <span className="truncate text-xs font-bold text-foreground md:text-sm" aria-label="Track title">{resolvedTitle}</span>
             )}
@@ -626,7 +622,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               type="button"
               onClick={() => (effectiveCanPrev ? handlePrev() : null)}
               disabled={!effectiveCanPrev}
-              className="hidden h-9 w-9 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed sm:inline-flex"
+              className="hidden h-8 w-8 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed sm:inline-flex md:h-9 md:w-9"
               aria-label="Previous track"
               title="Previous track"
             >
@@ -635,7 +631,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             <button
               type="button"
               onClick={togglePlayPause}
-              className="inline-flex h-10 w-10 touch-manipulation items-center justify-center rounded-full border-2 border-primary/70 bg-primary/20 text-primary transition hover:border-primary hover:bg-primary hover:text-white"
+              className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full border-2 border-primary/70 bg-primary/20 text-primary transition hover:border-primary hover:bg-primary hover:text-white sm:h-10 sm:w-10"
               aria-label={isPlaying ? 'Pause' : 'Play'}
               title={isPlaying ? 'Pause' : 'Play'}
             >
@@ -645,7 +641,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               type="button"
               onClick={() => (effectiveCanNext ? handleNext() : null)}
               disabled={!effectiveCanNext}
-              className="hidden h-9 w-9 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed sm:inline-flex"
+              className="hidden h-8 w-8 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed sm:inline-flex md:h-9 md:w-9"
               aria-label="Next track"
               title="Next track"
             >
@@ -676,9 +672,9 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               (which never got the memo) kept their size and visually spilled
               into the icon buttons after it. Below lg it instead owns the
               wrapped second line (w-full, order-last). */}
-          <div className="order-last flex w-full min-w-[130px] items-center gap-2 text-white lg:order-none lg:w-auto lg:flex-1">
-            <span className="w-9 shrink-0 text-right text-[10px] tabular-nums md:w-10 md:text-xs" aria-label="Elapsed time">{formatTime(positionSec)}</span>
-            <div className="relative min-w-[40px] flex-1">
+          <div className="flex min-w-[4.5rem] flex-1 items-center gap-1 text-white sm:min-w-[8rem] sm:gap-2">
+            <span className="w-7 shrink-0 text-right text-[9px] tabular-nums sm:w-9 sm:text-[10px] md:w-10 md:text-xs" aria-label="Elapsed time">{formatTime(positionSec)}</span>
+            <div className="relative min-w-[2rem] flex-1">
               {sections.length > 1 && durationMsSafe > 0 && (
                 <div className="pointer-events-none absolute inset-0 flex items-center">
                   {sections.slice(1).map((section) => {
@@ -734,7 +730,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 disabled={isIdle || !canSeekInEmbed || !hasDuration}
                 className="relative z-10 w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer
                          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5
-                         [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full
+                         [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full
                          [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer"
                 aria-label="Seek"
               />
@@ -744,7 +740,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 API to report one at all (a hard platform limit, not a bug),
                 and a real 0:00 next to a track that's visibly playing reads
                 as broken rather than as "still loading". */}
-            <span className="w-9 shrink-0 text-left text-[10px] tabular-nums md:w-10 md:text-xs" aria-label="Total duration">
+            <span className="w-7 shrink-0 text-left text-[9px] tabular-nums sm:w-9 sm:text-[10px] md:w-10 md:text-xs" aria-label="Total duration">
               {hasDuration ? formatTime(durationSec) : '--:--'}
             </span>
           </div>
@@ -814,7 +810,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           <button
             type="button"
             onClick={() => setQueueOpen(true)}
-            className="hidden h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground sm:inline-flex"
+            className="hidden h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground md:inline-flex"
             aria-label="Show queue"
             title="Show queue"
           >
@@ -825,7 +821,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             <button
               type="button"
               onClick={() => setShowVideo(false)}
-              className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
+              className="inline-flex h-8 w-8 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground sm:h-9 sm:w-9"
               aria-label="Compact player and hide video"
               title="Hide details"
             >
@@ -835,7 +831,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             <button
               type="button"
               onClick={() => setShowVideo(true)}
-              className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
+              className="inline-flex h-8 w-8 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground sm:h-9 sm:w-9"
               aria-label="Show video and expand player"
               title="Show details"
             >
@@ -846,7 +842,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           <button
             type="button"
             onClick={toggleHidden}
-            className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
+            className="inline-flex h-8 w-8 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground sm:h-9 sm:w-9"
             aria-label="Hide player (keeps playing)"
             title="Hide player (keeps playing)"
           >

@@ -211,14 +211,14 @@ export function TrackCard({
       </div>
 
       {/* Content */}
-      <div className="relative z-10 flex-1 flex flex-col justify-end p-6 pb-8 space-y-4">
+      <div className="relative z-10 flex-1 flex flex-col justify-end p-4 pb-5 space-y-3 sm:p-6 sm:pb-8 sm:space-y-4">
         {/* Track info with menu */}
-        <div className="space-y-2">
+        <div className="space-y-1.5 sm:space-y-2">
           <div className="flex items-start justify-between gap-2">
             <motion.h2
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
-              className="text-2xl font-bold text-foreground line-clamp-2 flex-1 flex items-center gap-2"
+              className="text-xl font-bold text-foreground line-clamp-2 flex-1 flex items-center gap-2 sm:text-2xl"
             >
               <span>{track.title}</span>
               {track.is_common_ancestor && (
@@ -237,7 +237,7 @@ export function TrackCard({
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.05 }}
-            className="text-lg text-muted-foreground"
+            className="text-base text-muted-foreground sm:text-lg"
           >
             {track.artist}
           </motion.p>
@@ -248,7 +248,7 @@ export function TrackCard({
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 0.07 }}
-              className="flex items-center gap-2 text-sm text-muted-foreground"
+              className="flex items-center gap-2 text-xs text-muted-foreground sm:text-sm"
             >
               {track.tempo && (
                 <span className="font-medium">{Math.round(track.tempo)} BPM</span>
@@ -284,7 +284,7 @@ export function TrackCard({
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="flex items-center gap-3"
+          className="flex items-center gap-2 sm:gap-3"
         >
           {/* Preview play button (if available) */}
           {track.preview_url && (
@@ -371,7 +371,7 @@ export function TrackCard({
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
-          className="flex items-center justify-between pt-4 relative z-20"
+          className="flex items-center justify-between pt-2 relative z-20 sm:pt-4"
         >
           {/* Skip - always clickable */}
           <ActionButton
@@ -424,13 +424,13 @@ export function TrackCard({
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.25 }}
-          className="flex items-center justify-center gap-4"
+          className="flex items-center justify-center gap-2 sm:gap-4"
         >
           {/* Comments - Now inline with count */}
           <motion.button
             whileTap={{ scale: 0.9 }}
             onClick={() => setShowComments(!showComments)}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 hover:bg-muted transition-all text-muted-foreground hover:text-foreground"
+            className="flex items-center gap-2 rounded-full bg-muted/50 px-3 py-1.5 text-muted-foreground transition-all hover:bg-muted hover:text-foreground sm:px-4 sm:py-2"
           >
             <MessageSquare className="w-5 h-5" />
             <span className="text-sm font-medium">{commentCount}</span>
@@ -457,7 +457,7 @@ export function TrackCard({
               transition={{ duration: 0.3 }}
               className="overflow-hidden"
             >
-              <div className="mt-6 pt-6 border-t border-border/50">
+              <div className="mt-3 border-t border-border/50 pt-3 sm:mt-6 sm:pt-6">
                 <TrackComments trackId={track.id} />
               </div>
             </motion.div>
@@ -483,7 +483,7 @@ function ActionButton({ icon: Icon, label, isActive, onClick, variant }: ActionB
       whileTap={{ scale: 0.9 }}
       onClick={onClick}
       className={cn(
-        'flex flex-col items-center gap-1 p-3 rounded-xl transition-all',
+        'flex flex-col items-center gap-1 rounded-xl p-2 transition-all sm:p-3',
         isActive && variant === 'accent' && 'text-accent glow-accent',
         isActive && variant === 'primary' && 'text-primary glow-primary',
         isActive && variant === 'muted' && 'text-foreground',
@@ -492,14 +492,14 @@ function ActionButton({ icon: Icon, label, isActive, onClick, variant }: ActionB
     >
       <div
         className={cn(
-          'p-3 rounded-full transition-all',
+          'rounded-full p-2 transition-all sm:p-3',
           isActive && variant === 'accent' && 'bg-accent/20',
           isActive && variant === 'primary' && 'bg-primary/20',
           isActive && variant === 'muted' && 'bg-muted',
           !isActive && 'bg-muted/50 hover:bg-muted'
         )}
       >
-        <Icon className={cn('w-6 h-6', isActive && variant === 'accent' && 'fill-current')} />
+        <Icon className={cn('h-5 w-5 sm:h-6 sm:w-6', isActive && variant === 'accent' && 'fill-current')} />
       </div>
       <span className="text-xs font-medium">{label}</span>
     </motion.button>

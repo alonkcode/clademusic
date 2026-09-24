@@ -327,7 +327,7 @@ export default function FeedPage() {
 
   if (authLoading || tracksLoading || recommendationsLoading) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-[100dvh] overflow-hidden bg-background">
         <FeedSkeleton />
         <BottomNav />
       </div>
@@ -336,7 +336,7 @@ export default function FeedPage() {
 
   if (tracksError) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex min-h-[100dvh] items-center justify-center overflow-hidden bg-background">
         <div className="text-center p-6">
           <AlertCircle className="w-12 h-12 text-destructive mx-auto mb-4" />
           <h2 className="text-xl font-semibold mb-2">Failed to load tracks</h2>
@@ -350,7 +350,7 @@ export default function FeedPage() {
   const currentTrack = tracks[currentIndex];
 
   return (
-    <div className="min-h-screen bg-background flex flex-col touch-pan-y" ref={containerRef} data-feed>
+    <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-background touch-pan-y" ref={containerRef} data-feed>
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-40 glass-strong safe-top border-b border-border/50">
         <ResponsiveContainer maxWidth="full">
@@ -426,13 +426,13 @@ export default function FeedPage() {
       </div>
 
       {/* Feed content */}
-      <main className="flex-1 pt-16 pb-24">
+      <main className="min-h-0 flex-1 overflow-hidden pt-16">
         {/* pt-16 above already clears the fixed header - stacking py-6's own
             top padding on top of that (as this used to) added a second,
             redundant gap before any real content, on top of the header's
             own real height. pb-6 for breathing room above pb-24's player-bar
             clearance is kept; just the top half was the dead space. */}
-        <ResponsiveContainer maxWidth="full" className="pt-2 pb-6">
+        <ResponsiveContainer maxWidth="full" className="flex h-full min-h-0 flex-col pt-2 pb-14">
           {/* The guest prompt sits above the card in normal flow, so its real
               height comes out of the card's dvh budget below via
               authPromptOffset (measured, not guessed) - it does push the
@@ -479,8 +479,10 @@ export default function FeedPage() {
             squashing the card.
           */}
           <div
-            className="mx-auto w-full max-w-lg lg:max-w-2xl min-h-[32rem]"
-            style={{ height: `calc(100dvh - 13rem - ${authPromptOffset}px)` }}
+            className="mx-auto min-h-0 w-full max-w-lg flex-1 lg:max-w-2xl"
+            style={{
+              height: `calc(100dvh - 10rem - var(--clade-player-height, 0px) - ${authPromptOffset}px)`,
+            }}
           >
             <AnimatePresence mode="wait">
               {currentTrack && (
