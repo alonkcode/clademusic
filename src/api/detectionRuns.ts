@@ -221,7 +221,16 @@ export function buildDetectionRunPayload(args: {
 
   if (sections.length === 0) return null;
 
-  const coveredFromMs = sections[0].startMs;
+  // Coverage is how much of the song was actually listened to. The first
+  // section's own start is not that: section detection always begins its first
+  // segment at 0:00, so a capture started two minutes in would have been
+  // credited with those two unheard minutes - enough to clear the coverage bar
+  // on the first few seconds of listening and save a track's analysis, for
+  // everyone, from a fragment of it. The first chord heard is the honest start.
+  const firstHeardMs = Math.min(...sections.flatMap((s) => s.chords.map((c) => c.startMs)));
+  const coveredFromMs = Number.isFinite(firstHeardMs)
+    ? Math.max(sections[0].startMs, firstHeardMs)
+    : sections[0].startMs;
   const coveredToMs = sections[sections.length - 1].endMs;
   if (coveredToMs <= coveredFromMs) return null;
 

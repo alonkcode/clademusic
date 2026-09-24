@@ -108,15 +108,37 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * Below this raw (pre-normalization) energy, treat the input as silence/noise
- * rather than force a guess. A rough heuristic, not a calibrated noise
- * floor: getFloatFrequencyData's dBFS values (typically -100..-30) are
- * converted back to linear before folding into chroma, so a mostly-quiet
- * signal across the ~55-4000Hz band stays under this while a few genuinely
- * audible tonal bins push over it. Tune here if live captures prove too
- * eager or too reluctant to call something silence.
+ * Below this raw (pre-normalization) energy, treat the input as silence
+ * rather than force a guess.
+ *
+ * Calibrated against a real AnalyserNode (Chromium, fftSize 8192, smoothing
+ * 0.4 - what useLiveChordDetection uses), not against the unit-scale fixtures
+ * the tests use. Two facts make the numbers small:
+ *
+ *   - The analyser reports |X[k]|/N after a Blackman window, so a full-scale
+ *     sine shows up at only about -13.5 dB, and a chord spread over many
+ *     partials puts its strongest bin at around -30 to -40 dB.
+ *   - `energy` is the norm of the chroma of squared magnitudes, so it goes as
+ *     the square of a bin's magnitude: 8 dB less signal is 16 dB less energy
+ *     (see the table below).
+ *
+ * Measured energy for a rich four-note chord mix, by loudness of the whole mix:
+ *
+ *     -6 dBFS RMS   3.8e-3     (louder than nearly all music)
+ *     -14 dBFS RMS  6.1e-4     (typical mastered track)
+ *     -26 dBFS RMS  3.9e-5
+ *     -40 dBFS RMS  1.5e-6
+ *     -50 dBFS RMS  1.5e-7
+ *
+ * and for the floor: digital silence is exactly 0, white noise at -50 dBFS is
+ * 3e-8, at -30 dBFS 3e-6. This used to be 0.02, which is above the loudest row
+ * of that table - every real capture was called silence, so no chord was ever
+ * detected, no key, no analysis, while the tempo (which does not depend on
+ * level) kept working. 2e-7 sits at a mix around -48 dBFS RMS: below anything
+ * meaningfully audible, above silence and quiet hiss, with the headroom that
+ * lets a listener turn the player down.
  */
-const SILENCE_ENERGY_THRESHOLD = 0.02;
+const SILENCE_ENERGY_THRESHOLD = 2e-7;
 
 /**
  * Match a chroma vector against all 24 major/minor triad templates.

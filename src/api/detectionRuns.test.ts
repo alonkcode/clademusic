@@ -173,6 +173,31 @@ describe('buildDetectionRunPayload', () => {
     expect(payload!.coveredToMs).toBe(35000);
   });
 
+  // Section detection always starts its first segment at 0:00, so a capture
+  // begun mid-song comes in as a section from 0 whose chords only start where
+  // the listening did. Counting from the section edge credited the unheard
+  // minutes before it.
+  it('starts coverage at the first chord actually heard, not at the first section\'s 0:00 edge', () => {
+    const payload = buildDetectionRunPayload({
+      trackId: TRACK,
+      detectedKey: C_MAJOR,
+      sectionProgressions: [
+        progression('verse', 0, 130, [span(0, 'major', 120, 124), span(7, 'major', 124, 128)]),
+      ],
+    });
+    expect(payload!.coveredFromMs).toBe(120000);
+    expect(payload!.coveredToMs).toBe(130000);
+  });
+
+  it('falls back to the first section\'s start when no section has a chord in it', () => {
+    const payload = buildDetectionRunPayload({
+      trackId: TRACK,
+      detectedKey: C_MAJOR,
+      sectionProgressions: [progression('verse', 5, 30, [])],
+    });
+    expect(payload!.coveredFromMs).toBe(5000);
+  });
+
   it('averages the detector confidence across a section', () => {
     const payload = buildDetectionRunPayload({
       trackId: TRACK,
