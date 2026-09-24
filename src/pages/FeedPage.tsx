@@ -18,7 +18,7 @@ import { ChevronUp, ChevronDown, LogIn, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { usePlayer } from '@/player/PlayerContext';
-import { ProfileCircle } from '@/components/shared';
+import { CladeBrand, ProfileCircle } from '@/components/shared';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 
 export default function FeedPage() {
@@ -361,9 +361,7 @@ export default function FeedPage() {
             that button and is effectively invisible.
           */}
           <div className="flex items-center justify-between gap-3 py-2.5 sm:py-3 pl-14 sm:pl-16 min-w-0">
-            <h1 className="text-base sm:text-lg lg:text-xl font-bold gradient-text tracking-tight shrink-0">
-              CladeMusic
-            </h1>
+            <CladeBrand size="sm" className="shrink-0" />
 
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               {tracks.length > 0 && (
