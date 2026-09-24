@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { CladeMark } from '@/components/CladeMark';
+import { useSetting } from '@/hooks/useSystemSettings';
 
 // "Connections" is deliberately absent: it linked to /connections, but the
 // only registered route is /connections/:trackId - ConnectionsPage has no
@@ -24,6 +25,8 @@ const navItems = [
 export function BottomNav() {
   const location = useLocation();
   const [open, setOpen] = useState(false);
+  const forumEnabled = useSetting('flag.forum_enabled');
+  const items = forumEnabled ? navItems : navItems.filter((item) => item.to !== '/forum');
 
   return (
     <div className="fixed top-0 left-0 z-[70] p-3 md:p-4">
@@ -63,7 +66,7 @@ export function BottomNav() {
             </SheetTitle>
           </SheetHeader>
           <nav className="py-2">
-            {navItems.map((item) => {
+            {items.map((item) => {
               const isActive = location.pathname === item.to;
               return (
                 <SheetTrigger asChild key={item.to}>

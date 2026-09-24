@@ -97,4 +97,60 @@ describe('useSectionSync liveChordIndex', () => {
 
     expect(result.current.liveChordIndex).toBe(1);
   });
+
+  // A track with a stored progression but no section list used to return 0
+  // here permanently: no active section meant no index, so the readout sat on
+  // the first chord for the whole song.
+  it('rotates through the progression when the track has no sections at all', () => {
+    mocks.player.positionMs = 4500; // 120bpm, 4 beats/chord = 2s each -> third chord
+    const { result } = renderHook(() =>
+      useSectionSync({
+        trackId: 'track-1',
+        progression: ['I', 'V', 'vi', 'IV'],
+        sections: [],
+        bpm: 120,
+      })
+    );
+
+    expect(result.current.activeSection).toBeNull();
+    expect(result.current.liveChordIndex).toBe(2);
+    expect(result.current.progression).toEqual(['I', 'V', 'vi', 'IV']);
+  });
+
+  it('changes chord on a beat of the tempo even when the section starts between beats', () => {
+    // 120bpm: beats every 500ms. A section curated to start at 18.2s is not on
+    // that grid; the first chord change must be (18000 + 4 beats = 20000ms),
+    // not 18200 + 2000 = 20200ms.
+    const sections: SongSection[] = [section({ start_time: 18.2, end_time: 100 })];
+    const run = (positionMs: number) => {
+      mocks.player.positionMs = positionMs;
+      return renderHook(() =>
+        useSectionSync({
+          trackId: 'track-1',
+          progression: ['I', 'V', 'vi', 'IV'],
+          sections,
+          bpm: 120,
+        })
+      ).result.current.liveChordIndex;
+    };
+
+    expect(run(19990)).toBe(0);
+    expect(run(20010)).toBe(1);
+  });
+
+  it('exposes the beats-per-chord it rotates at, so the preview loop can match it', () => {
+    mocks.player.positionMs = 0;
+    const sections: SongSection[] = [section({ start_time: 0, end_time: 100 })];
+    const { result } = renderHook(() =>
+      useSectionSync({
+        trackId: 'track-1',
+        progression: ['I', 'V', 'vi', 'IV'],
+        sections,
+        bpm: 120,
+        loopLengthBars: 8,
+      })
+    );
+
+    expect(result.current.beatsPerChord).toBe(8);
+  });
 });

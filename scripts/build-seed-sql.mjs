@@ -78,7 +78,14 @@ ON CONFLICT (external_id, provider) DO UPDATE SET
   progression_roman = EXCLUDED.progression_roman,
   detected_key = EXCLUDED.detected_key,
   detected_mode = EXCLUDED.detected_mode,
-  sections = EXCLUDED.sections,
+  -- A track whose sections were edited (or promoted from a detection run) has
+  -- rows in track_sections; re-running the seed must not put the seed's
+  -- original boundaries back over them.
+  sections = CASE
+    WHEN EXISTS (SELECT 1 FROM public.track_sections ts WHERE ts.track_id = public.tracks.id)
+      THEN public.tracks.sections
+    ELSE EXCLUDED.sections
+  END,
   tempo = COALESCE(EXCLUDED.tempo, public.tracks.tempo);`);
   lines.push('');
 }

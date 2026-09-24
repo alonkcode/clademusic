@@ -8,6 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { getTrackSections } from '@/api/trackSections';
+import { QUERY_KEYS } from '@/lib/constants';
 import type { TrackSection } from '@/types';
 
 /**
@@ -52,6 +53,19 @@ export function findSectionAtTime(
 }
 
 /**
+ * What to tell the person clicking Save. The raw PostgREST text for a function
+ * that has not been installed ("Could not find the function ... in the schema
+ * cache") reads like an app bug; it is a missing SQL script.
+ */
+function saveErrorMessage(error: { message?: string; code?: string }): string {
+  if (error.code === 'PGRST202' || error.code === '42883') {
+    return 'Saving sections is not set up in the database yet. Run supabase/sql-editor/19-save-track-sections.sql (then 31-save-track-sections-mirror.sql) in the SQL editor.';
+  }
+  if (error.code === '42501') return 'Only an admin can edit a track\'s sections.';
+  return error.message || 'Could not save these sections.';
+}
+
+/**
  * Save a hand-marked set of sections for a track.
  *
  * Structure only: the RPC deliberately drops any chord data, because moving a
@@ -70,11 +84,15 @@ export function useSaveTrackSections() {
         p_track_id: args.trackId,
         p_sections: args.sections,
       } as never);
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(saveErrorMessage(error));
       return (data as unknown as number) ?? 0;
     },
     onSuccess: (_count, args) => {
       queryClient.invalidateQueries({ queryKey: ['track-sections', args.trackId] });
+      // The database also mirrors the saved structure onto the track's own
+      // `sections` column, which is what the feed cards read. Without this
+      // they kept showing the old sections until their cache expired.
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.TRACKS] });
     },
   });
 }

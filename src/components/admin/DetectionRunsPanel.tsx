@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { ChevronDown, ChevronRight, Check, X, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Check, X, Loader2, Undo2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,8 +20,10 @@ import {
   useDetectionRunDetail,
   usePromoteDetectionRun,
   useRejectDetectionRun,
+  useRevertDetectionRun,
   type DetectionRunStatus,
   type DetectionRunSummary,
+  type RevertDetectionRunResult,
 } from '@/hooks/api/useDetectionRuns';
 
 /**
@@ -41,6 +43,24 @@ const formatMs = (ms: number) => {
 };
 
 const percent = (value: number | null) => (value === null ? '—' : `${Math.round(value * 100)}%`);
+
+const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+/**
+ * What an undo actually did, in the reviewer's terms. The last clause matters:
+ * a promotion made before undo history existed can be removed but its key can
+ * not be recovered, and that should be said rather than implied.
+ */
+const describeRevert = (title: string, result: RevertDetectionRunResult) =>
+  [
+    `Undid the promotion on "${title}": removed ${plural(result.sections_removed, 'section')}.`,
+    result.sections_restored > 0 ? `Put back the ${result.sections_restored} it had replaced.` : null,
+    result.track_restored
+      ? 'Its previous key was restored.'
+      : 'Its key was left as it is - this promotion predates undo history.',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
 function RunDetail({ runId }: { runId: string }) {
   const { data: sections, isLoading } = useDetectionRunDetail(runId);
@@ -97,10 +117,12 @@ export function DetectionRunsPanel() {
   const [status, setStatus] = useState<DetectionRunStatus | 'all'>('pending');
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<DetectionRunSummary | null>(null);
+  const [reverting, setReverting] = useState<DetectionRunSummary | null>(null);
 
   const { data: runs, isLoading } = useDetectionRuns(status);
   const promote = usePromoteDetectionRun();
   const reject = useRejectDetectionRun();
+  const revert = useRevertDetectionRun();
 
   const handlePromote = async (run: DetectionRunSummary) => {
     try {
@@ -119,6 +141,17 @@ export function DetectionRunsPanel() {
       toast.success('Run rejected.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not reject this run.');
+    }
+  };
+
+  const handleRevert = async (run: DetectionRunSummary) => {
+    try {
+      const result = await revert.mutateAsync(run.id);
+      toast.success(describeRevert(run.track_title ?? 'track', result));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not undo this promotion.');
+    } finally {
+      setReverting(null);
     }
   };
 
@@ -158,7 +191,7 @@ export function DetectionRunsPanel() {
         <div className="space-y-2">
           {runs?.map((run) => {
             const isOpen = openRunId === run.id;
-            const busy = promote.isPending || reject.isPending;
+            const busy = promote.isPending || reject.isPending || revert.isPending;
             return (
               <div key={run.id} className="rounded-lg border border-border/60">
                 <div className="flex flex-wrap items-center gap-3 p-3">
@@ -216,12 +249,24 @@ export function DetectionRunsPanel() {
                       </Button>
                     </div>
                   ) : (
-                    <Badge
-                      variant="outline"
-                      className={cn('capitalize', run.status === 'promoted' && 'text-emerald-500')}
-                    >
-                      {run.status}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={cn('capitalize', run.status === 'promoted' && 'text-emerald-500')}
+                      >
+                        {run.status}
+                      </Badge>
+                      {run.status === 'promoted' && (
+                        <Button size="sm" variant="outline" disabled={busy} onClick={() => setReverting(run)}>
+                          {revert.isPending && reverting?.id === run.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Undo2 className="h-3.5 w-3.5" />
+                          )}
+                          Undo
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -246,13 +291,37 @@ export function DetectionRunsPanel() {
               This replaces every existing section on “{confirming?.track_title ?? 'this track'}” with the{' '}
               {confirming?.section_count ?? 0} from this run, and sets the track's key to{' '}
               {confirming?.detected_key ?? '?'} {confirming?.detected_mode ?? ''}. The run itself is kept, so
-              a better one can be promoted over it later.
+              a better one can be promoted over it later, and the promotion can be undone from the Promoted
+              tab.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => confirming && void handlePromote(confirming)}>
               Promote
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Undo takes sections off a track the player is showing, so it gets the
+          same deliberate confirmation promoting does. */}
+      <AlertDialog open={Boolean(reverting)} onOpenChange={(open) => !open && setReverting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Undo this promotion?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This takes the {reverting?.section_count ?? 0} sections this run put on “
+              {reverting?.track_title ?? 'this track'}” back off the track and returns the run to pending. If the
+              promotion recorded what it replaced, the earlier sections and key come back too; otherwise the
+              track keeps its current key. Only the track's current analysis can be undone - if a later run was
+              promoted over this one, undo that one first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => reverting && void handleRevert(reverting)}>
+              Undo promotion
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

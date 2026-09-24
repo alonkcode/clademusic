@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
+import { useRateLimitGuard, useSetting } from '@/hooks/useSystemSettings';
 import {
   useAddPostComment,
   useDeletePostComment,
@@ -179,7 +180,8 @@ interface ForumCommentThreadProps {
 export function ForumCommentThread({ postId, isLocked = false }: ForumCommentThreadProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const commentsEnabled = !isLocked;
+  const commentsEnabled = useSetting('flag.comments_enabled') && !isLocked;
+  const allowComment = useRateLimitGuard('limit.comments');
 
   const { data: comments = [], isLoading, isError } = usePostComments(postId);
   const addComment = useAddPostComment(postId);
@@ -194,6 +196,7 @@ export function ForumCommentThread({ postId, isLocked = false }: ForumCommentThr
       navigate('/auth');
       throw new Error('Sign in required');
     }
+    if (!allowComment()) throw new Error('Rate limited');
 
     try {
       await addComment.mutateAsync({ content, parentId });
@@ -248,7 +251,7 @@ export function ForumCommentThread({ postId, isLocked = false }: ForumCommentThr
         )
       ) : (
         <p className="text-sm text-muted-foreground">
-          This post is locked.
+          {isLocked ? 'This post is locked.' : 'New comments are turned off right now.'}
         </p>
       )}
 

@@ -10,24 +10,13 @@
 
 import { useEffect, useState } from 'react';
 import { getTrackSections } from '@/api/trackSections';
-import { sectionStartSeconds } from '@/lib/sections';
+import { sectionDisplayNames, sectionStartSeconds } from '@/lib/sections';
 import { usePlayer } from '@/player/PlayerContext';
-import type { TrackSection, SongSectionType } from '@/types';
+import type { TrackSection } from '@/types';
 
 interface TrackSectionsProps {
   trackId: string;
 }
-
-const LABEL_MAP: Record<SongSectionType, string> = {
-  intro: 'Intro',
-  verse: 'Verse',
-  'pre-chorus': 'Pre-Chorus',
-  chorus: 'Chorus',
-  bridge: 'Bridge',
-  outro: 'Outro',
-  breakdown: 'Breakdown',
-  drop: 'Drop',
-};
 
 export function TrackSections({ trackId }: TrackSectionsProps) {
   const [sections, setSections] = useState<TrackSection[]>([]);
@@ -64,6 +53,8 @@ export function TrackSections({ trackId }: TrackSectionsProps) {
     return null;
   }
 
+  const names = sectionDisplayNames(sections);
+
   return (
     <div className="mt-4">
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
@@ -97,7 +88,7 @@ export function TrackSections({ trackId }: TrackSectionsProps) {
                 !isPlaying && 'opacity-90',
               ].join(' ')}
             >
-              {LABEL_MAP[section.label] || section.label}
+              {names[index]}
             </button>
           );
         })}

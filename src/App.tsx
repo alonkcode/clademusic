@@ -8,8 +8,12 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { PlayerProvider, usePlayer } from "@/player/PlayerContext";
 import { EmbeddedPlayerDrawer } from "@/player/EmbeddedPlayerDrawer";
 import { ErrorBoundary, GlobalErrorHandlers, LoadingSpinner } from "@/components/shared";
-import { NotificationsRealtimeBridge } from "@/components/notifications/NotificationsRealtimeBridge";
 import { AdminRoute } from "@/components/AdminRoute";
+import { FeatureRoute } from "@/components/FeatureRoute";
+import { MaintenanceGate } from "@/components/MaintenanceGate";
+import { SystemAnnouncement } from "@/components/SystemAnnouncement";
+import { NotificationsRealtimeBridge } from "@/components/notifications/NotificationsRealtimeBridge";
+import { SystemSettingsProvider } from "@/hooks/useSystemSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { parseAuthHashError, stashAuthRedirectError } from "@/lib/authHashError";
@@ -132,6 +136,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
+        <SystemSettingsProvider>
         <PlayerProvider>
               <Toaster />
               <Sonner />
@@ -142,13 +147,17 @@ const App = () => (
                 <GlobalErrorHandlers />
                 <AuthLinkErrorRedirect />
                 <NotificationsRealtimeBridge />
+                <SystemAnnouncement />
+                <MaintenanceGate>
                 <PlayerBottomPadding>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageLoader />}>
                     <Routes>
                       <Route path="/" element={<Index />} />
-                      <Route path="/pricing" element={<PricingPage />} />
-                      <Route path="/billing" element={<BillingPage />} />
+                      <Route element={<FeatureRoute flag="flag.billing_enabled" name="Pricing & billing" />}>
+                        <Route path="/pricing" element={<PricingPage />} />
+                        <Route path="/billing" element={<BillingPage />} />
+                      </Route>
                       <Route path="/feed" element={<FeedPage />} />
                       <Route path="/auth" element={<AuthGatePage />} />
                       <Route path="/login" element={<LoginPage />} />
@@ -168,9 +177,11 @@ const App = () => (
                       <Route path="/playlist/:playlistId" element={<PlaylistDetailPage />} />
                       <Route path="/chat" element={<ChatPage />} />
                       <Route path="/notifications" element={<NotificationsPage />} />
-                      <Route path="/forum" element={<ForumHomePage />} />
-                      <Route path="/forum/:forumName" element={<ForumHomePage />} />
-                      <Route path="/forum/post/:postId" element={<ForumHomePage />} />
+                      <Route element={<FeatureRoute flag="flag.forum_enabled" name="Forums" />}>
+                        <Route path="/forum" element={<ForumHomePage />} />
+                        <Route path="/forum/:forumName" element={<ForumHomePage />} />
+                        <Route path="/forum/post/:postId" element={<ForumHomePage />} />
+                      </Route>
                       <Route path="/__e2e__/player" element={<E2EUniversalPlayerPage />} />
                       {/* Legal Pages */}
                       <Route path="/terms" element={<TermsOfServicePage />} />
@@ -189,8 +200,10 @@ const App = () => (
                 </RouteErrorBoundary>
                 </PlayerBottomPadding>
                 <PlayerVisibilityGate />
+                </MaintenanceGate>
               </BrowserRouter>
         </PlayerProvider>
+        </SystemSettingsProvider>
     </AuthProvider>
   </TooltipProvider>
 </QueryClientProvider>

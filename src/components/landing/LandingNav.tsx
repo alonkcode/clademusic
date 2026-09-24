@@ -4,12 +4,14 @@ import { CladeMark } from '@/components/CladeMark';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import { useSetting } from '@/hooks/useSystemSettings';
 
 export function LandingNav() {
   const navigate = useNavigate();
   const { scrollY } = useScroll();
   const [isVisible, setIsVisible] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const billingEnabled = useSetting('flag.billing_enabled');
 
   const backgroundColor = useTransform(
     scrollY,
@@ -46,7 +48,7 @@ export function LandingNav() {
     { label: 'Features', href: '#features' },
     { label: 'Demo', href: '#demo' },
     { label: 'Testimonials', href: '#testimonials' },
-    { label: 'Pricing', href: '/pricing' },
+    ...(billingEnabled ? [{ label: 'Pricing', href: '/pricing' }] : []),
   ];
 
   const scrollToSection = (href: string) => {

@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
 import { Music2, Github, Mail, Heart } from 'lucide-react';
+import { useSetting } from '@/hooks/useSystemSettings';
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
+  const forumEnabled = useSetting('flag.forum_enabled');
 
   return (
     <footer className="border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -56,11 +58,13 @@ export function Footer() {
                   Feed
                 </Link>
               </li>
-              <li>
-                <Link to="/forum" className="text-muted-foreground hover:text-foreground transition">
-                  Forums
-                </Link>
-              </li>
+              {forumEnabled && (
+                <li>
+                  <Link to="/forum" className="text-muted-foreground hover:text-foreground transition">
+                    Forums
+                  </Link>
+                </li>
+              )}
               <li>
                 <Link to="/search" className="text-muted-foreground hover:text-foreground transition">
                   Search
@@ -107,11 +111,13 @@ export function Footer() {
                   Cookie Policy
                 </Link>
               </li>
-              <li>
-                <Link to="/forum" className="text-muted-foreground hover:text-foreground transition">
-                  Community Guidelines
-                </Link>
-              </li>
+              {forumEnabled && (
+                <li>
+                  <Link to="/forum" className="text-muted-foreground hover:text-foreground transition">
+                    Community Guidelines
+                  </Link>
+                </li>
+              )}
             </ul>
           </div>
         </div>

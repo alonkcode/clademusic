@@ -40,7 +40,7 @@ async function ensureAdmin(req: Request) {
   const user = userRes?.user;
   if (!user) return null;
 
-  const { data, error } = await service.rpc('is_admin', { user_id: user.id });
+  const { data, error } = await service.rpc('has_role', { _user_id: user.id, _role: 'admin' });
   if (error || data !== true) return null;
   return user;
 }

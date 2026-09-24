@@ -29,6 +29,10 @@ type SpotifyPlayerInstance = {
 const SDK_URL = 'https://sdk.scdn.co/spotify-player.js';
 let sdkPromise: Promise<void> | null = null;
 
+// How long after a track request the poll may ignore a device that still
+// reports some other track. Past this, whatever the device says is reality.
+const TRACK_SWITCH_GRACE_MS = 6000;
+
 function loadSpotifyWebPlaybackSdk(): Promise<void> {
   if (typeof window === 'undefined') return Promise.reject(new Error('No window'));
   if (window.Spotify?.Player) return Promise.resolve();
@@ -118,6 +122,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
   const deviceIdRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const lastTrackIdRef = useRef<string | null>(null);
+  const lastTrackRequestedAtRef = useRef(0);
   // Which `${playRequestId}:${trackId}` has already been handed to
   // `PUT /me/player/play`, so a re-run of the setup effect never replays a
   // track the listener is already partway through.
@@ -223,6 +228,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     // /play PUT below has even been sent - the poll below reads this to
     // reject state for whatever track the device is still reporting.
     lastTrackIdRef.current = providerTrackId;
+    lastTrackRequestedAtRef.current = Date.now();
     updatePlaybackState({
       durationMs: 0,
       isPlaying: shouldAutoplayRef.current,
@@ -280,6 +286,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
       if (startedPlayKeyRef.current === playKey) return;
       startedPlayKeyRef.current = playKey;
       lastTrackIdRef.current = providerTrackId;
+      lastTrackRequestedAtRef.current = Date.now();
 
       // Start where the caller asked - tapping a chorus should land on the
       // chorus, not at 0:00 with a seek racing the SDK's connect.
@@ -464,7 +471,18 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
             // overwrote the just-set new title/artist/position with the
             // track being replaced, which is what made switching songs look
             // like it "jumped back" to whatever was playing before.
-            if (track?.id && lastTrackIdRef.current && track.id !== lastTrackIdRef.current) return;
+            //
+            // Two ways this guard must NOT hold: Spotify relinks a track that
+            // isn't available in the listener's market, and then reports the
+            // substitute's id in `id` with the requested one in `linked_from`;
+            // and the device may simply never land on the requested track.
+            // Either way an unbounded guard drops every poll tick, so the
+            // seekbar, duration and play state freeze while audio plays on.
+            const requestedId = lastTrackIdRef.current;
+            const isRequestedTrack =
+              !track?.id || !requestedId || track.id === requestedId || track.linked_from?.id === requestedId;
+            const stillSwitching = Date.now() - lastTrackRequestedAtRef.current < TRACK_SWITCH_GRACE_MS;
+            if (!isRequestedTrack && stillSwitching) return;
             const artistNames = Array.isArray(track?.artists)
               ? track.artists.map((a: any) => a?.name).filter(Boolean).join(', ')
               : null;

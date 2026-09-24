@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import {
   getRecentlyPlayedTracks,
-  isSpotifyConnected,
+  getSpotifyConnectionStatus,
   getSpotifyProfile,
   getTopTracks,
   getTopArtists,
@@ -16,22 +16,42 @@ import {
   getRecommendations,
   type TimeRange,
   type SpotifyArtist,
+  type SpotifyConnectionStatus,
   type MusicStats,
 } from '@/services/spotifyUserService';
 import type { Track } from '@/types';
 
 /**
- * Hook to check if user has Spotify connected
+ * One cached connection-status query, read through `select` by the hooks
+ * below so they share a single /me request instead of each making their own.
  */
-export function useSpotifyConnected() {
+function useSpotifyConnectionStatus<T>(select: (status: SpotifyConnectionStatus) => T) {
   const { user } = useAuth();
 
   return useQuery({
     queryKey: ['spotify-connected', user?.id],
-    queryFn: () => isSpotifyConnected(user!.id),
+    queryFn: () => getSpotifyConnectionStatus(user!.id),
     enabled: !!user,
     staleTime: 5 * 60 * 1000, // 5 minutes
+    select,
   });
+}
+
+const isConnectedStatus = (status: SpotifyConnectionStatus) => status === 'connected';
+const isBlockedStatus = (status: SpotifyConnectionStatus) => status === 'blocked';
+
+/**
+ * Hook to check if user has Spotify connected
+ */
+export function useSpotifyConnected() {
+  return useSpotifyConnectionStatus(isConnectedStatus);
+}
+
+/**
+ * True when Spotify refuses this account (403) - see SpotifyConnectionStatus.
+ */
+export function useSpotifyBlocked() {
+  return useSpotifyConnectionStatus(isBlockedStatus);
 }
 
 /**

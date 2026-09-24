@@ -202,9 +202,15 @@ export default function SpotifyCallbackPage() {
           throw new Error('Failed to save Spotify connection');
         }
 
-        // Refresh cached "connected" state so the app doesn't keep prompting to reconnect
-        // until a hard refresh (React Query may have cached `false` with a long staleTime).
-        queryClient.setQueryData(['spotify-connected', user.id], true);
+        // Refresh cached connection state so the app doesn't keep prompting to reconnect
+        // until a hard refresh (React Query may have cached 'disconnected' with a long
+        // staleTime). A 403 profile fetch is written as 'blocked', not 'connected' -
+        // claiming connected here made a blocked account look fine until the refetch.
+        if (profile) {
+          queryClient.setQueryData(['spotify-connected', user.id], 'connected');
+        } else if (profileErrorStatus === 403) {
+          queryClient.setQueryData(['spotify-connected', user.id], 'blocked');
+        }
         queryClient.invalidateQueries({ queryKey: ['spotify-connected'] });
         queryClient.invalidateQueries({ queryKey: ['user-providers'] });
         queryClient.invalidateQueries({ queryKey: ['spotify-profile'] });

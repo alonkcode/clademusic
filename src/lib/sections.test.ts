@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sectionStartSeconds } from './sections';
+import { sectionDisplayNames, sectionStartSeconds } from './sections';
 import type { TrackSection } from '@/types';
 
 /**
@@ -23,5 +23,45 @@ describe('sectionStartSeconds', () => {
 
   it('still returns 0 for an exact whole-second boundary', () => {
     expect(sectionStartSeconds(section(0))).toBe(0);
+  });
+});
+
+describe('sectionDisplayNames', () => {
+  const named = (...labels: TrackSection['label'][]) =>
+    sectionDisplayNames(labels.map((label) => ({ label })));
+
+  it('numbers a label only where it repeats, in playing order', () => {
+    expect(named('intro', 'verse', 'chorus', 'verse', 'chorus', 'bridge', 'chorus', 'outro')).toEqual([
+      'Intro',
+      'Verse 1',
+      'Chorus 1',
+      'Verse 2',
+      'Chorus 2',
+      'Bridge',
+      'Chorus 3',
+      'Outro',
+    ]);
+  });
+
+  it('leaves a lone section unnumbered', () => {
+    expect(named('verse', 'chorus')).toEqual(['Verse', 'Chorus']);
+  });
+
+  it('uses the readable name for hyphenated labels', () => {
+    expect(named('pre-chorus', 'pre-chorus')).toEqual(['Pre-Chorus 1', 'Pre-Chorus 2']);
+  });
+
+  it('counts occurrences rather than trusting a stored ordinal', () => {
+    // ordinal defaults to 1 in the table, so rows saved before it existed
+    // would all read "Verse 1" if it were used.
+    const rows = [
+      { label: 'verse' as const, ordinal: 1 },
+      { label: 'verse' as const, ordinal: 1 },
+    ];
+    expect(sectionDisplayNames(rows)).toEqual(['Verse 1', 'Verse 2']);
+  });
+
+  it('returns nothing for nothing', () => {
+    expect(sectionDisplayNames([])).toEqual([]);
   });
 });

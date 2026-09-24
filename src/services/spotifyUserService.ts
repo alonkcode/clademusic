@@ -114,35 +114,41 @@ export async function getRecentlyPlayedTracks(
 }
 
 /**
- * Check if user has Spotify connected
+ * 'blocked' is Spotify answering 403: the token is valid but Spotify refuses
+ * this account, almost always because the app is in Development Mode and the
+ * account isn't on its allowlist. Unlike 'disconnected', reconnecting can't
+ * fix it - only the Spotify Developer Dashboard can - so callers should not
+ * offer a Reconnect for it.
  */
-export async function isSpotifyConnected(userId: string): Promise<boolean> {
-  const accessToken = await getValidAccessToken(userId);
-  if (!accessToken) return false;
+export type SpotifyConnectionStatus = 'connected' | 'blocked' | 'disconnected';
 
-  // Validate token against /me to avoid noisy 403 loops when the token is unusable.
+/**
+ * Whether the user's stored Spotify token actually works, validated against /me.
+ */
+export async function getSpotifyConnectionStatus(userId: string): Promise<SpotifyConnectionStatus> {
+  const accessToken = await getValidAccessToken(userId);
+  if (!accessToken) return 'disconnected';
+
+  const fromResponse = (res: Response): SpotifyConnectionStatus =>
+    res.ok ? 'connected' : res.status === 403 ? 'blocked' : 'disconnected';
+
   try {
     const res = await fetch(`${SPOTIFY_API_BASE}/me`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    if (res.ok) return true;
-    if (res.status === 401) {
-      const creds = await getSpotifyCredentials(userId);
-      const refreshed = creds?.refresh_token ? await refreshSpotifyToken(userId, creds.refresh_token) : null;
-      if (!refreshed) return false;
-      const retry = await fetch(`${SPOTIFY_API_BASE}/me`, {
-        headers: { Authorization: `Bearer ${refreshed}` },
-      });
-      return retry.ok;
-    }
+    if (res.status !== 401) return fromResponse(res);
 
-    // Common causes: dev-mode app without whitelisted user, revoked permissions, missing scopes.
-    if (res.status === 403) return false;
-    return false;
+    const creds = await getSpotifyCredentials(userId);
+    const refreshed = creds?.refresh_token ? await refreshSpotifyToken(userId, creds.refresh_token) : null;
+    if (!refreshed) return 'disconnected';
+    const retry = await fetch(`${SPOTIFY_API_BASE}/me`, {
+      headers: { Authorization: `Bearer ${refreshed}` },
+    });
+    return fromResponse(retry);
   } catch (err) {
-    console.warn('[Spotify] isSpotifyConnected validation failed', err);
-    return false;
+    console.warn('[Spotify] connection validation failed', err);
+    return 'disconnected';
   }
 }
 

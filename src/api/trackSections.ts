@@ -6,6 +6,7 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { SECTION_LABELS } from '@/lib/harmony/sectionDraft';
 import type { TrackSection } from '@/types';
 
 /**
@@ -14,15 +15,23 @@ import type { TrackSection } from '@/types';
 /** Seconds in tracks.sections; milliseconds everywhere the app uses them. */
 function sectionsColumnToTrackSections(trackId: string, raw: unknown): TrackSection[] {
   if (!Array.isArray(raw)) return [];
-  return raw
+  const converted = raw
     .map((entry: any, index: number) => {
       const start = Number(entry?.start_time);
       const end = Number(entry?.end_time);
       if (!Number.isFinite(start)) return null;
+      // `type` is the canonical label (intro, verse, ...). The column's own
+      // `label` is a display name - "Verse 1", "Final Chorus" - and used to
+      // be passed through as TrackSection.label, which is typed as the
+      // canonical one. Anything reading it as such (the section editor's
+      // draft, sectionVariant) then failed to recognise every seeded
+      // section: opening the editor on a seeded track showed a lone Intro.
+      const type = entry?.type;
+      if (typeof type !== 'string' || !(SECTION_LABELS as readonly string[]).includes(type)) return null;
       return {
-        id: `${trackId}-${entry?.type ?? 'section'}-${index}`,
+        id: `${trackId}-${type}-${index}`,
         track_id: trackId,
-        label: entry?.label || entry?.type || 'section',
+        label: type,
         start_ms: Math.max(0, Math.round(start * 1000)),
         end_ms: Number.isFinite(end) ? Math.max(0, Math.round(end * 1000)) : 0,
         created_at: new Date().toISOString(),
@@ -30,6 +39,14 @@ function sectionsColumnToTrackSections(trackId: string, raw: unknown): TrackSect
     })
     .filter((s): s is TrackSection => s !== null)
     .sort((a, b) => a.start_ms - b.start_ms);
+
+  // Which occurrence of its label each one is, as the canonical table stores.
+  const seen = new Map<string, number>();
+  return converted.map((section) => {
+    const ordinal = (seen.get(section.label) ?? 0) + 1;
+    seen.set(section.label, ordinal);
+    return { ...section, ordinal };
+  });
 }
 
 export async function getTrackSections(trackId: string): Promise<TrackSection[]> {

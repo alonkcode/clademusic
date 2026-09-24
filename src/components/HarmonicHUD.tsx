@@ -242,11 +242,16 @@ export function HarmonicHUD({
     loopLengthBars,
   });
 
+  // beatsPerChord comes from sync, not the loop's own default of 4: the live
+  // readout sizes it from the track's loop_length_bars, and the preview has to
+  // step at that same rate or "Hear chords" and the playing song disagree
+  // about how long a chord lasts at the very same tempo.
   const loop = useHarmonicLoop({
     progression: sync.progression,
     detectedKey,
     mode: effectiveMode,
     bpm,
+    beatsPerChord: sync.beatsPerChord,
   });
 
   // Adopt the key that was actually heard. Without this the numerals above are
@@ -257,6 +262,21 @@ export function HarmonicHUD({
   useEffect(() => {
     if (liveTonic !== null) setLoopTonic(liveTonic);
   }, [liveTonic, setLoopTonic]);
+
+  // What the section editor starts from: the stored sections, never the
+  // live-detected ones (effectiveSections) - those are a capture in progress.
+  const editorSections = useMemo(
+    () =>
+      (sections ?? []).map((s) => ({
+        label: s.type,
+        start_ms: Math.round(s.start_time * 1000),
+      })),
+    [sections]
+  );
+  const editorSectionsKey = useMemo(
+    () => editorSections.map((s) => `${s.label}@${s.start_ms}`).join('|'),
+    [editorSections]
+  );
 
   if (progression.length === 0) return null;
 
@@ -289,12 +309,15 @@ export function HarmonicHUD({
           only, because it writes the canonical sections every listener sees. */}
       {editingSections && (
         <div className="px-3 pb-2 sm:px-4">
+          {/* Keyed on what is stored so the draft is re-seeded if the sections
+              finish loading (or a save lands) after Edit was clicked. Seeded
+              only once otherwise, an editor opened before the fetch resolved
+              held a lone Intro, and Save would have replaced the track's real
+              sections with it. */}
           <SectionEditor
+            key={editorSectionsKey}
             trackId={trackId}
-            sections={(sections ?? []).map((s) => ({
-              label: s.type,
-              start_ms: Math.round(s.start_time * 1000),
-            }))}
+            sections={editorSections}
             onClose={() => setEditingSections(false)}
           />
         </div>
@@ -370,11 +393,17 @@ export function HarmonicHUD({
               </span>
             </motion.div>
           ) : (
+            // The exit has its own short, fixed duration. It used to inherit
+            // the entrance spring, and mode="wait" holds the incoming chord
+            // until the outgoing one has fully settled - around 0.4s, longer
+            // than a beat at anything over 150bpm - so this readout showed
+            // every chord well after the beat dot and the progression chips
+            // below had already moved on.
             <motion.div
               key={`${current?.source}-${sync.activeSectionIndex}`}
               initial={{ opacity: 0, scale: 0.85, y: 6 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9 }}
+              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.05, ease: 'easeIn' } }}
               transition={{ type: 'spring', stiffness: 320, damping: 24 }}
               className="text-center"
             >

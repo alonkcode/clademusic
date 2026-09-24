@@ -93,6 +93,7 @@ vi.mock('@/hooks/api/useSpotifyConnect', () => ({
 
 vi.mock('@/hooks/api/useSpotifyUser', () => ({
   useSpotifyConnected: () => ({ data: false }),
+  useSpotifyBlocked: () => ({ data: false }),
 }));
 
 function renderPlayer() {

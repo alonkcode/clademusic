@@ -1,1 +1,7 @@
 project_id = "jlmddkchldgcjmdpvibm"
+
+# The gateway JWT check would reject the CI reporter, which authenticates with
+# an X-CI-TOKEN header and sends no Authorization header. The function checks
+# credentials itself on both paths: X-CI-TOKEN on POST, an admin session on GET.
+[functions.test-runs]
+verify_jwt = false

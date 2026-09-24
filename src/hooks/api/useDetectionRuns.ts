@@ -112,6 +112,40 @@ export function usePromoteDetectionRun() {
   });
 }
 
+export interface RevertDetectionRunResult {
+  track_id: string;
+  sections_removed: number;
+  /** Sections the promotion had replaced, put back. Zero when none were recorded. */
+  sections_restored: number;
+  /** False for a run promoted before undo history existed: its key was left as it is. */
+  track_restored: boolean;
+}
+
+/**
+ * Undo a promotion: the run's sections come off the track, whatever it
+ * replaced goes back when that was recorded, and the run returns to pending.
+ * Only the run that is currently the track's canonical analysis can be undone;
+ * the database says so in the error when it is not.
+ */
+export function useRevertDetectionRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (runId: string): Promise<RevertDetectionRunResult> => {
+      const { data, error } = await supabase.rpc('revert_detection_run' as never, {
+        p_run_id: runId,
+      } as never);
+      if (error) throw new Error(error.message);
+      const rows = data as unknown as RevertDetectionRunResult[];
+      return rows?.[0] ?? { track_id: '', sections_removed: 0, sections_restored: 0, track_restored: false };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['detectionRuns'] });
+      queryClient.invalidateQueries({ queryKey: ['detectionRun'] });
+      queryClient.invalidateQueries({ queryKey: ['track-sections'] });
+    },
+  });
+}
+
 export function useRejectDetectionRun() {
   const queryClient = useQueryClient();
   return useMutation({

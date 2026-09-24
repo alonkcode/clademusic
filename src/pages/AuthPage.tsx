@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { useSetting } from '@/hooks/useSystemSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,7 +27,11 @@ export default function AuthPage({ initialMode = 'signin' }: { initialMode?: Aut
     if (qp === 'signup' || qp === 'signin') return qp;
     return initialMode;
   }, [searchParams, initialMode]);
-  const [mode, setMode] = useState<AuthMode>(initial);
+  const [requestedMode, setMode] = useState<AuthMode>(initial);
+  // With signups closed (admin flag), a request for the sign-up form - from
+  // /signup or ?mode=signup - resolves to sign-in instead.
+  const signupsEnabled = useSetting('flag.signups_enabled');
+  const mode: AuthMode = requestedMode === 'signup' && !signupsEnabled ? 'signin' : requestedMode;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -260,18 +265,22 @@ export default function AuthPage({ initialMode = 'signin' }: { initialMode?: Aut
           <div className="mt-6 text-center">
             <p className="text-sm text-muted-foreground">
               {mode === 'signin' ? (
-                <>
-                  Don't have an account?{' '}
-                  <button
-                    onClick={() => {
-                      setMode('signup');
-                      setSearchParams({ mode: 'signup' });
-                    }}
-                    className="text-primary hover:underline font-medium"
-                  >
-                    Sign up
-                  </button>
-                </>
+                signupsEnabled ? (
+                  <>
+                    Don't have an account?{' '}
+                    <button
+                      onClick={() => {
+                        setMode('signup');
+                        setSearchParams({ mode: 'signup' });
+                      }}
+                      className="text-primary hover:underline font-medium"
+                    >
+                      Sign up
+                    </button>
+                  </>
+                ) : (
+                  <>New signups are currently closed.</>
+                )
               ) : (
                 <>
                   Already have an account?{' '}

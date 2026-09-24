@@ -4,6 +4,7 @@ import { Plus, Trash2, Save, X, Loader2, ChevronLeft, ChevronRight } from 'lucid
 import { cn } from '@/lib/utils';
 import { usePlayer } from '@/player/PlayerContext';
 import { useSaveTrackSections } from '@/hooks/api/useTrackSections';
+import { useTrack } from '@/hooks/api/useTracks';
 import {
   addBoundary,
   draftFromSections,
@@ -43,15 +44,24 @@ function formatMs(ms: number): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
+const positiveMs = (ms: unknown): number =>
+  typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0;
+
 export function SectionEditor({ trackId, sections, onClose, className }: SectionEditorProps) {
   const { positionMs, durationMs, seekTo } = usePlayer();
   const save = useSaveTrackSections();
+  const { data: track } = useTrack(trackId);
 
   // Seeded once: re-deriving from `sections` on every render would throw the
   // draft away the moment a refetch landed mid-edit.
   const [draft, setDraft] = useState<SectionMarker[]>(() => draftFromSections(sections));
 
-  const safeDuration = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
+  // The last section ends where the track does, so Save needs a length. The
+  // player only reports one once its embed has said so - the guest Spotify
+  // embed often never does - which left Save disabled for good. The player
+  // drawer's own seekbar falls back to the catalog's duration for the same
+  // reason, so do the same here: live value first, catalog value otherwise.
+  const safeDuration = positiveMs(durationMs) || positiveMs(track?.duration_ms);
   const built = useMemo(() => toSections(draft, safeDuration), [draft, safeDuration]);
   const problem = draftProblem(draft, safeDuration);
 
@@ -70,7 +80,7 @@ export function SectionEditor({ trackId, sections, onClose, className }: Section
           end_ms: s.endMs,
         })),
       });
-      toast.success(`Saved ${count} sections.`);
+      toast.success(`Saved ${count} section${count === 1 ? '' : 's'}.`);
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not save these sections.');

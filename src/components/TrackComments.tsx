@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/hooks/useAuth';
+import { useRateLimitGuard, useSetting } from '@/hooks/useSystemSettings';
 import { toast } from '@/hooks/use-toast';
 import {
   useDeleteTrackComment,
@@ -36,6 +37,8 @@ const failed = (title: string) => toast({ title, description: 'Please try again.
 export function TrackComments({ trackId, className = '' }: TrackCommentsProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const commentsEnabled = useSetting('flag.comments_enabled');
+  const allowCommentPost = useRateLimitGuard('limit.comments');
 
   const { data: comments = [], isLoading } = useTrackComments(trackId);
   useTrackCommentsRealtime(trackId);
@@ -55,6 +58,7 @@ export function TrackComments({ trackId, className = '' }: TrackCommentsProps) {
   const submitComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newComment.trim() || !user || postComment.isPending) return;
+    if (!commentsEnabled || !allowCommentPost()) return;
 
     const parent = replyingTo;
     try {
@@ -269,7 +273,11 @@ export function TrackComments({ trackId, className = '' }: TrackCommentsProps) {
       </div>
 
       {/* Post comment */}
-      {user ? (
+      {!commentsEnabled ? (
+        <p className="rounded-lg border border-dashed border-border/50 p-4 text-center text-sm text-muted-foreground">
+          Commenting is temporarily turned off.
+        </p>
+      ) : user ? (
         <form onSubmit={submitComment} className="space-y-3">
           {replyingTo && (
             <div className="p-3 bg-muted rounded-lg flex items-center justify-between">

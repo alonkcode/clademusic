@@ -4,9 +4,9 @@ import { usePlayer } from './PlayerContext';
 import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Repeat, Loader2, EyeOff } from 'lucide-react';
 import { QueueSheet } from './QueueSheet';
 import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
-import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
+import { useSpotifyBlocked, useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
 import { useIsAdmin } from '@/hooks/api/useAdmin';
-import { getSectionDisplayLabel } from '@/lib/sections';
+import { sectionDisplayNames } from '@/lib/sections';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { UniversalPlayerHost } from '@/player/universal/UniversalPlayerHost';
@@ -76,10 +76,12 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const { user } = useAuth();
   const navigate = useNavigate();
   const { data: isSpotifyConnected } = useSpotifyConnected();
+  const { data: isSpotifyBlocked } = useSpotifyBlocked();
   const connectSpotify = useConnectSpotify();
   const { data: isAdmin } = useIsAdmin();
 
   const { sections, harmony, hudSections, isLoading: isHarmonyLoading, resolvedTrackId } = usePlayerHarmony(canonicalTrackId);
+  const sectionNames = useMemo(() => sectionDisplayNames(sections), [sections]);
 
   const safeQueue = Array.isArray(queue) ? queue : [];
   const safeQueueIndex = typeof queueIndex === 'number' ? queueIndex : -1;
@@ -411,8 +413,9 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 {sections.length > 0 && (
                   <div className="mt-3 flex items-center gap-2">
                     <div className="flex-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-                      {sections.map((section) => {
+                      {sections.map((section, index) => {
                         const isActive = currentSectionId === section.id;
+                        const sectionName = sectionNames[index];
                         return (
                           <button
                             key={section.id}
@@ -436,10 +439,10 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                                 ? 'bg-primary text-primary-foreground border-primary/50'
                                 : 'bg-muted/60 text-muted-foreground border-border/60 hover:bg-muted',
                             ].join(' ')}
-                            aria-label={`Jump to ${getSectionDisplayLabel(section.label)}`}
-                            title={`Jump to ${getSectionDisplayLabel(section.label)}${sectionWhy && isActive ? ` — ${sectionWhy}` : ''}`}
+                            aria-label={`Jump to ${sectionName}`}
+                            title={`Jump to ${sectionName}${sectionWhy && isActive ? ` — ${sectionWhy}` : ''}`}
                           >
-                            {getSectionDisplayLabel(section.label)}
+                            {sectionName}
                           </button>
                         );
                       })}
@@ -576,13 +579,22 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             visually hidden) while idle, so there's no empty-looking strip
             reserved at the bottom of every page before anything has played;
             the iframe host above keeps mounting regardless (see isIdle
-            comment above the DetailsPanel setup). */}
+            comment above the DetailsPanel setup). Below lg the row wraps: the
+            seekbar block (order-last, w-full) takes its own line under the
+            controls, so the track gets the full bar width instead of whatever
+            is left beside the buttons. In one row the track measured ~40px
+            wide anywhere from 640px to ~850px (phones in landscape, tablets),
+            so the wrap can't stop at the phone breakpoint. lg+ is one
+            non-wrapping row. */}
         {!isIdle && (
-        <div className="flex items-center gap-2 px-3 py-2 md:gap-3 md:px-4 md:py-2.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 lg:flex-nowrap md:gap-3 md:px-4 md:py-2.5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/80 text-lg shadow-inner md:h-10 md:w-10">
             {meta.Icon ? <meta.Icon className="h-4 w-4 md:h-5 md:w-5" /> : meta.badge}
           </span>
-          <div ref={titleSwipeRef} className="flex min-w-0 flex-col leading-tight [touch-action:pan-y]" style={{ flexBasis: '9rem' }}>
+          {/* Below lg the title has a zero basis and grows to fill the first
+              line, so it can never push a control onto the wrapped line (a
+              fixed 9rem basis counts toward wrapping); lg+ keeps 9rem. */}
+          <div ref={titleSwipeRef} className="flex min-w-0 flex-1 flex-col leading-tight [touch-action:pan-y] lg:flex-[0_1_9rem]">
             {resolvedTitle && (
               <span className="truncate text-xs font-bold text-foreground md:text-sm" aria-label="Track title">{resolvedTitle}</span>
             )}
@@ -606,9 +618,9 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
 
           <div className="flex shrink-0 items-center gap-1">
             {/* Previous/next hide below sm - on a narrow phone width there is
-                not enough room for badge + title + prev + play + next + seek
-                + expand + close all in one non-wrapping row without things
-                overlapping; Spotify's own mobile bar drops to just
+                not enough room for badge + title + prev + play + next
+                + expand + hide + close on one line without the title
+                collapsing to nothing; Spotify's own mobile bar drops to just
                 play/pause too, leaving prev/next to the expanded view. */}
             <button
               type="button"
@@ -662,8 +674,9 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               basis (the title block) do, so without this floor the seekbar
               - not the title - was the one collapsing, and its own children
               (which never got the memo) kept their size and visually spilled
-              into the icon buttons after it. */}
-          <div className="flex min-w-[130px] flex-1 items-center gap-2 text-white">
+              into the icon buttons after it. Below lg it instead owns the
+              wrapped second line (w-full, order-last). */}
+          <div className="order-last flex w-full min-w-[130px] items-center gap-2 text-white lg:order-none lg:w-auto lg:flex-1">
             <span className="w-9 shrink-0 text-right text-[10px] tabular-nums md:w-10 md:text-xs" aria-label="Elapsed time">{formatTime(positionSec)}</span>
             <div className="relative min-w-[40px] flex-1">
               {sections.length > 1 && durationMsSafe > 0 && (
@@ -760,7 +773,20 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               aria-label="Volume"
             />
 
-            {provider === 'spotify' && isSpotifyConnected !== true && (
+            {provider === 'spotify' && isSpotifyBlocked && (
+              // Spotify answers 403 for this account, so a Reconnect button
+              // would loop: OAuth succeeds, /me is refused again, the button
+              // comes back. Say what is actually wrong instead.
+              <span
+                role="status"
+                className="max-w-[8.5rem] text-right text-[10px] font-semibold leading-tight text-amber-400"
+                title="Spotify is refusing this account (403). The account must be added as an allowed user in the Spotify Developer Dashboard - reconnecting won't help until then. Playing a preview instead."
+              >
+                Spotify blocked this account
+              </span>
+            )}
+
+            {provider === 'spotify' && isSpotifyConnected !== true && !isSpotifyBlocked && (
               <button
                 type="button"
                 onClick={handleReconnectSpotify}

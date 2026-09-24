@@ -31,6 +31,7 @@ import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { formatTime, formatDuration } from '@/lib/timeFormat';
+import { sectionDisplayNames } from '@/lib/sections';
 import { ProfileCircle } from '@/components/shared';
 import { TrackThumbnail } from '@/components/TrackThumbnail';
 
@@ -52,6 +53,7 @@ export default function TrackDetailPage() {
   const seekTo = (_seconds: number) => {};
   
   const [sections, setSections] = useState<TrackSection[]>([]);
+  const sectionNames = sectionDisplayNames(sections);
   const [hooktheoryData, setHooktheoryData] = useState<any>(null);
   const [whoSampledData, setWhoSampledData] = useState<any>(null);
   const [youtubeVideos, setYoutubeVideos] = useState<VideoSource[]>([]);
@@ -416,7 +418,7 @@ export default function TrackDetailPage() {
                 Song Structure
               </h3>
               <div className="space-y-2">
-                {sections.map((section) => {
+                {sections.map((section, index) => {
                   const isActive = currentSection?.id === section.id;
                   return (
                     <button
@@ -435,7 +437,7 @@ export default function TrackDetailPage() {
                             "font-medium capitalize flex items-center gap-2",
                             isActive && "text-primary"
                           )}>
-                            {section.label}
+                            {sectionNames[index]}
                             {isActive && <span className="text-xs animate-pulse">●</span>}
                             {!isActive && <Play className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />}
                           </div>

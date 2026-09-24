@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { PageLayout } from '@/components/shared';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DetectionRunsPanel } from '@/components/admin/DetectionRunsPanel';
+import { SystemSettingsPanel } from '@/components/admin/SystemSettingsPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAdminStats, useFlaggedContent, useAdminUsers } from '@/hooks/api/useAdmin';
 import { useLatestTestRuns, useTestRunHistory } from '@/hooks/api/useTestRuns';
@@ -20,8 +21,8 @@ export default function AdminDashboard() {
   const { data: stats, isLoading: statsLoading } = useAdminStats();
   const { data: flaggedContent = [], isLoading: flaggedLoading, isError: flaggedError } = useFlaggedContent();
   const { data: usersData, isLoading: usersLoading, isError: usersError, refetch: refetchUsers } = useAdminUsers(userSearch, userLimit, userOffset);
-  const { data: latestRuns = [] } = useLatestTestRuns();
-  const { data: history = [] } = useTestRunHistory(50);
+  const { data: latestRuns = [], isError: latestRunsError } = useLatestTestRuns();
+  const { data: history = [], isError: historyError } = useTestRunHistory(50);
 
   const totalUsers = usersData?.total ?? 0;
   const totalUserPages = useMemo(
@@ -295,19 +296,7 @@ export default function AdminDashboard() {
           </TabsContent>
 
           <TabsContent value="settings" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>System Settings</CardTitle>
-                <CardDescription>
-                  Configure feature flags, rate limits, and system preferences
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Settings panel will be added here
-                </p>
-              </CardContent>
-            </Card>
+            <SystemSettingsPanel />
           </TabsContent>
 
           <TabsContent value="testruns" className="space-y-6">
@@ -317,6 +306,14 @@ export default function AdminDashboard() {
                 <CardDescription>Hourly sanity → pentest → performance</CardDescription>
               </CardHeader>
               <CardContent>
+                {(latestRunsError || historyError) && (
+                  <Alert variant="destructive" className="mb-4">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      Failed to load test runs. The test-runs edge function may not be deployed.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="grid md:grid-cols-3 gap-3">
                   {['sanity','pentest','performance'].map((suite) => {
                     const run = latestRuns.find(r => r.suite === suite);

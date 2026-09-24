@@ -2,12 +2,21 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import { useToast } from './use-toast';
+import { useRateLimitGuard } from './useSystemSettings';
 
 /**
  * DRY hook for managing ALL user-track interactions
  * Replaces separate useLike, useSave, useHarmony hooks
  * Single source of truth for liked, harmony_saved, bookmarked states
  */
+
+// The generic "Failed to update ..." toast hid whether a failure was RLS, a
+// constraint or a missing function - show what the database actually said.
+function errorDetail(error: unknown, fallback: string): string {
+  const e = error as { message?: string; code?: string } | null;
+  if (!e?.message) return fallback;
+  return `${fallback}: ${e.message}${e.code ? ` (${e.code})` : ''}`;
+}
 
 export interface TrackInteraction {
   liked: boolean;
@@ -21,6 +30,7 @@ export interface TrackInteraction {
 export function useInteractions(trackId: string | null) {
   const { user } = useAuth();
   const { toast } = useToast();
+  const allowInteraction = useRateLimitGuard('limit.interactions');
 
   const [interaction, setInteraction] = useState<TrackInteraction>({
     liked: false,
@@ -82,6 +92,8 @@ export function useInteractions(trackId: string | null) {
       return;
     }
 
+    if (!allowInteraction()) return;
+
     // Optimistic update
     const previousState = interaction.liked;
     setInteraction((prev) => ({ ...prev, liked: !prev.liked }));
@@ -110,11 +122,11 @@ export function useInteractions(trackId: string | null) {
       console.error('Error toggling like:', error);
       toast({
         title: 'Error',
-        description: 'Failed to update like status',
+        description: errorDetail(error, 'Failed to update like status'),
         variant: 'destructive',
       });
     }
-  }, [user, trackId, interaction.liked, toast]);
+  }, [user, trackId, interaction.liked, toast, allowInteraction]);
 
   // Toggle harmony save (DRY implementation)
   const toggleHarmonySave = useCallback(async () => {
@@ -126,6 +138,8 @@ export function useInteractions(trackId: string | null) {
       });
       return;
     }
+
+    if (!allowInteraction()) return;
 
     const previousState = interaction.harmonySaved;
     setInteraction((prev) => ({ ...prev, harmonySaved: !prev.harmonySaved }));
@@ -152,11 +166,11 @@ export function useInteractions(trackId: string | null) {
       console.error('Error toggling harmony save:', error);
       toast({
         title: 'Error',
-        description: 'Failed to update harmony save',
+        description: errorDetail(error, 'Failed to update harmony save'),
         variant: 'destructive',
       });
     }
-  }, [user, trackId, interaction.harmonySaved, toast]);
+  }, [user, trackId, interaction.harmonySaved, toast, allowInteraction]);
 
   // Toggle bookmark (DRY implementation)
   const toggleBookmark = useCallback(async () => {
@@ -168,6 +182,8 @@ export function useInteractions(trackId: string | null) {
       });
       return;
     }
+
+    if (!allowInteraction()) return;
 
     const previousState = interaction.bookmarked;
     setInteraction((prev) => ({ ...prev, bookmarked: !prev.bookmarked }));
@@ -194,11 +210,11 @@ export function useInteractions(trackId: string | null) {
       console.error('Error toggling bookmark:', error);
       toast({
         title: 'Error',
-        description: 'Failed to update bookmark',
+        description: errorDetail(error, 'Failed to update bookmark'),
         variant: 'destructive',
       });
     }
-  }, [user, trackId, interaction.bookmarked, toast]);
+  }, [user, trackId, interaction.bookmarked, toast, allowInteraction]);
 
   // Toggle vibe (DRY implementation)
   const toggleVibe = useCallback(async () => {
@@ -210,6 +226,8 @@ export function useInteractions(trackId: string | null) {
       });
       return;
     }
+
+    if (!allowInteraction()) return;
 
     const previousState = interaction.vibed;
     setInteraction((prev) => ({ ...prev, vibed: !prev.vibed }));
@@ -229,11 +247,11 @@ export function useInteractions(trackId: string | null) {
       console.error('Error toggling vibe:', error);
       toast({
         title: 'Error',
-        description: 'Failed to update vibe status',
+        description: errorDetail(error, 'Failed to update vibe status'),
         variant: 'destructive',
       });
     }
-  }, [user, trackId, interaction.vibed, toast]);
+  }, [user, trackId, interaction.vibed, toast, allowInteraction]);
 
   // Record a share event (analytics counter, not a toggle - guests can still
   // use the share sheet itself, they just don't get a persisted count)

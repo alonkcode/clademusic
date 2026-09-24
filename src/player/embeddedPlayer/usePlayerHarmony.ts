@@ -4,6 +4,7 @@ import { useTrack } from '@/hooks/api/useTracks';
 import { useHarmonicFingerprint } from '@/hooks/api/useHarmonicFingerprint';
 import { useResolvedTrackId } from '@/hooks/api/useResolvedTrackId';
 import { isTestEnv } from '@/lib/env';
+import { sectionDisplayNames } from '@/lib/sections';
 import type { SongSection } from '@/types';
 import { estimateTempoFromSections } from '@/lib/harmony/tempoFromAnalysis';
 
@@ -110,17 +111,19 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
   // are carried over too - dropping them here silently forced every section
   // onto the generic bpm/beats-per-chord guess in useSectionSync even for a
   // track that actually had real per-chord timing.
-  const hudSections: SongSection[] = useMemo(
-    () =>
-      sections.map((s) => ({
-        type: s.label,
-        start_time: s.start_ms / 1000,
-        end_time: s.end_ms / 1000,
-        chords: s.chords,
-        chord_timings: s.chord_timings,
-      })),
-    [sections]
-  );
+  const hudSections: SongSection[] = useMemo(() => {
+    // `label` is the numbered name ("Verse 2") the HUD's chips show; `type`
+    // stays the canonical label the editor and section variants key on.
+    const names = sectionDisplayNames(sections);
+    return sections.map((s, i) => ({
+      type: s.label,
+      label: names[i],
+      start_time: s.start_ms / 1000,
+      end_time: s.end_ms / 1000,
+      chords: s.chords,
+      chord_timings: s.chord_timings,
+    }));
+  }, [sections]);
 
   // True only for the FIRST fetch of a brand-new track (no cached data yet),
   // not a background refetch of one already shown once. EmbeddedPlayerDrawer

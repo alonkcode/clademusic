@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Waves, Github, Mail } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useSetting } from '@/hooks/useSystemSettings';
 
 // Every entry here has to resolve to something real: either a registered
 // route, an in-page anchor that actually exists on the landing page, or a
@@ -13,18 +14,18 @@ import { Link } from 'react-router-dom';
 // Privacy Policy page, which already covers cookies in section 5.4).
 export function Footer() {
   const [newsletterEmail, setNewsletterEmail] = useState('');
+  const billingEnabled = useSetting('flag.billing_enabled');
+  const forumEnabled = useSetting('flag.forum_enabled');
   const footerLinks = {
     Product: [
       { label: 'Features', href: '/#features' },
-      { label: 'Pricing', href: '/pricing' },
+      ...(billingEnabled ? [{ label: 'Pricing', href: '/pricing' }] : []),
       { label: 'Demo', href: '/#demo' },
     ],
     Company: [
       { label: 'Contact', href: 'mailto:hello@cladeai.com' },
     ],
-    Resources: [
-      { label: 'Community (Forums)', href: '/forum' },
-    ],
+    Resources: forumEnabled ? [{ label: 'Community (Forums)', href: '/forum' }] : [],
     Legal: [
       { label: 'Privacy Policy', href: '/privacy' },
       { label: 'Terms of Service', href: '/terms' },
@@ -82,7 +83,7 @@ export function Footer() {
           </div>
 
           {/* Links */}
-          {Object.entries(footerLinks).map(([category, links]) => (
+          {Object.entries(footerLinks).filter(([, links]) => links.length > 0).map(([category, links]) => (
             <div key={category}>
               <h3 className="font-semibold text-white mb-4">{category}</h3>
               <ul className="space-y-3">

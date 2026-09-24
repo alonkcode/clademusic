@@ -70,6 +70,29 @@ export function getSectionDisplayLabel(label: SongSectionType): string {
 }
 
 /**
+ * Display names for a track's sections, in playing order: a label is numbered
+ * only where it repeats ("Verse 1", "Verse 2", "Chorus 1"...), and a lone one
+ * stays plain ("Intro", "Bridge").
+ *
+ * Numbered by counting occurrences in the order given, not from a stored
+ * ordinal: the column defaults to 1, so rows written before ordinals existed
+ * would otherwise all read "Verse 1". Callers pass sections sorted by start.
+ */
+export function sectionDisplayNames(sections: Array<{ label: SongSectionType }>): string[] {
+  const totals = new Map<string, number>();
+  for (const section of sections) totals.set(section.label, (totals.get(section.label) ?? 0) + 1);
+
+  const seen = new Map<string, number>();
+  return sections.map((section) => {
+    const base = getSectionDisplayLabel(section.label);
+    if ((totals.get(section.label) ?? 0) < 2) return base;
+    const occurrence = (seen.get(section.label) ?? 0) + 1;
+    seen.set(section.label, occurrence);
+    return `${base} ${occurrence}`;
+  });
+}
+
+/**
  * Get color class for section type (Tailwind)
  */
 export function getSectionColor(label: SongSectionType): string {
