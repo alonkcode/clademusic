@@ -11,7 +11,7 @@ const getReasonMessage = (reason: unknown) => {
   if (reason instanceof Error) return reason.message;
   if (typeof reason === "string") return reason;
   try {
-    return JSON.stringify(reason);s
+    return JSON.stringify(reason);
   } catch {
     return String(reason);
   }

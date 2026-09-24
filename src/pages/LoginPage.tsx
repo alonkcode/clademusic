@@ -55,10 +55,10 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // If auth already resolved and user exists, hand off to the gate
+  // If auth already resolved and user exists, go directly to the feed.
   useEffect(() => {
     if (!loading && user) {
-      navigate('/auth', { replace: true });
+      navigate('/feed', { replace: true });
     }
   }, [user, loading, navigate]);
 
@@ -94,7 +94,7 @@ export default function LoginPage() {
           return;
         }
         toast.success('Welcome back!');
-        navigate('/auth', { replace: true });
+        navigate('/feed', { replace: true });
       } else {
         const { error, needsEmailConfirmation, alreadyRegistered } = await signUp(
           email,

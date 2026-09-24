@@ -91,6 +91,12 @@ describe('Seeking to a section', () => {
     );
   });
 
+  it('shows millisecond precision in the section timestamp labels', () => {
+    renderSections();
+
+    expect(screen.getByText('0:50.000')).toBeInTheDocument();
+  });
+
   it('stays on Spotify when the Spotify player is the one open', () => {
     Object.assign(player, { spotifyOpen: true, spotifyTrackId: 'sp-other' });
     renderSections();

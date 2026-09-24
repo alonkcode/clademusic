@@ -53,3 +53,4 @@ playwright-report/
 
 # Supabase CLI scratch
 supabase/.temp/
+.vercel

@@ -60,6 +60,8 @@ ORDER=(
   20260828140000_harden_auto_playlists.sql
   20260901120000_wire_credits_to_live_detection.sql
   20260921190700_grant_signup_credits.sql
+  20260923120000_system_settings.sql
+  20260923130000_fix_interaction_writes.sql
 )
 
 fix_sql() {
@@ -183,6 +185,46 @@ fix_sql() {
       echo "-- bundle-fixes/10-harmonic-retention.sql"
       echo "-- ============================================================"
       cat supabase/bundle-fixes/10-harmonic-retention.sql
+      echo
+    fi
+
+    # Undo-promotion: snapshots a run's key/sections before promote so an
+    # admin can roll it back. Needs detection_runs.detection_run_sections,
+    # detection_run_chords and tracks to exist, so it sits after the whole
+    # detection-run stack.
+    if [ "$f" = "20260923130000_fix_interaction_writes.sql" ]; then
+      echo
+      echo "-- ============================================================"
+      echo "-- sql-editor/17-live-detection-runs.sql"
+      echo "-- ============================================================"
+      cat supabase/sql-editor/17-live-detection-runs.sql
+      echo
+      echo "-- ============================================================"
+      echo "-- sql-editor/18-promote-detection-run.sql"
+      echo "-- ============================================================"
+      cat supabase/sql-editor/18-promote-detection-run.sql
+      echo
+      echo "-- ============================================================"
+      echo "-- sql-editor/19-save-track-sections.sql"
+      echo "-- ============================================================"
+      cat supabase/sql-editor/19-save-track-sections.sql
+      echo
+      echo
+      echo "-- ============================================================"
+      echo "-- sql-editor/29-auto-analysis.sql"
+      echo "-- ============================================================"
+      cat supabase/sql-editor/29-auto-analysis.sql
+      echo
+      echo
+      echo "-- ============================================================"
+      echo "-- sql-editor/30-undo-promotion.sql"
+      echo "-- ============================================================"
+      cat supabase/sql-editor/30-undo-promotion.sql
+      echo
+      echo "-- ============================================================"
+      echo "-- sql-editor/31-save-track-sections-mirror.sql"
+      echo "-- ============================================================"
+      cat supabase/sql-editor/31-save-track-sections-mirror.sql
       echo
     fi
   done

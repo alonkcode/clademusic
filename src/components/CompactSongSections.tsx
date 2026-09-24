@@ -190,12 +190,12 @@ export function CompactSongSections({
               isActive && 'ring-2 ring-primary ring-offset-1',
               colorClass
             )}
-            title={`Play ${section.label} from ${formatTime(section.start_ms)} and show its chords`}
+            title={`Play ${section.label} from ${formatTime(section.start_ms, true)} and show its chords`}
           >
             <div className="flex items-center gap-1">
               <Play className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100 transition-opacity" />
               <span className="capitalize">{section.label}</span>
-              <span className="text-[10px] opacity-60">{formatTime(section.start_ms)}</span>
+              <span className="text-[10px] opacity-60">{formatTime(section.start_ms, true)}</span>
             </div>
           </motion.button>
         );

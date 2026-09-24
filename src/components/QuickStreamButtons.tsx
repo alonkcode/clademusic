@@ -42,6 +42,8 @@ const YouTubeIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+let latestQuickStreamClick = 0;
+
 /**
  * Provider buttons for Spotify and YouTube.
  * Clickable buttons that trigger autoplay in the universal player.
@@ -115,6 +117,7 @@ export function QuickStreamButtons({
   );
 
   const handleSpotifyClick = useCallback(async () => {
+    const clickGeneration = ++latestQuickStreamClick;
     setPreferredProvider('spotify');
 
     // Same fallback YouTube has had: a card without a cached Spotify id - a
@@ -131,6 +134,7 @@ export function QuickStreamButtons({
       if (!query) return;
       try {
         const { tracks: found } = await searchSpotifyPublic(query, 1);
+        if (clickGeneration !== latestQuickStreamClick) return;
         resolvedId = found[0]?.spotify_id ?? null;
       } catch (err) {
         console.warn('Spotify search failed; cannot play', err);
@@ -141,6 +145,8 @@ export function QuickStreamButtons({
       toast.error(`Couldn't find "${trackTitle ?? 'this track'}" on Spotify`);
       return;
     }
+
+    if (clickGeneration !== latestQuickStreamClick) return;
 
     // Always allow Spotify to play *something* immediately:
     // - Guest / not connected: Spotify embed preview
@@ -159,6 +165,7 @@ export function QuickStreamButtons({
   }, [canonicalTrackId, trackTitle, trackArtist, openPlayer, currentPositionSec, spotifyTrackId]);
 
   const handleYouTubeClick = useCallback(async () => {
+    const clickGeneration = ++latestQuickStreamClick;
     setPreferredProvider('youtube');
 
     // If we already have a YouTube ID, use it; otherwise, search for a best match.
@@ -166,6 +173,7 @@ export function QuickStreamButtons({
     if (!resolvedId) {
       try {
         const results = await searchYouTubeVideos(trackArtist || '', trackTitle || '');
+        if (clickGeneration !== latestQuickStreamClick) return;
         resolvedId = results[0]?.videoId;
       } catch (err) {
         console.warn('YouTube search failed; falling back to no-op', err);
@@ -176,6 +184,8 @@ export function QuickStreamButtons({
       console.warn('No YouTube result found for track; cannot play');
       return;
     }
+
+    if (clickGeneration !== latestQuickStreamClick) return;
 
     openPlayer({
       canonicalTrackId,

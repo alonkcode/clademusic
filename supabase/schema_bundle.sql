@@ -107,24 +107,19 @@ CREATE TABLE public.chord_submissions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Admin-controlled system settings: feature flags, rate limits and site
--- preferences, edited from the Settings tab of the Admin Dashboard.
---
--- One row per setting, keyed by a namespaced name (flag.*, limit.*, pref.*).
--- There is deliberately NO seed data: the app ships its own defaults
--- (src/lib/systemSettings.ts), and a key with no row means "use the default".
--- Rows appear the first time an admin changes a setting, so the defaults live
--- in exactly one place and cannot drift from a copy here.
---
--- Everyone can READ this table - guests need the flags to know whether the
--- sign-up form is open or the site is in maintenance - so it must never hold
--- anything secret. Only admins can write.
+-- Create system settings table for admin budget controls
 CREATE TABLE public.system_settings (
-  key        text PRIMARY KEY CHECK (key ~ '^(flag|limit|pref)\.[a-z0-9_]+$'),
-  value      jsonb NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key TEXT NOT NULL UNIQUE,
+  value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Insert default system settings
+INSERT INTO public.system_settings (key, value) VALUES
+  ('max_analyses_per_day', '{"limit": 1000, "current": 0}'::jsonb),
+  ('max_comparisons_per_day', '{"limit": 500, "current": 0}'::jsonb),
+  ('global_rate_limit', '{"requests_per_minute": 60}'::jsonb);
 
 -- Enable RLS on all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -198,32 +193,11 @@ CREATE POLICY "Users can create submissions" ON public.chord_submissions
 CREATE POLICY "Moderators can manage submissions" ON public.chord_submissions
   FOR UPDATE USING (public.has_role(auth.uid(), 'moderator') OR public.has_role(auth.uid(), 'admin'));
 
--- System settings policies: public read, admin-only write
-CREATE POLICY "System settings are publicly readable" ON public.system_settings
-  FOR SELECT
-  USING (true);
+-- System settings policies (admin only)
+CREATE POLICY "Admins can view settings" ON public.system_settings
+  FOR SELECT USING (public.has_role(auth.uid(), 'admin'));
 CREATE POLICY "Admins can manage settings" ON public.system_settings
-  FOR ALL
-  USING (public.has_role(auth.uid(), 'admin'::app_role))
-  WITH CHECK (public.has_role(auth.uid(), 'admin'::app_role));
-
--- Stamp who changed a row and when on the server, so the client cannot
--- claim someone else made the change.
-CREATE OR REPLACE FUNCTION public.stamp_system_settings()
-RETURNS trigger
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-BEGIN
-  NEW.updated_at := now();
-  NEW.updated_by := auth.uid();
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER stamp_system_settings
-  BEFORE INSERT OR UPDATE ON public.system_settings
-  FOR EACH ROW EXECUTE FUNCTION public.stamp_system_settings();
+  FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- Trigger for profile creation on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -268,6 +242,7 @@ CREATE OR REPLACE TRIGGER update_tracks_updated_at
   BEFORE UPDATE ON public.tracks
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
+
 -- ============================================================
 -- 20260114211408_1be47900-6c38-4adb-b34e-5dfe41a998e4.sql
 -- ============================================================
@@ -283,6 +258,7 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
 
 -- ============================================================
 -- 20260115085704_58686868-f4a3-4d8f-9b0b-766b1d0430fc.sql
@@ -386,6 +362,7 @@ ON public.profiles
 FOR UPDATE
 USING (auth.uid() = id)
 WITH CHECK (auth.uid() = id);
+
 
 -- ============================================================
 -- 20260115092130_unified_music_schema.sql
@@ -661,6 +638,7 @@ BEFORE UPDATE ON public.user_locations
 FOR EACH ROW
 EXECUTE FUNCTION public.update_updated_at();
 
+
 -- ============================================================
 -- 20260118065431_c2bd75bd-b63c-4560-bc4c-0f96e698af9d.sql
 -- ============================================================
@@ -734,6 +712,7 @@ CREATE POLICY "Users can record their own plays"
 ON public.play_history
 FOR INSERT
 WITH CHECK (auth.uid() = user_id);
+
 
 -- ============================================================
 -- 20260120091200_add_sections_to_tracks.sql
@@ -4681,7 +4660,6 @@ create policy "Users can insert playback events"
 comment on table public.playback_events is 'Controller-layer playback analytics (intents, sessions, qualified plays). Not a royalty settlement source.';
 
 
-
 -- ============================================================
 -- 20260828120000_harden_signup_trigger.sql
 -- ============================================================
@@ -5029,5 +5007,2077 @@ GRANT EXECUTE ON FUNCTION public.spend_credit(UUID, INTEGER, TEXT) TO authentica
 COMMENT ON FUNCTION public.spend_credit IS
   'Atomically deducts credits if the balance covers it; returns (false, current_balance) otherwise. Logs to billing_events.';
 
+
+-- ============================================================
+-- 20260921190700_grant_signup_credits.sql
+-- ============================================================
+-- Grant 2500 credits to every newly registered user.
+--
+-- Updates the signup trigger so NEW users get 2500 credits at creation
+-- instead of 50. Existing users are NOT modified.
+--
+-- Safe to re-run: CREATE OR REPLACE + ON CONFLICT DO NOTHING.
+
+BEGIN;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  BEGIN
+    INSERT INTO public.profiles (id, email, display_name)
+    VALUES (
+      NEW.id,
+      NEW.email,
+      COALESCE(
+        NULLIF(NEW.raw_user_meta_data->>'display_name', ''),
+        NULLIF(split_part(COALESCE(NEW.email, ''), '@', 1), ''),
+        'listener'
+      )
+    )
+    ON CONFLICT (id) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'handle_new_user/profiles %: %', NEW.id, SQLERRM;
+  END;
+
+  BEGIN
+    INSERT INTO public.user_roles (user_id, role) VALUES (NEW.id, 'user')
+    ON CONFLICT (user_id, role) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'handle_new_user/roles %: %', NEW.id, SQLERRM;
+  END;
+
+  BEGIN
+    INSERT INTO public.credits (user_id, balance) VALUES (NEW.id, 2500)
+    ON CONFLICT (user_id) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'handle_new_user/credits %: %', NEW.id, SQLERRM;
+  END;
+
+  RETURN NEW;
+END;
+$$;
+
+COMMIT;
+
+
+-- ============================================================
+-- 20260923120000_system_settings.sql
+-- ============================================================
+-- Admin-controlled system settings: feature flags, rate limits and site
+-- preferences, edited from the Settings tab of the Admin Dashboard.
+--
+-- One row per setting, keyed by a namespaced name (flag.*, limit.*, pref.*).
+-- There is deliberately NO seed data: the app ships its own defaults
+-- (src/lib/systemSettings.ts), and a key with no row means "use the default".
+-- Rows appear the first time an admin changes a setting, so the defaults live
+-- in exactly one place and cannot drift from a copy here.
+--
+-- Everyone can READ this table - guests need the flags to know whether the
+-- sign-up form is open or the site is in maintenance - so it must never hold
+-- anything secret. Only admins can write.
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.system_settings (
+  key        text PRIMARY KEY CHECK (key ~ '^(flag|limit|pref)\.[a-z0-9_]+$'),
+  value      jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL
+);
+
+-- The schema bundle ships the table without updated_by or the key CHECK
+-- (it has id PK + key UNIQUE + no updated_by). If the table already exists
+-- from the bundle, add the missing column so the trigger below can write it.
+ALTER TABLE public.system_settings
+  ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL;
+
+ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins can view settings" ON public.system_settings;
+DROP POLICY IF EXISTS "System settings are publicly readable" ON public.system_settings;
+CREATE POLICY "System settings are publicly readable"
+  ON public.system_settings FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Admins can manage system settings" ON public.system_settings;
+CREATE POLICY "Admins can manage system settings"
+  ON public.system_settings FOR ALL
+  USING (public.has_role(auth.uid(), 'admin'::app_role))
+  WITH CHECK (public.has_role(auth.uid(), 'admin'::app_role));
+
+-- Stamp who changed a row and when on the server, so the client cannot
+-- claim someone else made the change.
+CREATE OR REPLACE FUNCTION public.stamp_system_settings()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  NEW.updated_by := auth.uid();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS stamp_system_settings ON public.system_settings;
+CREATE OR REPLACE TRIGGER stamp_system_settings
+  BEFORE INSERT OR UPDATE ON public.system_settings
+  FOR EACH ROW EXECUTE FUNCTION public.stamp_system_settings();
+
+COMMIT;
+
+NOTIFY pgrst, 'reload schema';
+
+
+-- ============================================================
+-- 20260923130000_fix_interaction_writes.sql
+-- ============================================================
+-- Like / Save / Harmonic (and any other write to public.user_interactions)
+-- showed an error toast instead of saving. Two independent causes, both only
+-- reachable once a signed-in user actually writes a row - the schema bundle
+-- alone passes, which is why neither showed up before the feed buttons were
+-- wired to the database.
+--
+-- 1. sync_interaction_to_playlist() copies user_interactions.track_id (TEXT)
+--    straight into playlist_tracks.track_id. 11-hotfix-rls-recursion-and-fks
+--    converted that column to UUID with an FK to tracks, so the INSERT fails
+--    with:
+--      column "track_id" is of type uuid but expression is of type text
+--    The original trigger has no exception handler, so the failure rolls back
+--    the like/bookmark/harmony toggle itself (Vibe and Share never hit it -
+--    they don't flip liked/harmony_saved/bookmarked). The hardened version in
+--    20260828140000 swallows the error, but still can never mirror anything:
+--    the type mismatch fails at plan time for every track, so Liked Songs /
+--    Bookmarked / Harmony Collection stay empty.
+--
+--    Rewritten to cast to UUID, and to mirror only ids that are real rows in
+--    tracks. user_interactions.track_id is TEXT precisely because it also holds
+--    provider-only ids ('lastfm:...', 'spotify:...') that have no tracks row and
+--    can never be playlist members - those are skipped, not errors.
+--
+-- 2. 18-hotfix-missing-profile-fks added user_interactions.user_id -> profiles,
+--    so a signed-in user with no profiles row (signup trigger swallowed its own
+--    failure, or the account predates the hardening) is rejected on every
+--    write with:
+--      violates foreign key constraint "user_interactions_user_id_profiles_fkey"
+--    Backfills any such user, same shape as the backfill in
+--    06-harmonic-and-signup.sql.
+
+BEGIN;
+
+INSERT INTO public.profiles (id, email, display_name)
+SELECT
+  u.id,
+  u.email,
+  COALESCE(
+    NULLIF(u.raw_user_meta_data->>'display_name', ''),
+    NULLIF(split_part(COALESCE(u.email, ''), '@', 1), ''),
+    'listener'
+  )
+FROM auth.users u
+LEFT JOIN public.profiles p ON p.id = u.id
+WHERE p.id IS NULL
+ON CONFLICT (id) DO NOTHING;
+
+CREATE OR REPLACE FUNCTION public.sync_interaction_to_playlist()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  v_playlist_id UUID;
+  v_max_position INTEGER;
+  v_type TEXT;
+  v_now BOOLEAN;
+  v_before BOOLEAN;
+  v_track_uuid UUID;
+BEGIN
+  IF NEW.track_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+    v_track_uuid := NEW.track_id::uuid;
+  END IF;
+
+  IF v_track_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM public.tracks WHERE id = v_track_uuid) THEN
+    RETURN NEW;
+  END IF;
+
+  FOREACH v_type IN ARRAY ARRAY['liked','harmony','bookmarked'] LOOP
+    BEGIN
+      IF v_type = 'liked' THEN
+        v_now := NEW.liked;           v_before := COALESCE(OLD.liked, FALSE);
+      ELSIF v_type = 'harmony' THEN
+        v_now := NEW.harmony_saved;   v_before := COALESCE(OLD.harmony_saved, FALSE);
+      ELSE
+        v_now := NEW.bookmarked;      v_before := COALESCE(OLD.bookmarked, FALSE);
+      END IF;
+
+      IF COALESCE(v_now, FALSE) AND NOT v_before THEN
+        SELECT id INTO v_playlist_id
+        FROM public.playlists
+        WHERE user_id = NEW.user_id AND type = v_type
+        LIMIT 1;
+
+        IF v_playlist_id IS NOT NULL THEN
+          SELECT COALESCE(MAX(position), 0) INTO v_max_position
+          FROM public.playlist_tracks WHERE playlist_id = v_playlist_id;
+
+          INSERT INTO public.playlist_tracks (playlist_id, track_id, position, added_by)
+          VALUES (v_playlist_id, v_track_uuid, v_max_position + 1, NEW.user_id)
+          ON CONFLICT (playlist_id, track_id) DO NOTHING;
+        END IF;
+
+      ELSIF NOT COALESCE(v_now, FALSE) AND v_before THEN
+        SELECT id INTO v_playlist_id
+        FROM public.playlists
+        WHERE user_id = NEW.user_id AND type = v_type
+        LIMIT 1;
+
+        IF v_playlist_id IS NOT NULL THEN
+          DELETE FROM public.playlist_tracks
+          WHERE playlist_id = v_playlist_id AND track_id::text = v_track_uuid::text;
+        END IF;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE WARNING 'sync_interaction_to_playlist(%) failed for user % track %: %',
+        v_type, NEW.user_id, NEW.track_id, SQLERRM;
+    END;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trigger_sync_interactions ON public.user_interactions;
+CREATE OR REPLACE TRIGGER trigger_sync_interactions
+  AFTER INSERT OR UPDATE ON public.user_interactions
+  FOR EACH ROW EXECUTE FUNCTION public.sync_interaction_to_playlist();
+
+COMMIT;
+
+NOTIFY pgrst, 'reload schema';
+
+
+-- ============================================================
+-- sql-editor/17-live-detection-runs.sql
+-- ============================================================
+-- ============================================================
+-- 17-live-detection-runs.sql
+--
+-- Persistence for live chord detection.
+--
+-- Until now every result the detector produced was thrown away when the
+-- capture ended: chords, section boundaries and the estimated key all lived
+-- in React state and nothing ever wrote them anywhere. This adds the storage
+-- that makes a capture worth doing.
+--
+-- The shape is deliberately two-layered:
+--
+--   * detection_runs / _sections / _chords hold RAW EVIDENCE - one set per
+--     capture, exactly as it was heard, never edited. Several people (or the
+--     same person twice) can analyse the same track and each gets their own
+--     run. Keeping the raw runs is what makes it possible to re-derive a
+--     better canonical answer later, or to re-write the numerals if the key
+--     estimate turns out to have been wrong.
+--
+--   * track_sections stays CANONICAL - the one answer the app shows. Rows
+--     there are promoted from a run after review, never written directly by
+--     a client.
+--
+-- Nothing here is client-writable. Ingest goes through the
+-- ingest-detection edge function using the service role, which is also what
+-- lets it validate a payload before any of it is trusted.
+--
+-- SAFETY: this script adds things. It creates three new tables, adds columns
+-- to track_sections, and replaces the get_track_sections function with one
+-- that returns those new columns too. There is no DROP TABLE, DELETE,
+-- TRUNCATE, ALTER COLUMN or RENAME anywhere in it, so no existing row can be
+-- lost. It is also idempotent - every statement is IF NOT EXISTS or
+-- DROP ... IF EXISTS followed by a create - so running it twice is a no-op
+-- rather than an error.
+--
+-- The whole thing runs in one transaction. If any statement fails, nothing is
+-- applied and the database is exactly as it was. (If your SQL editor already
+-- opened a transaction, the BEGIN below just logs a harmless
+-- "there is already a transaction in progress" warning.)
+-- ============================================================
+
+begin;
+
+-- ------------------------------------------------------------
+-- One capture session.
+-- ------------------------------------------------------------
+create table if not exists public.detection_runs (
+  id uuid primary key default gen_random_uuid(),
+  track_id uuid not null references public.tracks(id) on delete cascade,
+  -- Null when the contributor's account is later deleted: the analysis stays
+  -- useful even when we can no longer say who produced it.
+  user_id uuid references auth.users(id) on delete set null,
+
+  -- Provenance. Which code produced this, so a later algorithm change can
+  -- find and re-run everything from an older version.
+  analysis_version text not null,
+  source text not null default 'live-capture'
+    check (source in ('live-capture', 'server-analysis', 'manual')),
+
+  -- The key the numerals in this run are relative to. Stored as a pitch
+  -- class rather than a name so it needs no spelling convention.
+  detected_tonic smallint check (detected_tonic between 0 and 11),
+  detected_mode text check (detected_mode in ('major', 'minor')),
+  key_confidence numeric(4,3) check (key_confidence between 0 and 1),
+
+  -- Which stretch of the track this run actually heard. A live capture only
+  -- covers what the listener sat through, so a run is evidence about a
+  -- window, not about the whole song.
+  covered_from_ms integer not null default 0 check (covered_from_ms >= 0),
+  covered_to_ms integer not null check (covered_to_ms > covered_from_ms),
+
+  status text not null default 'pending'
+    check (status in ('pending', 'promoted', 'rejected')),
+  reviewed_by uuid references auth.users(id) on delete set null,
+  reviewed_at timestamptz,
+
+  -- Lets a client retry an ingest that may or may not have landed without
+  -- creating a duplicate run.
+  idempotency_key text,
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ------------------------------------------------------------
+-- The sections one run found, with its own chords.
+-- ------------------------------------------------------------
+create table if not exists public.detection_run_sections (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references public.detection_runs(id) on delete cascade,
+
+  label text not null check (label in
+    ('intro', 'verse', 'pre-chorus', 'chorus', 'bridge', 'outro', 'breakdown', 'drop')),
+  -- "Verse 1" vs "Verse 2": which occurrence of this label it is, in playing
+  -- order. This is the stanza ordering, and it is derived from start_ms
+  -- rather than detected.
+  ordinal smallint not null default 1 check (ordinal >= 1),
+
+  start_ms integer not null check (start_ms >= 0),
+  end_ms integer not null check (end_ms > start_ms),
+
+  -- The section's own loop, reduced to one cycle: a verse playing I-V-vi-IV
+  -- four times is a four-chord loop, not sixteen chords.
+  progression_roman text[] not null default '{}',
+  loop_length_bars smallint check (loop_length_bars > 0),
+  confidence numeric(4,3) check (confidence between 0 and 1),
+
+  created_at timestamptz not null default now(),
+
+  -- One section can start at a given moment within a run. Makes re-ingesting
+  -- the same payload idempotent rather than duplicating everything.
+  unique (run_id, start_ms)
+);
+
+-- ------------------------------------------------------------
+-- Every chord heard, with the time it was held for.
+--
+-- This is the table that did not exist in any form: `roman_progression` on
+-- harmonic_fingerprints is a bare array of numerals with no timing at all,
+-- so "the correct time of each chord" had nowhere to live.
+-- ------------------------------------------------------------
+create table if not exists public.detection_run_chords (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references public.detection_runs(id) on delete cascade,
+  -- Null for a chord heard before section detection had enough audio to
+  -- place it: still real, just not yet attributable to a section.
+  section_id uuid references public.detection_run_sections(id) on delete cascade,
+
+  -- Relative form, which is what the app reasons in.
+  numeral text not null,
+  -- ...and the absolute chord it was heard as. Kept alongside deliberately:
+  -- the key estimate is the least certain step in the pipeline, and holding
+  -- the raw pitch means every numeral can be recomputed if the key is later
+  -- corrected, without re-listening to the song.
+  root_pitch_class smallint not null check (root_pitch_class between 0 and 11),
+  quality text not null check (quality in ('major', 'minor')),
+
+  start_ms integer not null check (start_ms >= 0),
+  end_ms integer not null check (end_ms > start_ms),
+  confidence numeric(4,3) check (confidence between 0 and 1),
+
+  created_at timestamptz not null default now(),
+
+  unique (run_id, start_ms)
+);
+
+-- ------------------------------------------------------------
+-- Canonical sections gain what a promoted run can give them.
+-- ------------------------------------------------------------
+alter table public.track_sections
+  add column if not exists ordinal smallint not null default 1,
+  add column if not exists progression_roman text[] not null default '{}',
+  add column if not exists chord_timings integer[] not null default '{}',
+  add column if not exists confidence numeric(4,3),
+  add column if not exists source_run_id uuid references public.detection_runs(id) on delete set null,
+  add column if not exists updated_at timestamptz not null default now();
+
+-- ADD CONSTRAINT has no IF NOT EXISTS form, so guard it.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'track_sections_ordinal_positive'
+      and conrelid = 'public.track_sections'::regclass
+  ) then
+    alter table public.track_sections
+      add constraint track_sections_ordinal_positive check (ordinal >= 1);
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'track_sections_confidence_range'
+      and conrelid = 'public.track_sections'::regclass
+  ) then
+    alter table public.track_sections
+      add constraint track_sections_confidence_range
+      check (confidence is null or (confidence >= 0 and confidence <= 1));
+  end if;
+
+  -- chord_timings is only meaningful when it lines up one-for-one with the
+  -- progression - useSectionSync silently falls back to guessing from a
+  -- default BPM when the lengths disagree, which is exactly the drift this
+  -- whole feature exists to remove.
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'track_sections_timings_match_progression'
+      and conrelid = 'public.track_sections'::regclass
+  ) then
+    alter table public.track_sections
+      add constraint track_sections_timings_match_progression
+      check (
+        cardinality(chord_timings) = 0
+        or cardinality(chord_timings) = cardinality(progression_roman)
+      );
+  end if;
+end $$;
+
+-- ------------------------------------------------------------
+-- Indexes. Postgres does not index foreign keys on its own, and every one of
+-- these columns is either joined on, filtered on, or read by an RLS policy.
+-- ------------------------------------------------------------
+-- user_id is read by the RLS policy on every select, and is the foreign key
+-- a cascade would have to scan without it.
+create index if not exists idx_detection_runs_user on public.detection_runs(user_id);
+create index if not exists idx_detection_runs_reviewed_by on public.detection_runs(reviewed_by);
+-- Equality column first, ordered column last: the review queue is "pending
+-- runs, newest first".
+create index if not exists idx_detection_runs_status_created
+  on public.detection_runs(status, created_at desc);
+-- Covers lookups by track alone as well, by the leftmost-prefix rule, so no
+-- separate index on track_id is needed.
+create index if not exists idx_detection_runs_track_status
+  on public.detection_runs(track_id, status);
+create unique index if not exists idx_detection_runs_idempotency
+  on public.detection_runs(idempotency_key) where idempotency_key is not null;
+
+-- No index on detection_run_sections(run_id, ...) or
+-- detection_run_chords(run_id, ...): the `unique (run_id, start_ms)`
+-- constraints on both tables already create exactly that index, and a second
+-- copy would cost write throughput and space for nothing.
+create index if not exists idx_detection_run_chords_section
+  on public.detection_run_chords(section_id);
+
+create index if not exists idx_track_sections_source_run
+  on public.track_sections(source_run_id) where source_run_id is not null;
+
+-- ------------------------------------------------------------
+-- Keep updated_at honest.
+-- ------------------------------------------------------------
+drop trigger if exists trg_detection_runs_updated_at on public.detection_runs;
+create trigger trg_detection_runs_updated_at
+before update on public.detection_runs
+for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_track_sections_updated_at on public.track_sections;
+create trigger trg_track_sections_updated_at
+before update on public.track_sections
+for each row execute function public.set_updated_at();
+
+-- ------------------------------------------------------------
+-- RLS.
+--
+-- No client writes anywhere: ingest and promotion both run server-side with
+-- the service role, which bypasses these policies entirely. What the policies
+-- govern is reading - a contributor can see their own captures, an admin can
+-- see all of them to review.
+--
+-- auth.uid() and has_role() are wrapped in a scalar subquery so Postgres
+-- evaluates them once per statement instead of once per row.
+-- ------------------------------------------------------------
+alter table public.detection_runs enable row level security;
+alter table public.detection_run_sections enable row level security;
+alter table public.detection_run_chords enable row level security;
+
+drop policy if exists "read own detection runs" on public.detection_runs;
+create policy "read own detection runs"
+on public.detection_runs
+for select
+to authenticated
+using (
+  user_id = (select auth.uid())
+  or (select public.has_role((select auth.uid()), 'admin'::app_role))
+);
+
+drop policy if exists "no client writes to detection runs" on public.detection_runs;
+create policy "no client writes to detection runs"
+on public.detection_runs
+for all
+to authenticated, anon
+using (false)
+with check (false);
+
+drop policy if exists "read own run sections" on public.detection_run_sections;
+create policy "read own run sections"
+on public.detection_run_sections
+for select
+to authenticated
+using (
+  exists (
+    select 1 from public.detection_runs r
+    where r.id = detection_run_sections.run_id
+      and (
+        r.user_id = (select auth.uid())
+        or (select public.has_role((select auth.uid()), 'admin'::app_role))
+      )
+  )
+);
+
+drop policy if exists "no client writes to run sections" on public.detection_run_sections;
+create policy "no client writes to run sections"
+on public.detection_run_sections
+for all
+to authenticated, anon
+using (false)
+with check (false);
+
+drop policy if exists "read own run chords" on public.detection_run_chords;
+create policy "read own run chords"
+on public.detection_run_chords
+for select
+to authenticated
+using (
+  exists (
+    select 1 from public.detection_runs r
+    where r.id = detection_run_chords.run_id
+      and (
+        r.user_id = (select auth.uid())
+        or (select public.has_role((select auth.uid()), 'admin'::app_role))
+      )
+  )
+);
+
+drop policy if exists "no client writes to run chords" on public.detection_run_chords;
+create policy "no client writes to run chords"
+on public.detection_run_chords
+for all
+to authenticated, anon
+using (false)
+with check (false);
+
+-- ------------------------------------------------------------
+-- Reading a run back.
+--
+-- The client needs one round trip to show "here is what your capture found",
+-- not three. SECURITY INVOKER on purpose: this must stay subject to the RLS
+-- policies above rather than quietly handing any caller any run.
+-- ------------------------------------------------------------
+create or replace function public.get_detection_run(p_run_id uuid)
+returns table (
+  section_id uuid,
+  label text,
+  ordinal smallint,
+  start_ms integer,
+  end_ms integer,
+  progression_roman text[],
+  confidence numeric,
+  chords jsonb
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select
+    s.id,
+    s.label,
+    s.ordinal,
+    s.start_ms,
+    s.end_ms,
+    s.progression_roman,
+    s.confidence,
+    coalesce(
+      (
+        select jsonb_agg(
+          jsonb_build_object(
+            'numeral', c.numeral,
+            'root_pitch_class', c.root_pitch_class,
+            'quality', c.quality,
+            'start_ms', c.start_ms,
+            'end_ms', c.end_ms,
+            'confidence', c.confidence
+          )
+          order by c.start_ms
+        )
+        from public.detection_run_chords c
+        where c.section_id = s.id
+      ),
+      '[]'::jsonb
+    )
+  from public.detection_run_sections s
+  where s.run_id = p_run_id
+  order by s.start_ms;
+$$;
+
+-- ------------------------------------------------------------
+-- The canonical read path has to be able to see the new columns, or nothing
+-- promoted into them would ever reach the app.
+--
+-- `progression_roman` is exposed to clients as `chords` on purpose: the
+-- column keeps the name every other table uses (tracks.progression_roman),
+-- while the RPC keeps the name the TypeScript TrackSection type already
+-- reads. The client casts this result straight to that type, so the alias is
+-- what joins the two halves.
+--
+-- CREATE OR REPLACE cannot change a function's return type, so this drops
+-- first. Doing so is safe here because the function is only ever called by
+-- name from the client.
+-- ------------------------------------------------------------
+drop function if exists public.get_track_sections(uuid);
+
+create function public.get_track_sections(p_track_id uuid)
+returns table (
+  id uuid,
+  track_id uuid,
+  label text,
+  ordinal smallint,
+  start_ms integer,
+  end_ms integer,
+  chords text[],
+  chord_timings integer[],
+  confidence numeric,
+  created_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select
+    s.id,
+    s.track_id,
+    s.label,
+    s.ordinal,
+    s.start_ms,
+    s.end_ms,
+    s.progression_roman,
+    s.chord_timings,
+    s.confidence,
+    s.created_at
+  from public.track_sections s
+  where s.track_id = p_track_id
+  order by s.start_ms asc;
+$$;
+
+comment on function public.get_track_sections is
+  'Canonical sections for a track, ordered by start time. progression_roman is returned as "chords" to match the client type.';
+
+comment on table public.detection_runs is
+  'One live-capture analysis of one track. Raw evidence, never edited; track_sections holds the canonical answer promoted from these.';
+comment on table public.detection_run_sections is
+  'Sections found by a single detection run, each with its own chord loop.';
+comment on table public.detection_run_chords is
+  'Every chord heard in a run, with the milliseconds it was held for. The per-chord timing that makes BPM unnecessary for sync.';
+comment on column public.detection_run_chords.root_pitch_class is
+  'Absolute root kept alongside the numeral so numerals can be recomputed if the key estimate is corrected.';
+comment on column public.track_sections.ordinal is
+  'Which occurrence of this label the section is, in playing order - the "Verse 1 / Verse 2" number.';
+
+commit;
+
+-- ============================================================
+-- Sanity check. Run this after the commit above; it reads nothing but
+-- catalog metadata and changes nothing.
+-- ============================================================
+-- select table_name, count(*) as columns
+-- from information_schema.columns
+-- where table_schema = 'public'
+--   and table_name in ('detection_runs', 'detection_run_sections', 'detection_run_chords')
+-- group by table_name;
+--
+-- select column_name from information_schema.columns
+-- where table_schema = 'public' and table_name = 'track_sections'
+-- order by ordinal_position;
+
+
+-- ============================================================
+-- sql-editor/18-promote-detection-run.sql
+-- ============================================================
+-- ============================================================
+-- 18-promote-detection-run.sql
+--
+-- Turning raw evidence into the canonical answer.
+--
+-- 17-live-detection-runs.sql stored captures as detection_runs: never
+-- edited, never shown to anyone but their author and an admin. This adds the
+-- step that makes one of them the track's canonical structure, and the
+-- reject that closes the other ones out.
+--
+-- Promotion REPLACES a track's sections wholesale rather than merging. The
+-- canonical set has to be internally coherent - non-overlapping, in order,
+-- ordinals counted straight through - and merging two analyses cannot
+-- promise that. The raw runs are all still there, so a better answer can be
+-- re-derived and promoted over this one at any time.
+--
+-- SAFETY: additive except for one rename, on a table that is still empty.
+-- No DROP TABLE, DELETE of existing data, or TRUNCATE. Runs in one
+-- transaction: if any statement fails nothing is applied.
+-- ============================================================
+
+begin;
+
+-- ------------------------------------------------------------
+-- The same name meant two different things in the two tables.
+--
+-- On detection_run_sections it holds the REDUCED LOOP - a verse playing
+-- I-V-vi-IV four times stores four chords. On track_sections it has to hold
+-- the FULL sequence, because useSectionSync indexes chord_timings into it in
+-- parallel and a CHECK enforces that the two match in length. Calling both
+-- `progression_roman` invited exactly the mix-up that would silently break
+-- chord sync, so the run-level one says what it actually is.
+-- ------------------------------------------------------------
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'detection_run_sections'
+      and column_name = 'progression_roman'
+  ) then
+    alter table public.detection_run_sections rename column progression_roman to loop_roman;
+  end if;
+end $$;
+
+comment on column public.detection_run_sections.loop_roman is
+  'The section''s repeating unit, one cycle - not the full chord sequence, which lives in detection_run_chords.';
+
+-- ------------------------------------------------------------
+-- Promote one run to canonical.
+--
+-- SECURITY DEFINER because it writes track_sections, which RLS closes to
+-- every client. That makes the admin check inside it load-bearing rather
+-- than decorative: without it, any authenticated caller could rewrite any
+-- track's structure.
+-- ------------------------------------------------------------
+create or replace function public.promote_detection_run(p_run_id uuid)
+returns table (track_id uuid, sections_written integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_caller uuid := (select auth.uid());
+  v_run public.detection_runs%rowtype;
+  v_written integer := 0;
+begin
+  if v_caller is null or not public.has_role(v_caller, 'admin'::public.app_role) then
+    raise exception 'Only an admin can promote a detection run'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  select * into v_run from public.detection_runs where id = p_run_id;
+  if not found then
+    raise exception 'No such detection run: %', p_run_id using errcode = 'no_data_found';
+  end if;
+  if v_run.status = 'promoted' then
+    raise exception 'That run has already been promoted' using errcode = 'invalid_parameter_value';
+  end if;
+
+  -- Wholesale replacement: see the header. Anything previously canonical for
+  -- this track goes, including an earlier promotion's rows.
+  delete from public.track_sections ts where ts.track_id = v_run.track_id;
+
+  -- chord_timings are relative to the section's own start, because that is
+  -- what useSectionSync subtracts before comparing. The numerals come from
+  -- the run's chords in time order, so the two arrays line up one-for-one -
+  -- which the CHECK on the table insists on, and which is the whole reason
+  -- chord sync no longer has to dead-reckon from a tempo.
+  with promoted as (
+    insert into public.track_sections (
+      track_id, label, ordinal, start_ms, end_ms,
+      progression_roman, chord_timings, confidence, source_run_id
+    )
+    select
+      v_run.track_id,
+      s.label,
+      s.ordinal,
+      s.start_ms,
+      s.end_ms,
+      coalesce(c.numerals, '{}'),
+      coalesce(c.timings, '{}'),
+      s.confidence,
+      v_run.id
+    from public.detection_run_sections s
+    left join lateral (
+      select
+        array_agg(ch.numeral order by ch.start_ms) as numerals,
+        array_agg(greatest(0, ch.start_ms - s.start_ms) order by ch.start_ms) as timings
+      from public.detection_run_chords ch
+      where ch.section_id = s.id
+    ) c on true
+    where s.run_id = v_run.id
+    order by s.start_ms
+    returning 1
+  )
+  select count(*) into v_written from promoted;
+
+  update public.detection_runs
+  set status = 'promoted', reviewed_by = v_caller, reviewed_at = now()
+  where id = v_run.id;
+
+  -- The key the numerals are relative to has to travel with them, or the
+  -- readout renders them against whatever the catalog had and transposes
+  -- every chord name by the difference.
+  if v_run.detected_tonic is not null then
+    update public.tracks t
+    set detected_key = (array['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'])[v_run.detected_tonic + 1],
+        detected_mode = coalesce(v_run.detected_mode, t.detected_mode),
+        updated_at = now()
+    where t.id = v_run.track_id;
+  end if;
+
+  return query select v_run.track_id, v_written;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- Close out a run without promoting it.
+-- ------------------------------------------------------------
+create or replace function public.reject_detection_run(p_run_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_caller uuid := (select auth.uid());
+begin
+  if v_caller is null or not public.has_role(v_caller, 'admin'::public.app_role) then
+    raise exception 'Only an admin can reject a detection run'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  update public.detection_runs
+  set status = 'rejected', reviewed_by = v_caller, reviewed_at = now()
+  where id = p_run_id and status <> 'promoted';
+
+  if not found then
+    raise exception 'No pending run to reject: %', p_run_id using errcode = 'no_data_found';
+  end if;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- The review queue.
+--
+-- One row per run with what a reviewer needs to triage it - which track, who
+-- captured it, how much it covers, how sure it was - without a query per run
+-- from the client.
+-- ------------------------------------------------------------
+create or replace function public.list_detection_runs(
+  p_status text default 'pending',
+  p_limit integer default 50
+)
+returns table (
+  id uuid,
+  track_id uuid,
+  track_title text,
+  track_artist text,
+  contributor text,
+  status text,
+  detected_key text,
+  detected_mode text,
+  key_confidence numeric,
+  covered_from_ms integer,
+  covered_to_ms integer,
+  section_count bigint,
+  chord_count bigint,
+  created_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select
+    r.id,
+    r.track_id,
+    t.title,
+    t.artist,
+    p.username,
+    r.status,
+    case when r.detected_tonic is null then null
+         else (array['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'])[r.detected_tonic + 1]
+    end,
+    r.detected_mode,
+    r.key_confidence,
+    r.covered_from_ms,
+    r.covered_to_ms,
+    (select count(*) from public.detection_run_sections s where s.run_id = r.id),
+    (select count(*) from public.detection_run_chords c where c.run_id = r.id),
+    r.created_at
+  from public.detection_runs r
+  join public.tracks t on t.id = r.track_id
+  left join public.profiles p on p.id = r.user_id
+  where public.has_role((select auth.uid()), 'admin'::public.app_role)
+    and (p_status = 'all' or r.status = p_status)
+  order by r.created_at desc
+  limit greatest(1, least(p_limit, 200));
+$$;
+
+-- These are the admin's tools; nobody else should be able to call them at
+-- all, and the checks inside are the second line rather than the only one.
+revoke execute on function public.promote_detection_run(uuid) from public, anon;
+revoke execute on function public.reject_detection_run(uuid) from public, anon;
+revoke execute on function public.list_detection_runs(text, integer) from public, anon;
+grant execute on function public.promote_detection_run(uuid) to authenticated;
+grant execute on function public.reject_detection_run(uuid) to authenticated;
+grant execute on function public.list_detection_runs(text, integer) to authenticated;
+
+-- ------------------------------------------------------------
+-- get_detection_run selected the column the rename above moved, so it would
+-- have failed the moment a reviewer opened a run. Its output column is
+-- renamed to match, since nothing reads it yet.
+--
+-- CREATE OR REPLACE cannot change a return type, so this drops first.
+-- ------------------------------------------------------------
+drop function if exists public.get_detection_run(uuid);
+
+create function public.get_detection_run(p_run_id uuid)
+returns table (
+  section_id uuid,
+  label text,
+  ordinal smallint,
+  start_ms integer,
+  end_ms integer,
+  loop_roman text[],
+  confidence numeric,
+  chords jsonb
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select
+    s.id,
+    s.label,
+    s.ordinal,
+    s.start_ms,
+    s.end_ms,
+    s.loop_roman,
+    s.confidence,
+    coalesce(
+      (
+        select jsonb_agg(
+          jsonb_build_object(
+            'numeral', c.numeral,
+            'root_pitch_class', c.root_pitch_class,
+            'quality', c.quality,
+            'start_ms', c.start_ms,
+            'end_ms', c.end_ms,
+            'confidence', c.confidence
+          )
+          order by c.start_ms
+        )
+        from public.detection_run_chords c
+        where c.section_id = s.id
+      ),
+      '[]'::jsonb
+    )
+  from public.detection_run_sections s
+  where s.run_id = p_run_id
+  order by s.start_ms;
+$$;
+
+comment on function public.promote_detection_run is
+  'Admin only. Replaces a track''s canonical sections with one run''s analysis and marks the run promoted.';
+comment on function public.reject_detection_run is
+  'Admin only. Closes a run out without changing anything canonical.';
+comment on function public.list_detection_runs is
+  'Admin only. The review queue: one row per run with the track and totals needed to triage it.';
+
+commit;
+
+
+-- ============================================================
+-- sql-editor/19-save-track-sections.sql
+-- ============================================================
+-- ============================================================
+-- 19-save-track-sections.sql
+--
+-- Hand-edited song structure.
+--
+-- Detection produces sections from audio; this is for marking them by ear
+-- instead - listening, tapping a boundary at the playhead, saying what each
+-- part is. Same destination, different source, so it writes the same
+-- canonical table rather than a parallel one: whatever the app shows should
+-- come from one place regardless of how it got there.
+--
+-- Like promote_detection_run this has to be SECURITY DEFINER, because RLS
+-- closes track_sections to every client - which makes the admin check inside
+-- the real guard rather than a formality.
+--
+-- SAFETY: creates one function. It replaces a track's sections when CALLED,
+-- but applying this script changes no data.
+-- ============================================================
+
+begin;
+
+create or replace function public.save_track_sections(
+  p_track_id uuid,
+  p_sections jsonb
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_caller uuid := (select auth.uid());
+  v_count integer;
+  v_prev_end integer := -1;
+  v_row record;
+begin
+  if v_caller is null or not public.has_role(v_caller, 'admin'::public.app_role) then
+    raise exception 'Only an admin can edit a track''s sections'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  if not exists (select 1 from public.tracks where id = p_track_id) then
+    raise exception 'No such track: %', p_track_id using errcode = 'no_data_found';
+  end if;
+
+  if jsonb_typeof(p_sections) <> 'array' then
+    raise exception 'sections must be a JSON array' using errcode = 'invalid_parameter_value';
+  end if;
+
+  -- Sections tile one timeline, so they have to arrive in order and must not
+  -- overlap. useActiveSection resolves an overlap by first match, so bad data
+  -- here would not error anywhere - it would quietly highlight the wrong part
+  -- of the song. Checked server-side because the client is not the only
+  -- possible caller.
+  for v_row in
+    select
+      (e ->> 'label')::text as label,
+      coalesce((e ->> 'ordinal')::smallint, 1) as ordinal,
+      (e ->> 'start_ms')::integer as start_ms,
+      (e ->> 'end_ms')::integer as end_ms,
+      ordinality as position
+    from jsonb_array_elements(p_sections) with ordinality as t(e, ordinality)
+    order by ordinality
+  loop
+    if v_row.label is null or v_row.label not in
+       ('intro','verse','pre-chorus','chorus','bridge','outro','breakdown','drop') then
+      raise exception 'Unknown section label at position %: %', v_row.position, v_row.label
+        using errcode = 'invalid_parameter_value';
+    end if;
+    if v_row.start_ms is null or v_row.end_ms is null or v_row.end_ms <= v_row.start_ms then
+      raise exception 'Section % must end after it starts', v_row.position
+        using errcode = 'invalid_parameter_value';
+    end if;
+    if v_row.start_ms < v_prev_end then
+      raise exception 'Section % overlaps the one before it', v_row.position
+        using errcode = 'invalid_parameter_value';
+    end if;
+    v_prev_end := v_row.end_ms;
+  end loop;
+
+  delete from public.track_sections where track_id = p_track_id;
+
+  -- Deliberately no progression_roman or chord_timings. Moving a boundary
+  -- changes which chords fall inside a section, so carrying the old ones
+  -- across would attach chords to the wrong part while still looking exact.
+  -- A section edited by hand describes structure only; promoting a detection
+  -- run is what puts chords back.
+  insert into public.track_sections (track_id, label, ordinal, start_ms, end_ms)
+  select
+    p_track_id,
+    e ->> 'label',
+    coalesce((e ->> 'ordinal')::smallint, 1),
+    (e ->> 'start_ms')::integer,
+    (e ->> 'end_ms')::integer
+  from jsonb_array_elements(p_sections) as e;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+revoke execute on function public.save_track_sections(uuid, jsonb) from public, anon;
+grant execute on function public.save_track_sections(uuid, jsonb) to authenticated;
+
+comment on function public.save_track_sections is
+  'Admin only. Replaces a track''s sections with a hand-marked set. Structure only - chords come from promoting a detection run.';
+
+commit;
+
+
+-- ============================================================
+-- sql-editor/29-auto-analysis.sql
+-- ============================================================
+-- ============================================================
+-- 29-auto-analysis.sql
+--
+-- Analyse a track the catalog has never seen, once, and keep the result.
+--
+-- Until now a live capture could only be saved for a track that already had
+-- a `tracks` row, and even then it sat as `pending` until an admin promoted
+-- it - so an unknown track stayed unknown no matter how many people listened
+-- to it. This adds the three pieces that close that gap:
+--
+--   * resolve_or_create_track  - find (or make) the tracks row for a
+--                                Spotify/YouTube id the player is holding.
+--   * auto_promote_detection_run - promote a good capture straight to
+--                                canonical, but ONLY for a track that has no
+--                                analysis at all. Tracks that already have
+--                                curated data keep the admin-review path.
+--   * detection_runs.tempo_*   - a place for the measured BPM to live.
+--
+-- Both new functions are callable by the service role ONLY. The
+-- ingest-detection edge function is the single caller, and it decides
+-- whether a capture is good enough (see _shared/autoPromotion.ts) before
+-- asking; the database enforces the part that must never be wrong, which is
+-- that an existing analysis is never overwritten by this path.
+--
+-- promote_detection_run's body moves into a shared core so the admin path
+-- and the automatic path cannot drift. The admin RPC behaves exactly as it
+-- did: same admin check, same errors, same tables written.
+--
+-- SAFETY: additive. New columns, indexes and functions; promote_detection_run
+-- is replaced with an equivalent that delegates. No DROP TABLE, TRUNCATE or
+-- data deletion beyond what promote_detection_run already did. Idempotent, and
+-- one transaction: if any statement fails nothing is applied.
+--
+-- Run AFTER 17-live-detection-runs.sql and 18-promote-detection-run.sql.
+-- Deploy the ingest-detection function only once this has been applied.
+-- ============================================================
+
+begin;
+
+-- ------------------------------------------------------------
+-- Tempo, as measured from the audio during the capture.
+-- Kept on the run (evidence) and copied to tracks.tempo only when the
+-- detector was confident in it.
+-- ------------------------------------------------------------
+alter table public.detection_runs
+  add column if not exists tempo_bpm numeric(5,2)
+    check (tempo_bpm is null or tempo_bpm between 30 and 300),
+  add column if not exists tempo_confidence numeric(4,3)
+    check (tempo_confidence is null or tempo_confidence between 0 and 1);
+
+-- The seed and the app already read/write tracks.tempo; this only guards a
+-- database that was provisioned before it existed.
+alter table public.tracks add column if not exists tempo numeric;
+
+-- ------------------------------------------------------------
+-- Finding a track by the id the player holds. spotify_id / youtube_id were
+-- never indexed, and every play of an unknown track now looks one up.
+-- ------------------------------------------------------------
+create index if not exists idx_tracks_spotify_id
+  on public.tracks (spotify_id) where spotify_id is not null;
+create index if not exists idx_tracks_youtube_id
+  on public.tracks (youtube_id) where youtube_id is not null;
+
+-- ------------------------------------------------------------
+-- resolve_or_create_track
+--
+-- The player only ever knows a provider id ("spotify:<id>" / "youtube:<id>").
+-- Look for an existing row first, including one seeded under the OTHER
+-- provider that carries this id in spotify_id / youtube_id: a YouTube hit for
+-- a song the catalog already has from Spotify must reuse that row, or the
+-- same song would end up analysed twice under two ids.
+--
+-- Creating a row is race-safe: (external_id, provider) is unique, so a
+-- concurrent creator makes this insert do nothing and the re-select finds
+-- theirs.
+-- ------------------------------------------------------------
+create or replace function public.resolve_or_create_track(
+  p_provider text,
+  p_provider_id text,
+  p_title text,
+  p_artist text,
+  p_album text default null,
+  p_duration_ms integer default null,
+  p_isrc text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_id uuid;
+begin
+  if p_provider not in ('spotify', 'youtube') then
+    raise exception 'Unsupported provider: %', p_provider using errcode = 'invalid_parameter_value';
+  end if;
+  if coalesce(btrim(p_provider_id), '') = '' or coalesce(btrim(p_title), '') = '' or coalesce(btrim(p_artist), '') = '' then
+    raise exception 'A track needs a provider id, title and artist' using errcode = 'invalid_parameter_value';
+  end if;
+
+  select t.id into v_id
+  from public.tracks t
+  where (t.provider = p_provider and t.external_id = p_provider_id)
+     or (p_provider = 'spotify' and t.spotify_id = p_provider_id)
+     or (p_provider = 'youtube' and t.youtube_id = p_provider_id)
+  order by (t.provider = p_provider and t.external_id = p_provider_id) desc, t.created_at asc
+  limit 1;
+
+  if v_id is not null then
+    return v_id;
+  end if;
+
+  insert into public.tracks (
+    external_id, provider, title, artist, album, duration_ms, isrc, spotify_id, youtube_id
+  ) values (
+    p_provider_id,
+    p_provider,
+    left(btrim(p_title), 300),
+    left(btrim(p_artist), 300),
+    left(nullif(btrim(coalesce(p_album, '')), ''), 300),
+    case when p_duration_ms between 1000 and 21600000 then p_duration_ms else null end,
+    nullif(btrim(coalesce(p_isrc, '')), ''),
+    case when p_provider = 'spotify' then p_provider_id end,
+    case when p_provider = 'youtube' then p_provider_id end
+  )
+  on conflict (external_id, provider) do nothing
+  returning id into v_id;
+
+  if v_id is null then
+    select t.id into v_id
+    from public.tracks t
+    where t.provider = p_provider and t.external_id = p_provider_id;
+  end if;
+
+  return v_id;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- The promotion itself, shared by the admin RPC and the automatic path.
+--
+-- Same steps promote_detection_run always did: replace the track's sections
+-- wholesale, stamp the run, and carry the key with the numerals. The one
+-- addition is p_write_track_summary, which the automatic path sets so a track
+-- with nothing known about it also gets its progression, tempo and provenance
+-- filled in. The admin path leaves it false: an admin promoting a run onto a
+-- track with curated metadata must not have that metadata overwritten.
+-- ------------------------------------------------------------
+create or replace function public._promote_detection_run_core(
+  p_run_id uuid,
+  p_reviewer uuid,
+  p_write_track_summary boolean
+)
+returns table (track_id uuid, sections_written integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_run public.detection_runs%rowtype;
+  v_written integer := 0;
+  v_loop text[];
+  v_loop_bars smallint;
+begin
+  select * into v_run from public.detection_runs where id = p_run_id;
+  if not found then
+    raise exception 'No such detection run: %', p_run_id using errcode = 'no_data_found';
+  end if;
+  if v_run.status = 'promoted' then
+    raise exception 'That run has already been promoted' using errcode = 'invalid_parameter_value';
+  end if;
+
+  delete from public.track_sections ts where ts.track_id = v_run.track_id;
+
+  with promoted as (
+    insert into public.track_sections (
+      track_id, label, ordinal, start_ms, end_ms,
+      progression_roman, chord_timings, confidence, source_run_id
+    )
+    select
+      v_run.track_id,
+      s.label,
+      s.ordinal,
+      s.start_ms,
+      s.end_ms,
+      coalesce(c.numerals, '{}'),
+      coalesce(c.timings, '{}'),
+      s.confidence,
+      v_run.id
+    from public.detection_run_sections s
+    left join lateral (
+      select
+        array_agg(ch.numeral order by ch.start_ms) as numerals,
+        array_agg(greatest(0, ch.start_ms - s.start_ms) order by ch.start_ms) as timings
+      from public.detection_run_chords ch
+      where ch.section_id = s.id
+    ) c on true
+    where s.run_id = v_run.id
+    order by s.start_ms
+    returning 1
+  )
+  select count(*) into v_written from promoted;
+
+  update public.detection_runs
+  set status = 'promoted', reviewed_by = p_reviewer, reviewed_at = now()
+  where id = v_run.id;
+
+  if v_run.detected_tonic is not null then
+    update public.tracks t
+    set detected_key = (array['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'])[v_run.detected_tonic + 1],
+        detected_mode = coalesce(v_run.detected_mode, t.detected_mode),
+        updated_at = now()
+    where t.id = v_run.track_id;
+  end if;
+
+  if p_write_track_summary then
+    -- The track-level progression is the loop the song spends most of its
+    -- time in: the longest chorus if there is one, otherwise the longest
+    -- section that has a loop at all.
+    select s.loop_roman, s.loop_length_bars
+      into v_loop, v_loop_bars
+    from public.detection_run_sections s
+    where s.run_id = v_run.id and cardinality(s.loop_roman) > 0
+    order by (s.label = 'chorus') desc, (s.end_ms - s.start_ms) desc
+    limit 1;
+
+    update public.tracks t
+    set progression_roman = coalesce(v_loop, t.progression_roman),
+        loop_length_bars = coalesce(v_loop_bars, t.loop_length_bars),
+        -- A wrong BPM is worse than none, so it is only kept when the
+        -- detector was sure of it.
+        tempo = case
+                  when v_run.tempo_bpm is not null and coalesce(v_run.tempo_confidence, 0) >= 0.6
+                    then v_run.tempo_bpm
+                  else t.tempo
+                end,
+        confidence_score = coalesce(round(v_run.key_confidence, 2), t.confidence_score),
+        analysis_source = 'analysis',
+        updated_at = now()
+    where t.id = v_run.track_id;
+  end if;
+
+  return query select v_run.track_id, v_written;
+end;
+$$;
+
+-- The admin RPC: unchanged behaviour, now a thin wrapper.
+create or replace function public.promote_detection_run(p_run_id uuid)
+returns table (track_id uuid, sections_written integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_caller uuid := (select auth.uid());
+begin
+  if v_caller is null or not public.has_role(v_caller, 'admin'::public.app_role) then
+    raise exception 'Only an admin can promote a detection run'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  return query select * from public._promote_detection_run_core(p_run_id, v_caller, false);
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- auto_promote_detection_run
+--
+-- Promote a run with no human in the loop - but only into a track that has
+-- nothing. The track row is locked first, so two people finishing a capture
+-- of the same unknown track at once cannot both win: the second finds the
+-- first's sections and is told the track is already analysed, and its run
+-- stays pending as ordinary evidence.
+--
+-- "Nothing" means no canonical sections, no progression, and no curated
+-- section list. A seeded track fails that on purpose.
+-- ------------------------------------------------------------
+create or replace function public.auto_promote_detection_run(p_run_id uuid)
+returns table (promoted boolean, reason text, sections_written integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_run public.detection_runs%rowtype;
+  v_track public.tracks%rowtype;
+  v_written integer := 0;
+begin
+  select * into v_run from public.detection_runs where id = p_run_id;
+  if not found then
+    return query select false, 'run_not_found'::text, 0;
+    return;
+  end if;
+  if v_run.status <> 'pending' then
+    return query select (v_run.status = 'promoted'), 'run_not_pending'::text, 0;
+    return;
+  end if;
+
+  select * into v_track from public.tracks t where t.id = v_run.track_id for update;
+  if not found then
+    return query select false, 'track_not_found'::text, 0;
+    return;
+  end if;
+
+  if exists (select 1 from public.track_sections ts where ts.track_id = v_track.id)
+     or coalesce(cardinality(v_track.progression_roman), 0) > 0
+     or (v_track.sections is not null
+         and jsonb_typeof(v_track.sections) = 'array'
+         and jsonb_array_length(v_track.sections) > 0)
+  then
+    return query select false, 'already_analysed'::text, 0;
+    return;
+  end if;
+
+  select c.sections_written into v_written
+  from public._promote_detection_run_core(p_run_id, null, true) c;
+
+  return query select true, 'promoted'::text, v_written;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- Who can call what.
+--
+-- The two new entry points and the shared core are the service role's alone.
+-- Functions created in public are executable by everyone by default, so each
+-- is revoked explicitly. promote_detection_run keeps the grants 18 gave it
+-- (CREATE OR REPLACE preserves them); it is restated here so this file is
+-- correct on its own.
+-- ------------------------------------------------------------
+revoke all on function public.resolve_or_create_track(text, text, text, text, text, integer, text)
+  from public, anon, authenticated;
+-- The core is reachable only through the two definer functions that call it -
+-- not even the service role runs it directly, because it has no eligibility
+-- check of its own.
+revoke all on function public._promote_detection_run_core(uuid, uuid, boolean)
+  from public, anon, authenticated, service_role;
+revoke all on function public.auto_promote_detection_run(uuid)
+  from public, anon, authenticated;
+
+grant execute on function public.resolve_or_create_track(text, text, text, text, text, integer, text)
+  to service_role;
+grant execute on function public.auto_promote_detection_run(uuid)
+  to service_role;
+
+revoke execute on function public.promote_detection_run(uuid) from public, anon;
+grant execute on function public.promote_detection_run(uuid) to authenticated;
+
+comment on function public.resolve_or_create_track is
+  'Find the tracks row for a Spotify/YouTube id (also matching the other provider''s id column), creating it if the catalog has never seen the track. Service role only.';
+comment on function public.auto_promote_detection_run is
+  'Promote a pending run to canonical without review, but only for a track with no existing analysis. Service role only.';
+comment on column public.detection_runs.tempo_bpm is
+  'BPM measured from the audio during the capture. Copied to tracks.tempo only when tempo_confidence >= 0.6.';
+
+commit;
+
+-- ============================================================
+-- Sanity checks. Read-only; run after the commit above.
+-- ============================================================
+-- 1. The new functions exist and only service_role can execute them:
+-- select p.proname,
+--        has_function_privilege('anon', p.oid, 'execute')          as anon,
+--        has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+--        has_function_privilege('service_role', p.oid, 'execute')  as service_role
+-- from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+-- where n.nspname = 'public'
+--   and p.proname in ('resolve_or_create_track', 'auto_promote_detection_run', '_promote_detection_run_core');
+-- expected: anon = false, authenticated = false, service_role = true
+--           (the core is false / false / false - it is only reached through a definer function)
+--
+-- 2. The admin RPC is still callable by signed-in users (the admin check is inside it):
+-- select has_function_privilege('authenticated', 'public.promote_detection_run(uuid)', 'execute');
+--
+-- 3. New columns and indexes:
+-- select column_name from information_schema.columns
+-- where table_schema = 'public' and table_name = 'detection_runs' and column_name like 'tempo%';
+-- select indexname from pg_indexes
+-- where schemaname = 'public' and indexname in ('idx_tracks_spotify_id', 'idx_tracks_youtube_id');
+--
+-- 4. Track resolution (as postgres in the SQL editor). The two calls must return the SAME id,
+--    and a second provider id for a seeded song must not create a duplicate:
+-- select public.resolve_or_create_track('youtube', 'dQw4w9WgXcQ', 'Test track', 'Test artist');
+-- select public.resolve_or_create_track('youtube', 'dQw4w9WgXcQ', 'Test track', 'Test artist');
+-- -- clean up the probe row afterwards:
+-- -- delete from public.tracks where external_id = 'dQw4w9WgXcQ' and provider = 'youtube';
+
+
+-- ============================================================
+-- sql-editor/30-undo-promotion.sql
+-- ============================================================
+-- ============================================================
+-- 30-undo-promotion.sql
+--
+-- Make promoting a detection run reversible.
+--
+-- Promotion replaces a track's canonical sections wholesale and overwrites the
+-- track's key. Until now nothing recorded what it replaced, so a mistaken
+-- promotion (or a promoted demo/seed run) could be removed but not truly
+-- undone. This adds:
+--
+--   * detection_runs.pre_promotion - a snapshot taken at the moment of
+--                                    promotion: the track's sections and the
+--                                    track-level fields the promotion writes.
+--   * _promote_detection_run_core  - 29's shared core, unchanged except that
+--                                    it now takes that snapshot. Both the
+--                                    admin path and the automatic path go
+--                                    through it, so both become undoable.
+--   * revert_detection_run         - the admin RPC behind the Undo button.
+--   * _revert_detection_run_core   - the same thing without the admin check,
+--                                    for the SQL Editor and service role.
+--
+-- What Undo does, for the run that is CURRENTLY the track's canonical
+-- analysis:
+--   - removes the sections that run wrote,
+--   - puts back the sections it replaced and the track's previous key/mode
+--     (and, for an automatic promotion, its previous progression/tempo/
+--     provenance) when a snapshot exists,
+--   - returns the run to 'pending' so it can be reviewed again.
+--
+-- A run promoted BEFORE this script has no snapshot. Undoing it still removes
+-- what it wrote and returns it to pending, but the previous key and sections
+-- cannot be recovered - nothing recorded them - and the function says so
+-- rather than pretending. Runs promoted after this script are fully restored.
+--
+-- Only the run that is currently canonical can be undone. If a later
+-- promotion (or a hand edit) has since replaced it, undo that one first: its
+-- snapshot holds this run's sections, so undoing in reverse order walks the
+-- track back through its history.
+--
+-- Run AFTER 29-auto-analysis.sql, which creates the shared core this replaces.
+--
+-- CAUTION: re-running 29 afterwards puts back its version of the core, which
+-- does not take snapshots. This file is idempotent - run it again to restore
+-- snapshotting.
+--
+-- SAFETY: additive. One new nullable column, one replaced function that keeps
+-- its signature and grants, two new functions. No DROP, TRUNCATE or
+-- data deletion. One transaction: if any statement fails nothing is applied.
+-- ============================================================
+
+begin;
+
+do $$
+begin
+  if to_regprocedure('public._promote_detection_run_core(uuid,uuid,boolean)') is null then
+    raise exception 'Run 29-auto-analysis.sql first: this script extends the shared promotion core it creates.';
+  end if;
+end $$;
+
+-- ------------------------------------------------------------
+-- The snapshot. jsonb rather than a side table: it is one small document per
+-- promotion, read only by the run's own undo, and it lives and dies with the
+-- run (a deleted run takes its snapshot with it).
+--
+--   { "sections": [ <every track_sections row that was replaced> ],
+--     "track":    { detected_key, detected_mode, progression_roman,
+--                   loop_length_bars, tempo, confidence_score, analysis_source } }
+-- ------------------------------------------------------------
+alter table public.detection_runs
+  add column if not exists pre_promotion jsonb;
+
+comment on column public.detection_runs.pre_promotion is
+  'What promoting this run replaced: the track''s previous sections and track-level fields. Used by undo; null for runs promoted before it was recorded, and once the run is pending again.';
+
+-- ------------------------------------------------------------
+-- 29's core, plus the snapshot. Everything else is exactly as it was, so the
+-- admin and automatic paths still cannot drift apart.
+--
+-- The track row is locked before the snapshot is read so two promotions of the
+-- same track serialise: the second snapshots what the first left, which is
+-- what makes undoing them in reverse order correct.
+-- ------------------------------------------------------------
+create or replace function public._promote_detection_run_core(
+  p_run_id uuid,
+  p_reviewer uuid,
+  p_write_track_summary boolean
+)
+returns table (track_id uuid, sections_written integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_run public.detection_runs%rowtype;
+  v_written integer := 0;
+  v_loop text[];
+  v_loop_bars smallint;
+  v_snapshot jsonb;
+begin
+  select * into v_run from public.detection_runs where id = p_run_id;
+  if not found then
+    raise exception 'No such detection run: %', p_run_id using errcode = 'no_data_found';
+  end if;
+  if v_run.status = 'promoted' then
+    raise exception 'That run has already been promoted' using errcode = 'invalid_parameter_value';
+  end if;
+
+  perform 1 from public.tracks t where t.id = v_run.track_id for update;
+
+  select jsonb_build_object(
+    'sections', coalesce(
+      (select jsonb_agg(to_jsonb(ts) order by ts.start_ms)
+         from public.track_sections ts
+        where ts.track_id = v_run.track_id),
+      '[]'::jsonb
+    ),
+    'track', (
+      select jsonb_build_object(
+        'detected_key', t.detected_key,
+        'detected_mode', t.detected_mode,
+        'progression_roman', t.progression_roman,
+        'loop_length_bars', t.loop_length_bars,
+        'tempo', t.tempo,
+        'confidence_score', t.confidence_score,
+        'analysis_source', t.analysis_source
+      )
+      from public.tracks t
+      where t.id = v_run.track_id
+    )
+  ) into v_snapshot;
+
+  delete from public.track_sections ts where ts.track_id = v_run.track_id;
+
+  with promoted as (
+    insert into public.track_sections (
+      track_id, label, ordinal, start_ms, end_ms,
+      progression_roman, chord_timings, confidence, source_run_id
+    )
+    select
+      v_run.track_id,
+      s.label,
+      s.ordinal,
+      s.start_ms,
+      s.end_ms,
+      coalesce(c.numerals, '{}'),
+      coalesce(c.timings, '{}'),
+      s.confidence,
+      v_run.id
+    from public.detection_run_sections s
+    left join lateral (
+      select
+        array_agg(ch.numeral order by ch.start_ms) as numerals,
+        array_agg(greatest(0, ch.start_ms - s.start_ms) order by ch.start_ms) as timings
+      from public.detection_run_chords ch
+      where ch.section_id = s.id
+    ) c on true
+    where s.run_id = v_run.id
+    order by s.start_ms
+    returning 1
+  )
+  select count(*) into v_written from promoted;
+
+  update public.detection_runs
+  set status = 'promoted',
+      reviewed_by = p_reviewer,
+      reviewed_at = now(),
+      pre_promotion = v_snapshot
+  where id = v_run.id;
+
+  if v_run.detected_tonic is not null then
+    update public.tracks t
+    set detected_key = (array['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'])[v_run.detected_tonic + 1],
+        detected_mode = coalesce(v_run.detected_mode, t.detected_mode),
+        updated_at = now()
+    where t.id = v_run.track_id;
+  end if;
+
+  if p_write_track_summary then
+    select s.loop_roman, s.loop_length_bars
+      into v_loop, v_loop_bars
+    from public.detection_run_sections s
+    where s.run_id = v_run.id and cardinality(s.loop_roman) > 0
+    order by (s.label = 'chorus') desc, (s.end_ms - s.start_ms) desc
+    limit 1;
+
+    update public.tracks t
+    set progression_roman = coalesce(v_loop, t.progression_roman),
+        loop_length_bars = coalesce(v_loop_bars, t.loop_length_bars),
+        tempo = case
+                  when v_run.tempo_bpm is not null and coalesce(v_run.tempo_confidence, 0) >= 0.6
+                    then v_run.tempo_bpm
+                  else t.tempo
+                end,
+        confidence_score = coalesce(round(v_run.key_confidence, 2), t.confidence_score),
+        analysis_source = 'analysis',
+        updated_at = now()
+    where t.id = v_run.track_id;
+  end if;
+
+  return query select v_run.track_id, v_written;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- Undo one promotion.
+--
+-- Lock order matches promotion (track first, then the run), so an undo and a
+-- promotion racing on the same track wait for each other instead of
+-- deadlocking. The run is re-read after the lock: its status is only
+-- trustworthy once nobody else can change it.
+-- ------------------------------------------------------------
+create or replace function public._revert_detection_run_core(p_run_id uuid)
+returns table (
+  track_id uuid,
+  sections_removed integer,
+  sections_restored integer,
+  track_restored boolean
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_run public.detection_runs%rowtype;
+  v_removed integer := 0;
+  v_restored integer := 0;
+  v_track_restored boolean := false;
+  v_prev_sections jsonb;
+  v_prev_track jsonb;
+begin
+  select * into v_run from public.detection_runs where id = p_run_id;
+  if not found then
+    raise exception 'No such detection run: %', p_run_id using errcode = 'no_data_found';
+  end if;
+
+  perform 1 from public.tracks t where t.id = v_run.track_id for update;
+  select * into v_run from public.detection_runs where id = p_run_id for update;
+
+  if v_run.status <> 'promoted' then
+    raise exception 'Only a promoted run can be undone' using errcode = 'invalid_parameter_value';
+  end if;
+
+  if not exists (
+    select 1 from public.track_sections ts
+    where ts.track_id = v_run.track_id and ts.source_run_id = v_run.id
+  ) then
+    raise exception
+      'This run is no longer the canonical analysis for its track - a later promotion or edit replaced it. Undo that one first.'
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  delete from public.track_sections ts
+  where ts.track_id = v_run.track_id and ts.source_run_id = v_run.id;
+  get diagnostics v_removed = row_count;
+
+  if v_run.pre_promotion is not null then
+    v_prev_sections := v_run.pre_promotion -> 'sections';
+
+    -- Only put the old sections back onto an empty track. If anything else has
+    -- been written since (a hand edit), overwriting it would be the same
+    -- mistake promotion makes, and this is the undo.
+    if jsonb_typeof(v_prev_sections) = 'array'
+       and jsonb_array_length(v_prev_sections) > 0
+       and not exists (select 1 from public.track_sections ts where ts.track_id = v_run.track_id)
+    then
+      -- A restored row may point at a run that has since been deleted; the
+      -- foreign key would reject it, so that link is dropped rather than the
+      -- section.
+      insert into public.track_sections
+      select *
+      from jsonb_populate_recordset(
+        null::public.track_sections,
+        (
+          select jsonb_agg(
+            case
+              when e ->> 'source_run_id' is not null
+                and not exists (
+                  select 1 from public.detection_runs d where d.id = (e ->> 'source_run_id')::uuid
+                )
+              then jsonb_set(e, '{source_run_id}', 'null'::jsonb)
+              else e
+            end
+          )
+          from jsonb_array_elements(v_prev_sections) e
+        )
+      );
+      get diagnostics v_restored = row_count;
+    end if;
+
+    v_prev_track := v_run.pre_promotion -> 'track';
+    if jsonb_typeof(v_prev_track) = 'object' then
+      update public.tracks t
+      set detected_key = v_prev_track ->> 'detected_key',
+          detected_mode = v_prev_track ->> 'detected_mode',
+          progression_roman = case
+            when jsonb_typeof(v_prev_track -> 'progression_roman') = 'array'
+              then array(select jsonb_array_elements_text(v_prev_track -> 'progression_roman'))
+          end,
+          loop_length_bars = (v_prev_track ->> 'loop_length_bars')::integer,
+          tempo = (v_prev_track ->> 'tempo')::numeric,
+          confidence_score = (v_prev_track ->> 'confidence_score')::numeric,
+          analysis_source = v_prev_track ->> 'analysis_source',
+          updated_at = now()
+      where t.id = v_run.track_id;
+      v_track_restored := true;
+    end if;
+  end if;
+
+  update public.detection_runs
+  set status = 'pending',
+      reviewed_by = null,
+      reviewed_at = null,
+      pre_promotion = null
+  where id = v_run.id;
+
+  return query select v_run.track_id, v_removed, v_restored, v_track_restored;
+end;
+$$;
+
+-- The admin RPC behind the Undo button.
+create or replace function public.revert_detection_run(p_run_id uuid)
+returns table (
+  track_id uuid,
+  sections_removed integer,
+  sections_restored integer,
+  track_restored boolean
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_caller uuid := (select auth.uid());
+begin
+  if v_caller is null or not public.has_role(v_caller, 'admin'::public.app_role) then
+    raise exception 'Only an admin can undo a promotion'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  return query select * from public._revert_detection_run_core(p_run_id);
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- Who can call what. The core is reachable only through a definer function or
+-- the SQL Editor (which runs as postgres); the RPC needs the same grants the
+-- other admin RPCs have, with the admin check inside it.
+-- ------------------------------------------------------------
+revoke all on function public._revert_detection_run_core(uuid) from public, anon, authenticated;
+revoke execute on function public.revert_detection_run(uuid) from public, anon;
+grant execute on function public.revert_detection_run(uuid) to authenticated;
+
+comment on function public.revert_detection_run is
+  'Undo the promotion of the run that is currently canonical for its track: removes its sections, restores what it replaced when recorded, and returns the run to pending. Admin only.';
+
+commit;
+
+-- ============================================================
+-- Sanity checks. Read-only; run after the commit above.
+-- ============================================================
+-- 1. The RPC is callable by signed-in users, the core is not:
+-- select p.proname,
+--        has_function_privilege('anon', p.oid, 'execute')          as anon,
+--        has_function_privilege('authenticated', p.oid, 'execute') as authenticated
+-- from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+-- where n.nspname = 'public'
+--   and p.proname in ('revert_detection_run', '_revert_detection_run_core', '_promote_detection_run_core');
+-- expected: revert_detection_run false / true; both cores false / false
+--
+-- 2. Which promoted runs can be fully restored (snapshot recorded) and which
+--    can only be removed (promoted before this script):
+-- select r.status, (r.pre_promotion is not null) as has_snapshot, count(*)
+-- from public.detection_runs r
+-- group by 1, 2
+-- order by 1, 2;
+--
+-- 3. Undo every promoted seed run from the SQL Editor (newest first, so a
+--    track promoted twice unwinds in order). Runs that were replaced by a
+--    later promotion cannot be undone on their own and are skipped with a
+--    notice; the seed cleanup in 28 removes those.
+-- do $$
+-- declare r record;
+-- begin
+--   for r in
+--     select id from public.detection_runs
+--     where idempotency_key like 'seed-demo-%' and status = 'promoted'
+--     order by reviewed_at desc
+--   loop
+--     begin
+--       perform * from public._revert_detection_run_core(r.id);
+--     exception when others then
+--       raise notice 'skipped %: %', r.id, sqlerrm;
+--     end;
+--   end loop;
+-- end $$;
+
+
+-- ============================================================
+-- sql-editor/31-save-track-sections-mirror.sql
+-- ============================================================
+-- ============================================================
+-- 31-save-track-sections-mirror.sql
+--
+-- Make a hand-edited section list stick everywhere it is shown.
+--
+-- save_track_sections (19) writes the canonical public.track_sections table,
+-- and the player drawer reads that. But the feed's cards read the track row's
+-- own legacy `tracks.sections` jsonb column directly, and that column was only
+-- ever written by the seed. So after Save the drawer showed the edit and the
+-- feed - after a reload, from the database - showed the old sections again:
+-- to the person who made the edit it simply had not been remembered.
+--
+-- This replaces save_track_sections with the same function plus one step: the
+-- saved structure is mirrored onto tracks.sections in that column's existing
+-- shape, in the same transaction, so the two can never disagree.
+--
+--   [{"type":"verse","label":"Verse 1","start_time":18,"end_time":46}, ...]
+--
+-- `type` is the canonical label, `label` the display name (numbered only where
+-- a label repeats, matching the app's sectionDisplayNames), times are seconds.
+--
+-- SAFETY: CREATE OR REPLACE of one function; applying this script changes no
+-- data. Grants are restated because they are what keeps this admin-only.
+-- Run AFTER 19-save-track-sections.sql.
+-- ============================================================
+
+begin;
+
+create or replace function public.save_track_sections(
+  p_track_id uuid,
+  p_sections jsonb
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_caller uuid := (select auth.uid());
+  v_count integer;
+  v_prev_end integer := -1;
+  v_row record;
+begin
+  if v_caller is null or not public.has_role(v_caller, 'admin'::public.app_role) then
+    raise exception 'Only an admin can edit a track''s sections'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  if not exists (select 1 from public.tracks where id = p_track_id) then
+    raise exception 'No such track: %', p_track_id using errcode = 'no_data_found';
+  end if;
+
+  if jsonb_typeof(p_sections) <> 'array' then
+    raise exception 'sections must be a JSON array' using errcode = 'invalid_parameter_value';
+  end if;
+
+  -- Sections tile one timeline, so they have to arrive in order and must not
+  -- overlap. useActiveSection resolves an overlap by first match, so bad data
+  -- here would not error anywhere - it would quietly highlight the wrong part
+  -- of the song. Checked server-side because the client is not the only
+  -- possible caller.
+  for v_row in
+    select
+      (e ->> 'label')::text as label,
+      coalesce((e ->> 'ordinal')::smallint, 1) as ordinal,
+      (e ->> 'start_ms')::integer as start_ms,
+      (e ->> 'end_ms')::integer as end_ms,
+      ordinality as position
+    from jsonb_array_elements(p_sections) with ordinality as t(e, ordinality)
+    order by ordinality
+  loop
+    if v_row.label is null or v_row.label not in
+       ('intro','verse','pre-chorus','chorus','bridge','outro','breakdown','drop') then
+      raise exception 'Unknown section label at position %: %', v_row.position, v_row.label
+        using errcode = 'invalid_parameter_value';
+    end if;
+    if v_row.start_ms is null or v_row.end_ms is null or v_row.end_ms <= v_row.start_ms then
+      raise exception 'Section % must end after it starts', v_row.position
+        using errcode = 'invalid_parameter_value';
+    end if;
+    if v_row.start_ms < v_prev_end then
+      raise exception 'Section % overlaps the one before it', v_row.position
+        using errcode = 'invalid_parameter_value';
+    end if;
+    v_prev_end := v_row.end_ms;
+  end loop;
+
+  delete from public.track_sections where track_id = p_track_id;
+
+  -- Deliberately no progression_roman or chord_timings. Moving a boundary
+  -- changes which chords fall inside a section, so carrying the old ones
+  -- across would attach chords to the wrong part while still looking exact.
+  -- A section edited by hand describes structure only; promoting a detection
+  -- run is what puts chords back.
+  insert into public.track_sections (track_id, label, ordinal, start_ms, end_ms)
+  select
+    p_track_id,
+    e ->> 'label',
+    coalesce((e ->> 'ordinal')::smallint, 1),
+    (e ->> 'start_ms')::integer,
+    (e ->> 'end_ms')::integer
+  from jsonb_array_elements(p_sections) as e;
+
+  get diagnostics v_count = row_count;
+
+  -- Mirror onto the track row's own copy, read by the feed. Built from what
+  -- was just stored rather than from the input, so it is by construction what
+  -- the canonical table holds.
+  update public.tracks t
+  set sections = coalesce(
+        (
+          select jsonb_agg(
+                   jsonb_build_object(
+                     'type', s.label,
+                     'label', initcap(s.label)
+                              || case when s.total > 1 then ' ' || s.occurrence::text else '' end,
+                     'start_time', round(s.start_ms / 1000.0, 3),
+                     'end_time', round(s.end_ms / 1000.0, 3)
+                   )
+                   order by s.start_ms
+                 )
+          from (
+            select
+              ts.label,
+              ts.start_ms,
+              ts.end_ms,
+              count(*) over (partition by ts.label) as total,
+              row_number() over (partition by ts.label order by ts.start_ms) as occurrence
+            from public.track_sections ts
+            where ts.track_id = p_track_id
+          ) s
+        ),
+        '[]'::jsonb
+      ),
+      updated_at = now()
+  where t.id = p_track_id;
+
+  return v_count;
+end;
+$$;
+
+revoke execute on function public.save_track_sections(uuid, jsonb) from public, anon;
+grant execute on function public.save_track_sections(uuid, jsonb) to authenticated;
+
+comment on function public.save_track_sections is
+  'Admin only. Replaces a track''s sections with a hand-marked set and mirrors them onto tracks.sections for the feed. Structure only - chords come from promoting a detection run.';
+
+commit;
+
+-- ============================================================
+-- Sanity check. Read-only; run after the commit above.
+-- ============================================================
+-- The function body should now mention the mirror:
+-- select position('update public.tracks' in pg_get_functiondef('public.save_track_sections(uuid, jsonb)'::regprocedure)) > 0 as mirrors_to_tracks;
+-- expected: true
 
 COMMIT;

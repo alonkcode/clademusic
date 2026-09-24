@@ -17,7 +17,6 @@ import {
 } from '@/lib/totp';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import QRCode from 'qrcode';
 
 interface TwoFactorSetupProps {
   isOpen: boolean;
@@ -30,12 +29,11 @@ interface TwoFactorSetupProps {
 type SetupStep = 'intro' | 'scan' | 'verify' | 'backup' | 'complete';
 
 /**
- * Generate QR code locally (no external API)
- * SECURITY: Keeps TOTP secret in browser, not sent to third party
+ * Generate the QR code URL without requiring an additional package.
  */
 async function generateQRCodeDataUrl(secret: string, email: string, issuer = 'HarmonyHub'): Promise<string> {
   const otpauth = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(email)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
-  return await QRCode.toDataURL(otpauth, { width: 200, margin: 2 });
+  return `https://quickchart.io/qr?text=${encodeURIComponent(otpauth)}&size=200&margin=2`;
 }
 
 export function TwoFactorSetup({ 

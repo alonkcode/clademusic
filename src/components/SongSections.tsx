@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Music2, Play } from 'lucide-react';
 import { SongSection, SongSectionType } from '@/types';
 import { cn } from '@/lib/utils';
+import { formatTimeFromSeconds } from '@/lib/timeFormat';
 import { usePlayer } from '@/player/PlayerContext';
 
 interface SongSectionsProps {
@@ -63,9 +64,7 @@ export function SongSections({ sections, youtubeId, title, className }: SongSect
 
   function formatTime(seconds: number): React.ReactNode {
     if (typeof seconds !== 'number' || isNaN(seconds) || seconds < 0) return '--:--';
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
+    return formatTimeFromSeconds(seconds, true);
   }
 
   return (

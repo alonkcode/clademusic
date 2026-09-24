@@ -34,22 +34,23 @@ export function sectionDurationSeconds(section: TrackSection): number {
 }
 
 /**
- * Format milliseconds as mm:ss
+ * Format milliseconds as mm:ss.mmm for precise section boundaries.
  */
 export function formatMs(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
+  const value = Math.max(0, ms);
+  const totalSeconds = Math.floor(value / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const milliseconds = Math.floor(value % 1000);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
 }
 
 /**
- * Format seconds as mm:ss
+ * Format seconds as mm:ss.mmm
  */
 export function formatSeconds(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  const totalMs = Math.max(0, seconds) * 1000;
+  return formatMs(totalMs);
 }
 
 /**

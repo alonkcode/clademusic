@@ -7,20 +7,33 @@
 /**
  * Format milliseconds to MM:SS
  */
-export function formatTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
+export function formatTime(ms: number, includeMilliseconds = false): string {
+  const value = Math.max(0, ms);
+  const totalSeconds = Math.floor(value / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const milliseconds = Math.floor(value % 1000);
+
+  if (!includeMilliseconds) {
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
 }
 
 /**
  * Format seconds to MM:SS
  */
-export function formatTimeFromSeconds(seconds: number): string {
+export function formatTimeFromSeconds(seconds: number, includeMilliseconds = false): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  const milliseconds = Math.floor((seconds % 1) * 1000);
+
+  if (!includeMilliseconds) {
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  return `${mins}:${secs.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
 }
 
 /**

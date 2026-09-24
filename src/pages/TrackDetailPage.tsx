@@ -442,7 +442,7 @@ export default function TrackDetailPage() {
                             {!isActive && <Play className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            {formatTime(section.start_ms)} - {formatTime(section.end_ms)}
+                            {formatTime(section.start_ms, true)} - {formatTime(section.end_ms, true)}
                           </div>
                         </div>
 
