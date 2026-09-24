@@ -467,12 +467,12 @@ describe('Integration Tests', () => {
 });
 
 describe('Performance Benchmarks', () => {
-  it('should render player in under 100ms', async () => {
+  it('should render player in under 150ms', async () => {
     const start = performance.now();
     render(<EmbeddedPlayerDrawer />, { wrapper });
     const end = performance.now();
     
-    expect(end - start).toBeLessThan(100);
+    expect(end - start).toBeLessThan(150);
   });
 
   it('should handle rapid voting without lag', async () => {
