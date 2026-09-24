@@ -259,11 +259,17 @@ export function useAnalyzeTrack(target: AnalyzeTarget): UseAnalyzeTrackResult {
         // Any other reason is the server wanting more than it has heard; keep
         // listening and the next attempt goes out once there is more of the
         // song - until the attempts run out.
-        else if (attemptsRef.current >= MAX_AUTO_ATTEMPTS) setGaveUp(true);
+        else if (attemptsRef.current >= MAX_AUTO_ATTEMPTS || atTrackEnd) {
+          setGaveUp(true);
+          if (atTrackEnd) stopLive();
+        }
       })
       .catch((err: unknown) => {
         setSaveError(err instanceof Error ? err.message : 'Could not save this analysis.');
-        if (attemptsRef.current >= MAX_AUTO_ATTEMPTS) setGaveUp(true);
+        if (attemptsRef.current >= MAX_AUTO_ATTEMPTS || atTrackEnd) {
+          setGaveUp(true);
+          if (atTrackEnd) stopLive();
+        }
       })
       .finally(() => {
         inFlightRef.current = false;

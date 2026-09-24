@@ -48,6 +48,8 @@ export interface UseLiveChordDetectionResult {
    *  the guest Spotify embed reports none at all - in which case times are
    *  only relative to when capture started and must not be stored. */
   timingAligned: boolean;
+  /** True once the player's reported position reaches the actual track end. */
+  atTrackEnd: boolean;
   start: () => Promise<void>;
   stop: () => void;
   /** Throw away the accumulated analysis. Stopping a capture keeps it. */
@@ -56,6 +58,7 @@ export interface UseLiveChordDetectionResult {
 
 const FFT_SIZE = 8192; // higher resolution than the default 2048, for cleaner low-note bins
 const TICK_MS = 120;
+const TRACK_END_TOLERANCE_MS = 1_500;
 /** Re-running the self-similarity segmentation on every 120ms chord tick
  *  would be wasted work - boundaries don't need to update that often. */
 const SECTION_RECOMPUTE_MS = 3000;
@@ -127,7 +130,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   // outright. PlaybackClock interpolates between reports instead. Read via
   // refs so the capture loop sees the current value without restarting on
   // every position update.
-  const { positionMs, isPlaying } = usePlayer();
+  const { positionMs, durationMs, isPlaying } = usePlayer();
   const positionRef = useRef({ positionMs, isPlaying });
   useEffect(() => {
     positionRef.current = { positionMs, isPlaying };
@@ -393,6 +396,11 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
     detectedKey,
     tempo,
     timingAligned,
+    atTrackEnd:
+      Number.isFinite(durationMs) &&
+      durationMs > 0 &&
+      Number.isFinite(positionMs) &&
+      positionMs >= durationMs - TRACK_END_TOLERANCE_MS,
     start,
     stop,
     reset,
