@@ -1,49 +1,64 @@
 # Song Sections Feature Documentation
 
 ## Overview
-This document describes the new song sections feature that allows tracks to have timestamped sections (intro, verse, chorus, bridge, outro) with individual YouTube embeds for each section.
+Song sections describe a track's cut points (intro, verse, chorus, bridge, breakdown, etc.) and are used for both navigation and harmonic context. The canonical data is stored as millisecond boundaries on the section itself, and playback always starts through the universal player rather than launching a standalone inline embed.
 
-## Features
+## Current behavior
 
-### 1. YouTube Background for Watch Button
-When users click the "Watch" button on a track card:
-- The YouTube video plays  
-- UI elements remain visible with a gradient overlay
-- Button changes to "Hide" to dismiss the video
-- Creates an immersive music video experience
+### 1. Universal-player seek navigation
+When a user taps a section chip:
+- the app resolves the correct provider and track
+- it seeks the existing player in place when the same track is already playing
+- otherwise it opens the universal player at the exact section boundary
+- the section start is preserved as a real millisecond value, not rounded to whole seconds
 
-### 2. Spotify Native App Integration
-Improved Spotify link handling:
-- Uses hidden iframe to attempt opening Spotify native app
-- Falls back to background web player if app not installed
-- No popups or focus changes - keeps user on current page
-- Seamless integration that doesn't interrupt browsing
+This is the behavior implemented in: 
+- `src/components/CompactSongSections.tsx`
+- `src/components/SongSections.tsx`
+- `src/player/PlayerContext.tsx`
 
-### 3. Song Sections with Timestamps
-Display song structure with individual playback controls:
-- Grid layout showing all sections (intro, verse, chorus, bridge, outro)
-- Each section button shows section type with emoji icon, custom label, and timestamp
-- Click any section to play that specific part of the song
-- YouTube embed opens with startTime and endTime parameters
+### 2. Timestamp precision for tuning
+Section boundaries are stored and displayed in milliseconds so the UI can show values such as `0:50.000`. This is important for fine adjustment of section starts, especially when a section boundary is not perfectly aligned to a whole second.
 
-## Data Structure
+### 3. Section-aware playback context
+A section card not only jumps to the right time but also keeps the harmonic readout and active-section highlighting aligned with the current track and playback position.
 
-### SongSection Type
-```typescript
-export type SongSectionType = 'intro' | 'verse' | 'chorus' | 'bridge' | 'outro';
+## Data shapes
 
+### Legacy song-sections payload
+```ts
 export interface SongSection {
   type: SongSectionType;
-  label?: string;        // e.g., "Verse 1", "Chorus"
-  start_time: number;    // in seconds
-  end_time?: number;     // in seconds (optional)
+  label?: string; // e.g. "Verse 1", "Chorus", "Bridge"
+  start_time: number; // seconds for legacy payloads
+  end_time?: number; // seconds (optional)
+  chords?: string[];
+  chord_timings?: number[];
 }
 ```
 
-## Implementation Details
-See the full codebase for implementation details in:
-- `src/components/SongSections.tsx` - Main sections component
-- `src/components/TrackCard.tsx` - YouTube background integration
-- `src/components/YouTubeEmbed.tsx` - Timestamp support
-- `src/lib/providers.ts` - Spotify native app handling
-- `src/types/index.ts` - Type definitions
+### Canonical section rows
+```ts
+export interface TrackSection {
+  id: string;
+  track_id: string;
+  label: SongSectionType;
+  start_ms: number;
+  end_ms: number;
+  created_at: string;
+  ordinal?: number;
+  chords?: string[];
+  chord_timings?: number[];
+  confidence?: number;
+}
+```
+
+The important distinction is that the app treats `start_ms` / `end_ms` as the source of truth for playhead positioning and UI labels, while the older `start_time` / `end_time` fields are legacy compatibility shapes.
+
+## Implementation references
+- `src/components/CompactSongSections.tsx` — compact section chips and click-through seeking
+- `src/components/SongSections.tsx` — full song-structure view
+- `src/pages/TrackDetailPage.tsx` — section list on track detail pages
+- `src/lib/timeFormat.ts` — shared time formatting
+- `src/lib/sections.ts` — section utilities and precise millisecond formatting
+- `src/types/index.ts` — section data contracts

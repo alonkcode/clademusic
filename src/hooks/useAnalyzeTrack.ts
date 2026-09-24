@@ -126,7 +126,10 @@ export function useAnalyzeTrack(target: AnalyzeTarget): UseAnalyzeTrackResult {
 
   const attemptsRef = useRef(0);
   const lastAttemptCoverageRef = useRef(0);
+  const endAttemptedRef = useRef(false);
   const inFlightRef = useRef(false);
+
+  const atTrackEnd = live.atTrackEnd ?? false;
 
   // The server validates ids strictly, so hand it the normalised one from the
   // canonical id when there is one rather than whatever form the player kept.
@@ -192,6 +195,7 @@ export function useAnalyzeTrack(target: AnalyzeTarget): UseAnalyzeTrackResult {
     if (live.status === 'requesting') {
       attemptsRef.current = 0;
       lastAttemptCoverageRef.current = 0;
+      endAttemptedRef.current = false;
       setSaveError(null);
       setGaveUp(false);
     }
@@ -220,7 +224,8 @@ export function useAnalyzeTrack(target: AnalyzeTarget): UseAnalyzeTrackResult {
     // relative to when the listener happened to click.
     if (!live.timingAligned) return;
     if (inFlightRef.current || saved !== 'none') return;
-    if (attemptsRef.current >= MAX_AUTO_ATTEMPTS) return;
+    if (endAttemptedRef.current) return;
+    if (attemptsRef.current >= MAX_AUTO_ATTEMPTS && !atTrackEnd) return;
     if (
       attemptsRef.current > 0 &&
       verdict.progress.coverageMs - lastAttemptCoverageRef.current < RETRY_EXTRA_COVERAGE_MS
@@ -229,6 +234,7 @@ export function useAnalyzeTrack(target: AnalyzeTarget): UseAnalyzeTrackResult {
     }
 
     inFlightRef.current = true;
+    if (atTrackEnd) endAttemptedRef.current = true;
     attemptsRef.current += 1;
     lastAttemptCoverageRef.current = verdict.progress.coverageMs;
     setSaving(true);
@@ -263,7 +269,7 @@ export function useAnalyzeTrack(target: AnalyzeTarget): UseAnalyzeTrackResult {
         inFlightRef.current = false;
         setSaving(false);
       });
-  }, [capturing, payload, verdict, user, live.timingAligned, saved, settle, stopLive, target.title]);
+  }, [atTrackEnd, capturing, payload, verdict, user, live.timingAligned, saved, settle, stopLive, target.title]);
 
   const start = useCallback(async () => {
     setSaved('none');

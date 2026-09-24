@@ -59,7 +59,7 @@ describe('LoginPage', () => {
     mockSignIn.mockResolvedValue({ error: null });
   });
 
-  it('allows sign-in from guest mode and navigates to auth gate', async () => {
+  it('allows sign-in from guest mode and navigates directly to the feed', async () => {
     render(
       <MemoryRouter
         initialEntries={[{ pathname: '/login' }]}
@@ -67,7 +67,7 @@ describe('LoginPage', () => {
       >
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/auth" element={<div data-testid="auth-gate" />} />
+          <Route path="/feed" element={<div data-testid="feed-page" />} />
         </Routes>
       </MemoryRouter>
     );
@@ -81,6 +81,6 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => expect(mockSignIn).toHaveBeenCalledWith('user@example.com', 'password123'));
-    await waitFor(() => expect(screen.getByTestId('auth-gate')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('feed-page')).toBeInTheDocument());
   });
 });

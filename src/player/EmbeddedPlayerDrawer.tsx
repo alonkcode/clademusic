@@ -485,7 +485,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             canonicalTrackId={canonicalTrackId}
             title={resolvedTitle}
             artist={resolvedArtist}
-            durationMs={durationMs}
+            durationMs={durationMsSafe > 0 ? durationMsSafe : null}
             resolvedTrackId={resolvedTrackId}
             onSignIn={() => navigate('/auth')}
           />

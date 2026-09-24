@@ -47,6 +47,8 @@ This page tracks user-visible problems that are either unresolved or have import
   floating/draggable/resizable panel
 - Seekbar no longer freezes at 0:00 or drifts out of sync on YouTube tracks
 - Section chips no longer light up from another track's playback position
+- Section timestamps now keep millisecond precision for fine-tuning section
+  boundaries instead of rounding to whole seconds
 - Fixed `ReferenceError: supabase is not defined` when connecting Last.fm
 - Live chord detection's silence gate fixed (was comparing an
   always-unit-normalized vector against itself, so it could never actually
