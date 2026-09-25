@@ -127,6 +127,10 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
   // `PUT /me/player/play`, so a re-run of the setup effect never replays a
   // track the listener is already partway through.
   const startedPlayKeyRef = useRef<string | null>(null);
+  // Keep overlapping track changes in order so an old Spotify request cannot
+  // finish after a newer quicklink and restore the previous song.
+  const latestPlayKeyRef = useRef<string | null>(null);
+  const playQueueRef = useRef<Promise<void>>(Promise.resolve());
   const volumeRef = useRef<number>(volume);
 
   useEffect(() => {
@@ -148,6 +152,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
 
   const shouldAutoplay = useMemo(() => autoplay ?? autoplaySpotify ?? true, [autoplay, autoplaySpotify]);
   const uri = useMemo(() => (providerTrackId ? `spotify:track:${providerTrackId}` : null), [providerTrackId]);
+  latestPlayKeyRef.current = providerTrackId ? `${playRequestId}:${providerTrackId}` : null;
 
   // Live transport values, mirrored into refs so the setup effect below can
   // READ them without being RE-RUN by them. The caller passes
@@ -292,35 +297,33 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
       // chorus, not at 0:00 with a seek racing the SDK's connect.
       const seekAtStartSec = seekToSecRef.current;
       const startMs = seekAtStartSec != null ? Math.max(0, Math.round(seekAtStartSec * 1000)) : 0;
-      const playRes = await spotifyApiFetch(token, `/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ uris: [uri], position_ms: startMs }),
-      });
+      const queuedPlay = playQueueRef.current.then(async () => {
+        // A newer click may replace this request while it waits in the queue.
+        if (latestPlayKeyRef.current !== playKey) return;
+        const playRes = await spotifyApiFetch(token, `/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ uris: [uri], position_ms: startMs }),
+        });
 
-      if (!playRes.ok && playRes.status !== 204) {
-        const details = await playRes.json().catch(() => null);
-        console.warn('[Spotify Web Player] play failed', playRes.status, details);
-        // Release the key so a later attempt can retry: this request never
-        // actually started, so treating it as started would strand the track.
-        startedPlayKeyRef.current = null;
-        // A 403 here is almost always the app's Spotify Developer Dashboard
-        // being in Development Mode, which restricts the API to an explicit
-        // allow-list of accounts regardless of whether the listener actually
-        // has Premium - surface that concretely rather than a bare status
-        // code, since "Using preview mode" alone gives the listener nothing
-        // they can act on.
-        if (playRes.status === 403) {
-          setError(
-            'Spotify playback not permitted (403). Using preview mode. If this account should have full access, add it under the Spotify Developer Dashboard → your app → Users and Access.'
-          );
+        if (!playRes.ok && playRes.status !== 204) {
+          const details = await playRes.json().catch(() => null);
+          console.warn('[Spotify Web Player] play failed', playRes.status, details);
+          // This request never actually started, so allow a later retry.
+          startedPlayKeyRef.current = null;
+          if (latestPlayKeyRef.current === playKey && playRes.status === 403) {
+            setError(
+              'Spotify playback not permitted (403). Using preview mode. If this account should have full access, add it under the Spotify Developer Dashboard → your app → Users and Access.'
+            );
+          }
+          return;
         }
-        return;
-      }
 
-      if (seekAtStartSec != null) {
-        // The start position was applied by the play call itself.
-        clearSeek();
-      }
+        if (seekAtStartSec != null) clearSeek();
+      });
+      playQueueRef.current = queuedPlay.catch((error) => {
+        console.error('[Spotify Web Player] queued play failed', error);
+      });
+      await queuedPlay;
     },
     [uri, providerTrackId, playRequestId, clearSeek]
   );
@@ -497,6 +500,7 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
           }, 500) as unknown as number;
         }
       } catch (e) {
+        if (cancelled) return;
         console.error('[Spotify Web Player] setup failed', e);
         setError('Spotify full playback failed to start. Using preview mode.');
       }

@@ -1,17 +1,13 @@
 import { motion } from 'framer-motion';
-import { Music } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { Loader2, Music } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TrackProviderInfo, getProviderLinks } from '@/lib/providers';
-import { getPreferredProvider, setPreferredProvider } from '@/lib/preferences';
+import { setPreferredProvider } from '@/lib/preferences';
 import { usePlayer } from '@/player/PlayerContext';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/useAuth';
-import { useNavigate } from 'react-router-dom';
 import { searchYouTubeVideos } from '@/services/youtubeSearchService';
 import { searchSpotifyPublic } from '@/services/spotifySearchService';
 import { toast } from 'sonner';
-import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
-import { useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
 import { buildProviderDeepLink } from '@/player/universal/buildEmbedSrc';
 
 interface QuickStreamButtonsProps {
@@ -59,12 +55,13 @@ export function QuickStreamButtons({
   const links = getProviderLinks(track);
   const spotifyLink = links.find((l) => l.provider === 'spotify');
   const youtubeLink = links.find((l) => l.provider === 'youtube');
-  const preferredProvider = getPreferredProvider();
   const { openPlayer, positionMs, provider: currentProvider, canonicalTrackId: currentTrackId, trackId: currentProviderTrackId } = usePlayer();
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const { data: isSpotifyConnected } = useSpotifyConnected();
-  const connectSpotify = useConnectSpotify();
+  const [spotifyStarting, setSpotifyStarting] = useState(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+  }, []);
 
   const normalizeSpotifyId = useCallback((raw?: string | null) => {
     if (!raw) return null;
@@ -118,6 +115,8 @@ export function QuickStreamButtons({
 
   const handleSpotifyClick = useCallback(async () => {
     const clickGeneration = ++latestQuickStreamClick;
+    setSpotifyStarting(true);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     setPreferredProvider('spotify');
 
     // Same fallback YouTube has had: a card without a cached Spotify id - a
@@ -131,17 +130,27 @@ export function QuickStreamButtons({
     let resolvedId = spotifyTrackId;
     if (!resolvedId) {
       const query = [trackArtist, trackTitle].filter(Boolean).join(' ').trim();
-      if (!query) return;
+      if (!query) {
+        setSpotifyStarting(false);
+        return;
+      }
       try {
         const { tracks: found } = await searchSpotifyPublic(query, 1);
-        if (clickGeneration !== latestQuickStreamClick) return;
+        if (clickGeneration !== latestQuickStreamClick) {
+          setSpotifyStarting(false);
+          return;
+        }
         resolvedId = found[0]?.spotify_id ?? null;
       } catch (err) {
         console.warn('Spotify search failed; cannot play', err);
+        setSpotifyStarting(false);
+        toast.error('Spotify search failed. Please try again.');
+        return;
       }
     }
 
     if (!resolvedId) {
+      setSpotifyStarting(false);
       toast.error(`Couldn't find "${trackTitle ?? 'this track'}" on Spotify`);
       return;
     }
@@ -162,6 +171,7 @@ export function QuickStreamButtons({
       artist: trackArtist,
       startSec: currentPositionSec,
     });
+    feedbackTimerRef.current = setTimeout(() => setSpotifyStarting(false), 1200);
   }, [canonicalTrackId, trackTitle, trackArtist, openPlayer, currentPositionSec, spotifyTrackId]);
 
   const handleYouTubeClick = useCallback(async () => {
@@ -238,6 +248,7 @@ export function QuickStreamButtons({
         }}
         onClick={canFindSpotify ? handleSpotifyClick : undefined}
         data-provider="spotify"
+        aria-busy={spotifyStarting}
         disabled={!canFindSpotify}
         className={cn(
           sizeClasses[size],
@@ -246,18 +257,25 @@ export function QuickStreamButtons({
             ? 'bg-gradient-to-br from-[#1DB954] to-[#1ed760] text-white shadow-lg hover:shadow-xl hover:from-[#1ed760] hover:to-[#1DB954] cursor-pointer'
             : 'bg-muted text-muted-foreground cursor-not-allowed opacity-60',
           currentProvider === 'spotify' && isCurrentTrack && 'ring-2 ring-white ring-offset-2 ring-offset-background',
+          spotifyStarting && 'scale-110 ring-4 ring-white ring-offset-2 ring-offset-background',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
         )}
-        title={hasSpotify ? 'Play in Spotify' : canFindSpotify ? 'Find on Spotify' : 'Spotify unavailable'}
+        title={spotifyStarting ? 'Opening Spotify…' : hasSpotify ? 'Play in Spotify' : canFindSpotify ? 'Find on Spotify' : 'Spotify unavailable'}
         aria-label={
-          hasSpotify
+          spotifyStarting
+            ? `Opening ${trackTitle} in Spotify`
+            : hasSpotify
             ? `Play ${trackTitle} in Spotify`
             : canFindSpotify
               ? `Find ${trackTitle} on Spotify`
               : 'Spotify unavailable'
         }
       >
-        <SpotifyIcon className={iconSizes[size]} />
+        {spotifyStarting ? (
+          <Loader2 className={cn(iconSizes[size], 'animate-spin')} aria-hidden="true" />
+        ) : (
+          <SpotifyIcon className={iconSizes[size]} />
+        )}
       </motion.button>
 
       <motion.button
