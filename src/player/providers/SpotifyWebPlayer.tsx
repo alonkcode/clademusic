@@ -264,8 +264,10 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
       if (!player || unlocked) return;
       unlocked = true;
       setAutoplayBlocked(false);
+      // Unlock audio in the user's gesture. Do not resume here: this capture
+      // handler runs before the quicklink updates the requested track, so
+      // resume() can restart the previous song.
       void player.activateElement?.();
-      void player.resume();
       window.removeEventListener('pointerdown', unlock, { capture: true });
       window.removeEventListener('keydown', unlock, { capture: true });
     };
@@ -395,8 +397,11 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
 
           instance.addListener('playback_error', (e: any) => {
             console.error('[Spotify Web Player] playback error', e);
-            // Don’t hard-fail; allow fallback/polling to drive UI.
-            setError((prev) => prev ?? 'Spotify playback error. Using preview mode.');
+            // Spotify emits this for transient and stale playback failures as
+            // well as permanent ones. Falling back here disconnects the SDK
+            // even while a newer quicklink request is in flight. Keep the
+            // device connected; explicit API/auth/account failures below
+            // remain responsible for switching to the preview player.
           });
 
           // Not an error - the browser's own autoplay policy refused the
