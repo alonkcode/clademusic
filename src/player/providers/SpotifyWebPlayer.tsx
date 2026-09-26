@@ -277,7 +277,8 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback, onNoti
       setMute: async (muted) => {
         await sessionRef.current?.setVolume(muted ? 0 : latest.current.volume);
       },
-      // Disconnects the device but leaves the session able to build a new one.
+      // Silences the device and hands the SDK player back, still connected, so
+      // coming back to Spotify starts on it at once.
       teardown: async () => {
         sessionRef.current?.release();
       },

@@ -5,6 +5,15 @@ import { vi } from 'vitest';
  * it, behaving the way the real pair does closely enough to drive the player:
  * the device announces itself, a successful play request makes it switch to the
  * requested track, and any response can be scripted to fail.
+ *
+ * It also reproduces the one SDK quirk that matters for switching providers. The
+ * real SDK has a single hidden iframe per page, holding a single audio engine
+ * that belongs to the FIRST Player constructed. Every later `new Player()`
+ * re-initialises the iframe under a fresh device id and, from then on, `ready`
+ * announces that id to the newest Player only - a device with no engine behind
+ * it, which the Web API cannot find (404). Here that is: the first Player is the
+ * real device (`world.deviceId`), later ones are "ghosts", and only the newest
+ * instance hears events.
  */
 
 export interface ScriptedResponse {
@@ -48,8 +57,14 @@ export class FakeSdkPlayer {
   connectCalls = 0;
   disconnectCalls = 0;
 
+  /** The id this instance is announced under: the real device for the first
+   *  Player of the page, a ghost for every later one. */
+  readonly id: string;
+
   constructor(public options: unknown) {
-    FakeSdkPlayer.instances.push(this);
+    const { world, instances } = FakeSdkPlayer;
+    this.id = instances.length === 0 ? world.deviceId : `${world.deviceId}-ghost-${instances.length}`;
+    instances.push(this);
   }
 
   emit(event: string, data: Record<string, unknown> = {}) {
@@ -60,8 +75,18 @@ export class FakeSdkPlayer {
     const world = FakeSdkPlayer.world;
     this.connectCalls += 1;
     if (world.connectDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, world.connectDelayMs));
-    if (world.readyDelayMs === 0) this.emit('ready', { device_id: world.deviceId });
-    else if (world.readyDelayMs > 0) setTimeout(() => this.emit('ready', { device_id: world.deviceId }), world.readyDelayMs);
+    // The SDK routes the iframe's events to the newest Player, whichever one
+    // asked to connect, and announces that Player's id.
+    // Scoped to this install: a timer left over from an earlier test must not
+    // announce a device into the next one.
+    const instances = FakeSdkPlayer.instances;
+    const announce = () => {
+      if (FakeSdkPlayer.instances !== instances) return;
+      const newest = instances.at(-1);
+      newest?.emit('ready', { device_id: newest.id });
+    };
+    if (world.readyDelayMs === 0) announce();
+    else if (world.readyDelayMs > 0) setTimeout(announce, world.readyDelayMs);
     return true;
   }
 
@@ -146,7 +171,9 @@ export function installFakeSpotify(overrides: Partial<FakeSpotifyWorld> = {}) {
   };
   FakeSdkPlayer.world = world;
   FakeSdkPlayer.instances = [];
-  window.Spotify = { Player: FakeSdkPlayer as never };
+  // A new class per install: to the code under test that is a freshly loaded SDK
+  // script, so a Player kept from an earlier test is not carried into this one.
+  window.Spotify = { Player: class extends FakeSdkPlayer {} as never };
 
   vi.stubGlobal(
     'fetch',
@@ -155,11 +182,10 @@ export function installFakeSpotify(overrides: Partial<FakeSpotifyWorld> = {}) {
       if (href.includes('/me/player/play')) {
         const body = JSON.parse(String(init?.body ?? '{}')) as { uris?: string[]; position_ms?: number };
         const uri = body.uris?.[0] ?? '';
-        world.plays.push({
-          deviceId: new URL(href).searchParams.get('device_id'),
-          uri,
-          positionMs: body.position_ms ?? 0,
-        });
+        const deviceId = new URL(href).searchParams.get('device_id');
+        world.plays.push({ deviceId, uri, positionMs: body.position_ms ?? 0 });
+        // A ghost device has no engine, so Spotify does not know it.
+        if (deviceId !== world.deviceId) return response(404, { body: { error: { status: 404, message: 'Device not found' } } });
         const scripted = world.playResponses.shift();
         if (scripted === 'throw') throw new TypeError('Failed to fetch');
         const res = scripted ?? { status: 204 };
@@ -172,7 +198,8 @@ export function installFakeSpotify(overrides: Partial<FakeSpotifyWorld> = {}) {
       }
       if (href.endsWith('/me/player')) {
         world.transfers += 1;
-        return response(204);
+        const target = (JSON.parse(String(init?.body ?? '{}')) as { device_ids?: string[] }).device_ids?.[0];
+        return response(target === world.deviceId ? 204 : 404);
       }
       return response(204);
     })

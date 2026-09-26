@@ -72,11 +72,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function setup() {
+/** Like the drawer: the SDK player exists only while Spotify is the active provider,
+ *  so switching to YouTube unmounts it and coming back mounts a new one. */
+function DrawerHarness({ onCtx }: { onCtx: (ctx: Ctx) => void }) {
+  const ctx = usePlayer();
+  useEffect(() => {
+    onCtx(ctx);
+  });
+  return ctx.provider === 'spotify' ? (
+    <SpotifyWebPlayer providerTrackId={ctx.trackId} onFallback={onFallback} onNotice={onNotice} />
+  ) : null;
+}
+
+async function setup(Root: typeof Harness = Harness) {
   let latest: Ctx | null = null;
   const view = render(
     <PlayerProvider>
-      <Harness onCtx={(c) => (latest = c)} />
+      <Root onCtx={(c) => (latest = c)} />
     </PlayerProvider>
   );
   await waitFor(() => expect(latest).toBeTruthy());
@@ -268,14 +280,69 @@ describe('a Spotify quicklink click', () => {
     expect(get().isPlaying).toBe(true);
   });
 
-  it('disconnects its device when it goes away', async () => {
+  it('silences its device when it goes away, but leaves the one player connected', async () => {
     const { get, unmount } = await setup();
     await quicklink(get, 'track-a');
     await waitFor(() => expect(get().isStarting).toBe(false), settled);
 
     unmount();
 
-    expect(fake.players().every((p) => p.disconnectCalls >= 1)).toBe(true);
+    expect(fake.world.pauseCalls).toBeGreaterThanOrEqual(1);
+    expect(fake.players().every((p) => p.disconnectCalls === 0)).toBe(true);
+  });
+});
+
+describe('switching to YouTube and back', () => {
+  const openYouTube = async (get: () => Ctx) => {
+    const before = get().playRequestId;
+    act(() => {
+      get().openPlayer({
+        canonicalTrackId: 'canonical-yt',
+        provider: 'youtube',
+        providerTrackId: 'yt-video',
+        title: 'Fake Track',
+        artist: 'Fake Artist',
+        autoplay: true,
+      });
+    });
+    await waitFor(() => expect(get().playRequestId).toBeGreaterThan(before));
+  };
+
+  it('starts Spotify again on the way back, on the same device, with no error', async () => {
+    // Coming back used to build a second SDK player. The SDK gives one working
+    // player per page, so the second announced a device nothing was behind: the
+    // start was retried, then reported as "Spotify didn't respond".
+    const { get } = await setup(DrawerHarness);
+    await quicklink(get, 'track-a');
+    await waitFor(() => expect(get().isStarting).toBe(false), settled);
+
+    await openYouTube(get);
+    // Spotify is silenced the moment YouTube takes over.
+    await waitFor(() => expect(fake.world.pauseCalls).toBeGreaterThanOrEqual(1));
+
+    await quicklink(get, 'track-a');
+    await waitFor(() => expect(get().isStarting).toBe(false), settled);
+
+    expect(fake.players()).toHaveLength(1);
+    expect(fake.world.plays.map((p) => p.deviceId)).toEqual(['device-1', 'device-1']);
+    expect(fake.world.trackId).toBe('track-a');
+    expect(get().isPlaying).toBe(true);
+    expect(onNotice).not.toHaveBeenCalled();
+    expect(onFallback).not.toHaveBeenCalled();
+  });
+
+  it('restores the volume a mute set on the way out', async () => {
+    const { get } = await setup(DrawerHarness);
+    await quicklink(get, 'track-a');
+    await waitFor(() => expect(get().isStarting).toBe(false), settled);
+
+    await openYouTube(get); // silences Spotify: the device is muted to 0
+    await waitFor(() => expect(fake.world.volumes.at(-1)).toBe(0));
+
+    await quicklink(get, 'track-a');
+    await waitFor(() => expect(get().isStarting).toBe(false), settled);
+
+    expect(fake.world.volumes.at(-1)).toBeGreaterThan(0);
   });
 });
 

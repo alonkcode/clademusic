@@ -93,7 +93,7 @@ describe('connecting', () => {
     expect([a.status, b.status]).toEqual(['started', 'started']);
   });
 
-  it('does not leave an orphan device when disposed while still connecting', async () => {
+  it('abandons the wait when disposed while still connecting, and the next session adopts the one player', async () => {
     fake.world.readyDelayMs = 60;
     const session = makeSession();
 
@@ -103,18 +103,24 @@ describe('connecting', () => {
     session.dispose();
 
     expect(await settled).toBeInstanceOf(Error);
-    expect(fake.players()[0].disconnectCalls).toBeGreaterThanOrEqual(1);
+
+    // Not an orphan: it is the page's only player, and it finishes connecting.
+    expect(await makeSession().ensureDevice()).toBe('device-1');
+    expect(fake.players()).toHaveLength(1);
+    expect(fake.players()[0].connectCalls).toBe(1);
   });
 
-  it('rebuilds the player once when the first never announces a device, then reports unavailable', async () => {
+  it('reconnects the same player once when it never announces a device, then reports unavailable', async () => {
+    // Never a second Player: it would announce a device nothing is behind.
     fake.world.readyDelayMs = -1;
     const session = makeSession({ retryDelaysMs: [0] });
 
     const outcome = await session.play(request('a'));
 
     expect(outcome.status).toBe('unavailable');
-    expect(fake.players().length).toBeGreaterThan(1);
-    expect(fake.players().every((p) => p.disconnectCalls >= 1)).toBe(true);
+    expect(fake.players()).toHaveLength(1);
+    expect(fake.players()[0].connectCalls).toBeGreaterThan(1);
+    expect(fake.players()[0].disconnectCalls).toBeGreaterThanOrEqual(1);
   });
 
   it('does not remember a failed SDK script load', async () => {
@@ -197,15 +203,16 @@ describe('transient failures are retried, not dropped', () => {
     expect(fake.world.transfers).toBe(2);
   });
 
-  it('rebuilds the device if it keeps being not found', async () => {
+  it('reconnects the device if it keeps being not found', async () => {
     fake.world.playResponses = [{ status: 404 }, { status: 404 }, { status: 404 }];
     const session = makeSession();
 
     const outcome = await session.play(request('a'));
 
     expect(outcome.status).toBe('started');
-    expect(fake.players().length).toBeGreaterThan(1);
+    expect(fake.players()).toHaveLength(1);
     expect(fake.players()[0].disconnectCalls).toBeGreaterThanOrEqual(1);
+    expect(fake.players()[0].connectCalls).toBeGreaterThan(1);
   });
 
   it('asks for a freshly refreshed token after a 401, then starts', async () => {
@@ -402,10 +409,10 @@ describe('overlapping requests', () => {
     session.release();
 
     expect((await first).status).toBe('superseded');
-    expect(fake.players()[0].disconnectCalls).toBeGreaterThanOrEqual(1);
 
     fake.world.readyDelayMs = 0;
     expect((await session.play(request('b'))).status).toBe('started');
+    expect(fake.players()).toHaveLength(1);
   });
 
   it('resolves everything as superseded once disposed', async () => {
@@ -414,5 +421,65 @@ describe('overlapping requests', () => {
 
     expect((await session.play(request('a'))).status).toBe('superseded');
     expect(fake.world.plays).toHaveLength(0);
+  });
+});
+
+describe('switching away and back (the SDK gives one working Player per page)', () => {
+  it('a later session plays on the same player instead of building a second one', async () => {
+    // The drawer unmounts the Spotify player when YouTube takes over and mounts a
+    // new one when the listener comes back. A second Player would announce a
+    // device with no audio engine: the play request 404s, or is accepted and
+    // nothing is heard.
+    const first = makeSession();
+    expect((await first.play(request('a'))).status).toBe('started');
+    first.dispose();
+
+    const second = makeSession();
+    const outcome = await second.play(request('b'));
+
+    expect(outcome.status).toBe('started');
+    expect(fake.players()).toHaveLength(1);
+    expect(fake.world.plays.map((p) => p.deviceId)).toEqual(['device-1', 'device-1']);
+    expect(fake.world.trackId).toBe('b');
+  });
+
+  it('lets go of the player silenced but still connected', async () => {
+    const session = makeSession();
+    await session.play(request('a'));
+
+    session.release();
+
+    // Left playing it would carry on underneath the YouTube video that replaced it.
+    expect(fake.world.pauseCalls).toBeGreaterThanOrEqual(1);
+    expect(fake.players()[0].disconnectCalls).toBe(0);
+  });
+
+  it('does not let a session that has let go stop what the next one is playing', async () => {
+    const first = makeSession();
+    await first.play(request('a'));
+    const second = makeSession();
+    await second.play(request('b'));
+    const pausesBefore = fake.world.pauseCalls;
+
+    first.release(); // a late teardown from the provider that was switched away from
+
+    expect(fake.world.pauseCalls).toBe(pausesBefore);
+    expect(fake.players()[0].disconnectCalls).toBe(0);
+    expect(fake.world.trackId).toBe('b');
+  });
+
+  it('reports a fatal error to the session holding the player, not to one that let go', async () => {
+    const firstFatal = vi.fn();
+    const secondFatal = vi.fn();
+    const first = makeSession({ onFatal: firstFatal });
+    await first.play(request('a'));
+    first.release();
+    const second = makeSession({ onFatal: secondFatal });
+    await second.ensureDevice();
+
+    fake.players()[0].emit('authentication_error', { message: 'expired' });
+
+    expect(secondFatal).toHaveBeenCalledTimes(1);
+    expect(firstFatal).not.toHaveBeenCalled();
   });
 });

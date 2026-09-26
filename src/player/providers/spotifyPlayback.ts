@@ -21,6 +21,9 @@
  * requested track playing. Only failures that retrying cannot fix (no Premium,
  * revoked auth, an SDK that cannot initialise) are reported as fatal; everything
  * else ends in `unavailable`, which leaves the session usable for the next try.
+ *
+ * Sessions come and go (one per mounted player), but the SDK's Player does not:
+ * see "The page's one Player" below.
  */
 
 declare global {
@@ -139,6 +142,147 @@ function spotifyApi(token: string, path: string, init?: RequestInit): Promise<Re
 }
 
 // ---------------------------------------------------------------------------
+// The page's one Player
+// ---------------------------------------------------------------------------
+
+/** What the shared Player's events are routed to while a session holds it. */
+interface PlayerOwner {
+  ready(deviceId: string): void;
+  notReady(deviceId: string | undefined): void;
+  fatal(failure: SpotifyFailure): void;
+  autoplayBlocked(): void;
+}
+
+interface PagePlayer {
+  /** The SDK class this was built from. */
+  ctor: new (options: unknown) => SpotifyPlayerInstance;
+  instance: SpotifyPlayerInstance;
+  /** Announced by `ready`, cleared by `not_ready`; null while there is no device. */
+  deviceId: string | null;
+  /** `connect()` has succeeded and the Player has not been disconnected since,
+   *  so a missing device only needs waiting for (the SDK reconnects itself). */
+  connected: boolean;
+  /** A `connect()` in flight, shared so two sessions cannot start two. */
+  connecting: Promise<boolean> | null;
+  /** The session events go to; null while nobody holds the player. */
+  owner: PlayerOwner | null;
+  /** Token source of the latest owner: the SDK asks for tokens on its own
+   *  schedule, whether or not a session holds the player at that moment. */
+  getToken: SpotifySessionOptions['getToken'];
+}
+
+/**
+ * The SDK supports ONE Player per page load, so this is created once and lent to
+ * each session in turn - never rebuilt.
+ *
+ * All Players share a single hidden iframe (made when the SDK script loads) that
+ * holds a single audio engine, bound to the FIRST Player's device. Every later
+ * `new Player()` re-initialises that iframe under a fresh, random device id, and
+ * from then on `ready` announces that id - a device with no audio engine behind
+ * it. The Web API then answers 404 for it, or accepts a play request that nothing
+ * ever plays, and getCurrentState never shows the track. On top of that the SDK
+ * routes the iframe's events to the newest Player only, so older ones go deaf.
+ *
+ * Building a Player per session therefore worked exactly once: leaving Spotify
+ * for YouTube and coming back (or closing the player and reopening it) built a
+ * second one, and Spotify stopped, played silently, or reported that it could not
+ * connect.
+ */
+let pagePlayer: PagePlayer | null = null;
+
+function discardPagePlayer() {
+  const stale = pagePlayer;
+  pagePlayer = null;
+  try {
+    stale?.instance.disconnect();
+  } catch {
+    // already gone
+  }
+}
+
+function acquirePagePlayer(owner: PlayerOwner, opts: SpotifySessionOptions): PagePlayer {
+  const PlayerCtor = window.Spotify?.Player;
+  if (!PlayerCtor) throw new Error('Spotify SDK not available');
+  // A reloaded SDK script (a failed load is retried) starts a new iframe and
+  // engine, so a Player from before it is dead.
+  if (pagePlayer && pagePlayer.ctor !== PlayerCtor) discardPagePlayer();
+
+  if (!pagePlayer) {
+    const instance = new PlayerCtor({
+      name: opts.playerName ?? 'Clade Player',
+      volume: opts.getVolume(),
+      // A null from the first try is usually a refresh that lost a race, so ask
+      // once more, forcing it.
+      getOAuthToken: (cb: (token: string) => void) => {
+        void (async () => {
+          const getToken = pagePlayer?.getToken;
+          if (!getToken) return;
+          const token = (await getToken().catch(() => null)) ?? (await getToken(true).catch(() => null));
+          if (token) cb(token);
+        })();
+      },
+    });
+
+    // Every listener ignores events from a Player that has been discarded.
+    const live = () => (pagePlayer?.instance === instance ? pagePlayer : null);
+
+    instance.addListener('ready', ({ device_id }) => {
+      const shared = live();
+      if (!shared || !device_id) return;
+      shared.deviceId = device_id;
+      shared.owner?.ready(device_id);
+    });
+    instance.addListener('not_ready', ({ device_id }) => {
+      const shared = live();
+      if (!shared) return;
+      if (device_id === shared.deviceId) shared.deviceId = null;
+      shared.owner?.notReady(device_id);
+    });
+    instance.addListener('initialization_error', (e) => {
+      console.error('[Spotify Web Player] init error', e);
+      live()?.owner?.fatal({ code: 'init', message: 'Spotify player failed to initialize.' });
+    });
+    instance.addListener('authentication_error', (e) => {
+      console.error('[Spotify Web Player] auth error', e);
+      live()?.owner?.fatal({ code: 'auth', message: 'Spotify authentication failed. Reconnect Spotify.' });
+    });
+    // Common: non-premium accounts cannot use Web Playback SDK.
+    instance.addListener('account_error', (e) => {
+      console.error('[Spotify Web Player] account error', e);
+      live()?.owner?.fatal({
+        code: 'premium',
+        message: 'Spotify Premium is required for full-track playback. Using preview mode.',
+      });
+    });
+    // Emitted for transient and stale failures as well as permanent ones, so it
+    // is not a reason to give up the device. A start that does not take is
+    // caught by verifyStart instead.
+    instance.addListener('playback_error', (e) => {
+      console.error('[Spotify Web Player] playback error', e);
+    });
+    // Not an error: the browser's autoplay policy refused the start because no
+    // gesture preceded it. The device has the track and resumes on a press.
+    instance.addListener('autoplay_failed', () => {
+      live()?.owner?.autoplayBlocked();
+    });
+
+    pagePlayer = {
+      ctor: PlayerCtor,
+      instance,
+      deviceId: null,
+      connected: false,
+      connecting: null,
+      owner: null,
+      getToken: opts.getToken,
+    };
+  }
+
+  pagePlayer.owner = owner;
+  pagePlayer.getToken = opts.getToken;
+  return pagePlayer;
+}
+
+// ---------------------------------------------------------------------------
 // Session
 // ---------------------------------------------------------------------------
 
@@ -214,6 +358,7 @@ async function isPremiumRefusal(res: Response): Promise<boolean> {
 }
 
 export class SpotifyPlaybackSession {
+  /** The page's one Player, while this session holds it. */
   private player: SpotifyPlayerInstance | null = null;
   private deviceId: string | null = null;
   private devicePromise: Promise<string> | null = null;
@@ -269,93 +414,75 @@ export class SpotifyPlaybackSession {
 
   private async connectDevice(generation: number): Promise<string> {
     await loadSpotifyWebPlaybackSdk();
-    // Two rounds: a first connect that never yields a device (a stale instance,
-    // a dropped websocket) is thrown away and rebuilt once before giving up.
+    // Two rounds: a first connect that never yields a device (a dropped
+    // websocket) is disconnected and tried once more before giving up. Always on
+    // the same Player - see "The page's one Player".
     for (let round = 0; round < 2; round++) {
       this.assertLive(generation);
-      if (!this.player) {
-        const instance = this.createPlayer();
-        // Assigned before connect(): the SDK may announce `ready` from inside it.
-        this.player = instance;
-        let connected = false;
-        try {
-          connected = await instance.connect();
-        } catch {
-          connected = false;
-        }
+      const shared = this.claimPlayer();
+      if (!shared.deviceId && !shared.connected) {
+        const connected = await this.connectShared(shared);
         this.assertLive(generation);
         if (!connected) {
-          this.dropPlayer(instance);
+          this.resetDevice();
           continue;
         }
       }
+      // `ready` may have been announced while another session held the player.
+      if (shared.deviceId && shared.deviceId !== this.deviceId) this.deviceId = shared.deviceId;
       const id = await this.waitForReady(this.readyTimeoutMs);
       this.assertLive(generation);
       if (this.fatal) throw new SpotifyFatalError(this.fatal);
       if (id) return id;
-      if (this.player) this.dropPlayer(this.player);
+      this.resetDevice();
     }
     throw new Error('Spotify device did not become ready');
   }
 
-  private createPlayer(): SpotifyPlayerInstance {
-    const PlayerCtor = window.Spotify?.Player;
-    if (!PlayerCtor) throw new Error('Spotify SDK not available');
+  /** Takes the page's Player (creating it the first time) and points its events
+   *  at this session. A device it already announced is available at once. */
+  private claimPlayer(): PagePlayer {
+    const shared = acquirePagePlayer(this.owner, this.opts);
+    this.player = shared.instance;
+    if (shared.deviceId !== this.deviceId) this.transferredTo = null;
+    this.deviceId = shared.deviceId;
+    return shared;
+  }
 
-    const instance = new PlayerCtor({
-      name: this.opts.playerName ?? 'Clade Player',
-      volume: this.opts.getVolume(),
-      // The SDK asks for a token whenever it needs one. A null from the first
-      // try is usually a refresh that lost a race, so ask once more, forcing it.
-      getOAuthToken: (cb: (token: string) => void) => {
-        void (async () => {
-          const token = (await this.opts.getToken().catch(() => null)) ?? (await this.opts.getToken(true).catch(() => null));
-          if (token) cb(token);
-        })();
-      },
-    });
+  private connectShared(shared: PagePlayer): Promise<boolean> {
+    if (!shared.connecting) {
+      const attempt: Promise<boolean> = (async () => {
+        try {
+          const connected = await shared.instance.connect();
+          // Not if it was reset (disconnected) while this was still in flight.
+          if (connected && shared.connecting === attempt) shared.connected = true;
+          return connected;
+        } catch {
+          return false;
+        }
+      })().finally(() => {
+        if (shared.connecting === attempt) shared.connecting = null;
+      });
+      shared.connecting = attempt;
+    }
+    return shared.connecting;
+  }
 
-    // Every listener ignores events from an instance that has been replaced.
-    const current = () => this.player === instance;
-
-    instance.addListener('ready', ({ device_id }) => {
-      if (!current() || !device_id) return;
-      if (this.deviceId !== device_id) this.transferredTo = null;
-      this.deviceId = device_id;
-      this.notifyReady(device_id);
-    });
-    instance.addListener('not_ready', ({ device_id }) => {
+  /** Events from the shared Player, while this session holds it. */
+  private readonly owner: PlayerOwner = {
+    ready: (id) => {
+      if (this.deviceId !== id) this.transferredTo = null;
+      this.deviceId = id;
+      this.notifyReady(id);
+    },
+    notReady: (id) => {
       // The SDK reconnects on its own and announces `ready` again; until then
       // there is no device to send commands to.
-      if (current() && device_id === this.deviceId) this.deviceId = null;
-    });
-    instance.addListener('initialization_error', (e) => {
-      console.error('[Spotify Web Player] init error', e);
-      this.setFatal({ code: 'init', message: 'Spotify player failed to initialize.' });
-    });
-    instance.addListener('authentication_error', (e) => {
-      console.error('[Spotify Web Player] auth error', e);
-      this.setFatal({ code: 'auth', message: 'Spotify authentication failed. Reconnect Spotify.' });
-    });
-    // Common: non-premium accounts cannot use Web Playback SDK.
-    instance.addListener('account_error', (e) => {
-      console.error('[Spotify Web Player] account error', e);
-      this.setFatal({ code: 'premium', message: 'Spotify Premium is required for full-track playback. Using preview mode.' });
-    });
-    // Emitted for transient and stale failures as well as permanent ones, so it
-    // is not a reason to give up the device. A start that does not take is
-    // caught by verifyStart instead.
-    instance.addListener('playback_error', (e) => {
-      console.error('[Spotify Web Player] playback error', e);
-    });
-    // Not an error: the browser's autoplay policy refused the start because no
-    // gesture preceded it. The device has the track and resumes on a press.
-    instance.addListener('autoplay_failed', () => {
-      this.opts.onAutoplayBlocked?.();
-    });
-
-    return instance;
-  }
+      if (id === this.deviceId) this.deviceId = null;
+    },
+    fatal: (failure) => this.setFatal(failure),
+    autoplayBlocked: () => this.opts.onAutoplayBlocked?.(),
+  };
 
   private setFatal(failure: SpotifyFailure) {
     if (this.fatal) return;
@@ -381,17 +508,24 @@ export class SpotifyPlaybackSession {
     for (const waiter of [...this.readyWaiters]) waiter(id);
   }
 
-  private dropPlayer(instance: SpotifyPlayerInstance) {
-    try {
-      instance.disconnect();
-    } catch {
-      // already gone
+  /** Disconnects the shared Player so the next connect() registers its device
+   *  afresh. The Player itself is kept: a replacement would announce a device
+   *  with no audio engine behind it. */
+  private resetDevice() {
+    const shared = pagePlayer;
+    if (shared && shared.owner === this.owner) {
+      try {
+        shared.instance.disconnect();
+      } catch {
+        // already gone
+      }
+      shared.deviceId = null;
+      shared.connected = false;
+      shared.connecting = null;
     }
-    if (this.player === instance) {
-      this.player = null;
-      this.deviceId = null;
-      this.transferredTo = null;
-    }
+    this.player = null;
+    this.deviceId = null;
+    this.transferredTo = null;
   }
 
   // -- playback -------------------------------------------------------------
@@ -484,9 +618,9 @@ export class SpotifyPlaybackSession {
         forceRefresh = true;
       } else if (res.status === 404) {
         // The device is not (or no longer) known to Spotify. Re-register it, and
-        // if that keeps failing rebuild the player from scratch.
+        // if that keeps failing reconnect the player from scratch.
         this.transferredTo = null;
-        if (attempt >= 2 && this.player) this.dropPlayer(this.player);
+        if (attempt >= 2 && this.player) this.resetDevice();
       } else if (res.status === 429) {
         extraDelayMs = retryAfterMs(res);
       } else if (res.status === 403) {
@@ -597,24 +731,32 @@ export class SpotifyPlaybackSession {
 
   // -- lifecycle ------------------------------------------------------------
 
-  /** Disconnects the device but leaves the session usable: the next play
-   *  builds a fresh one. Work in flight under the old device is abandoned. */
+  /** Silences the player and hands it back, still connected, for whoever plays
+   *  next - this session's next play claims it again. Work in flight is abandoned.
+   *  Deliberately not a disconnect: the way back to Spotify is then an instant
+   *  start on the same device instead of a reconnect. */
   release() {
     this.generation++;
     this.devicePromise = null;
     this.notifyReady(null);
-    const instance = this.player;
+    const shared = pagePlayer;
+    // Only the holder may silence it: a teardown that arrives late, after the
+    // next session has taken over, must not stop what that one is playing.
+    if (shared && shared.owner === this.owner) {
+      shared.owner = null;
+      // Left playing it would carry on underneath whatever replaced it.
+      try {
+        void Promise.resolve(shared.instance.pause()).catch(() => {});
+      } catch {
+        // already gone
+      }
+    }
     this.player = null;
     this.deviceId = null;
     this.transferredTo = null;
-    try {
-      instance?.disconnect();
-    } catch {
-      // already gone
-    }
   }
 
-  /** Final: disconnects, and every later call resolves as superseded. */
+  /** Final: releases the player, and every later call resolves as superseded. */
   dispose() {
     this.disposed = true;
     this.release();
