@@ -57,34 +57,50 @@ export function findSectionAtTime(
  * that has not been installed ("Could not find the function ... in the schema
  * cache") reads like an app bug; it is a missing SQL script.
  */
-function saveErrorMessage(error: { message?: string; code?: string }): string {
+function saveErrorMessage(error: { message?: string; code?: string }, withChords: boolean): string {
   if (error.code === 'PGRST202' || error.code === '42883') {
+    // A save carrying chords calls a function signature only script 32 creates,
+    // so a database that has 19 and 31 but not 32 lands here too - and the
+    // structure-only advice would send the admin to scripts already run.
+    if (withChords) {
+      return 'Saving chords is not set up in the database yet. Run supabase/sql-editor/32-save-track-sections-chords.sql in the SQL editor (after 19 and 31 if you have not run those).';
+    }
     return 'Saving sections is not set up in the database yet. Run supabase/sql-editor/19-save-track-sections.sql (then 31-save-track-sections-mirror.sql) in the SQL editor.';
   }
   if (error.code === '42501') return 'Only an admin can edit a track\'s sections.';
   return error.message || 'Could not save these sections.';
 }
 
+/** A section to store. Chords, when present, are relative to `start_ms` and the same length. */
+export interface SectionToSave {
+  label: string;
+  ordinal: number;
+  start_ms: number;
+  end_ms: number;
+  progression_roman?: string[];
+  chord_timings?: number[];
+}
+
 /**
- * Save a hand-marked set of sections for a track.
+ * Save a hand-edited set of sections, and their chords, for a track.
  *
- * Structure only: the RPC deliberately drops any chord data, because moving a
- * boundary changes which chords fall inside a section and carrying them over
- * would attach them to the wrong part while still looking exact. Chords come
- * back by promoting a detection run.
+ * Chords are stored only when the call says it carries them (`p_with_chords`).
+ * The flag is sent only when some section has chords, so a structure-only save
+ * still works against a database that has not had script 32 applied, while a
+ * save with chords against one that has not fails loudly instead of returning
+ * "saved" for data it never wrote.
  */
 export function useSaveTrackSections() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (args: {
-      trackId: string;
-      sections: Array<{ label: string; ordinal: number; start_ms: number; end_ms: number }>;
-    }) => {
+    mutationFn: async (args: { trackId: string; sections: SectionToSave[] }) => {
+      const withChords = args.sections.some((s) => (s.progression_roman?.length ?? 0) > 0);
       const { data, error } = await supabase.rpc('save_track_sections' as never, {
         p_track_id: args.trackId,
         p_sections: args.sections,
+        ...(withChords ? { p_with_chords: true } : {}),
       } as never);
-      if (error) throw new Error(saveErrorMessage(error));
+      if (error) throw new Error(saveErrorMessage(error, withChords));
       return (data as unknown as number) ?? 0;
     },
     onSuccess: (_count, args) => {

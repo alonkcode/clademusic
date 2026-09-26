@@ -226,6 +226,11 @@ fix_sql() {
       echo "-- ============================================================"
       cat supabase/sql-editor/31-save-track-sections-mirror.sql
       echo
+      echo "-- ============================================================"
+      echo "-- sql-editor/32-save-track-sections-chords.sql"
+      echo "-- ============================================================"
+      cat supabase/sql-editor/32-save-track-sections-chords.sql
+      echo
     fi
   done
 

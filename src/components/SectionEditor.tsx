@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash2, Save, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Music, Trash2, Save, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePlayer } from '@/player/PlayerContext';
 import { useSaveTrackSections } from '@/hooks/api/useTrackSections';
 import { useTrack } from '@/hooks/api/useTracks';
+import { SectionChordList } from '@/components/SectionChordList';
 import {
   addBoundary,
   draftFromSections,
@@ -17,14 +18,28 @@ import {
   type SectionLabel,
   type SectionMarker,
 } from '@/lib/harmony/sectionDraft';
+import {
+  addChord,
+  chordChoices,
+  chordSpansBySection,
+  draftChordsFromSections,
+  removeChord,
+  replaceChord,
+  splitChord,
+  toChordColumns,
+  type ChordMarker,
+  type SectionChordSource,
+} from '@/lib/harmony/chordDraft';
 
 /**
- * Marking a song's structure by ear, while it plays.
+ * Marking a song's structure and chords by ear, while it plays.
  *
  * The playhead is the input device: listen, and tap at the moment a part
  * changes. Everything else - where a section ends, which occurrence of its
  * label it is - follows from the boundaries, so there is nothing to keep
- * consistent by hand and no way to leave a gap or an overlap behind.
+ * consistent by hand and no way to leave a gap or an overlap behind. Chords
+ * work the same way: they are kept at their place in the song, and belong to
+ * whichever section that place falls in.
  *
  * Nothing is written until Save; Cancel discards the draft.
  */
@@ -32,7 +47,10 @@ import {
 interface SectionEditorProps {
   trackId: string;
   /** Sections currently stored for this track, used as the starting point. */
-  sections: Array<{ label: string; start_ms: number }>;
+  sections: Array<{ label: string } & SectionChordSource>;
+  /** The key the chord numerals are relative to, so they can also be read as letter names. */
+  tonic?: number | null;
+  mode?: 'major' | 'minor';
   onClose: () => void;
   className?: string;
 }
@@ -47,7 +65,14 @@ function formatMs(ms: number): string {
 const positiveMs = (ms: unknown): number =>
   typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0;
 
-export function SectionEditor({ trackId, sections, onClose, className }: SectionEditorProps) {
+export function SectionEditor({
+  trackId,
+  sections,
+  tonic = null,
+  mode = 'major',
+  onClose,
+  className,
+}: SectionEditorProps) {
   const { positionMs, durationMs, seekTo } = usePlayer();
   const save = useSaveTrackSections();
   const { data: track } = useTrack(trackId);
@@ -55,6 +80,7 @@ export function SectionEditor({ trackId, sections, onClose, className }: Section
   // Seeded once: re-deriving from `sections` on every render would throw the
   // draft away the moment a refetch landed mid-edit.
   const [draft, setDraft] = useState<SectionMarker[]>(() => draftFromSections(sections));
+  const [chords, setChords] = useState<ChordMarker[]>(() => draftChordsFromSections(sections));
 
   // The last section ends where the track does, so Save needs a length. The
   // player only reports one once its embed has said so - the guest Spotify
@@ -65,19 +91,37 @@ export function SectionEditor({ trackId, sections, onClose, className }: Section
   const built = useMemo(() => toSections(draft, safeDuration), [draft, safeDuration]);
   const problem = draftProblem(draft, safeDuration);
 
+  // Which chords fall in which section is worked out from where the boundaries
+  // are now, so moving one is always reflected here and in what gets saved.
+  const chordSpans = useMemo(() => chordSpansBySection(chords, built), [chords, built]);
+  const chordCount = chordSpans.reduce((total, spans) => total + spans.length, 0);
+  const choices = useMemo(() => chordChoices(mode), [mode]);
+  const startingNumeral = mode === 'minor' ? 'i' : 'I';
+
+  // An edit that changes nothing came back as the same list: say why, rather
+  // than leave a button that silently did nothing.
+  const applyChordEdit = (next: ChordMarker[], refusal: string) => {
+    if (next === chords) toast.error(refusal);
+    else setChords(next);
+  };
+
   const handleSave = async () => {
     if (problem) {
       toast.error(problem);
       return;
     }
     try {
+      const columns = toChordColumns(chords, built);
       const count = await save.mutateAsync({
         trackId,
-        sections: built.map((s) => ({
+        sections: built.map((s, i) => ({
           label: s.label,
           ordinal: s.ordinal,
           start_ms: s.startMs,
           end_ms: s.endMs,
+          // Only a section that has chords carries the keys, so a track with
+          // none saves exactly as it always did.
+          ...(columns[i].progression_roman.length > 0 ? columns[i] : {}),
         })),
       });
       toast.success(`Saved ${count} section${count === 1 ? '' : 's'}.`);
@@ -100,8 +144,24 @@ export function SectionEditor({ trackId, sections, onClose, className }: Section
           Mark at {formatMs(positionMs)}
         </button>
 
+        <button
+          type="button"
+          onClick={() =>
+            applyChordEdit(
+              addChord(chords, positionMs, built, startingNumeral),
+              "Can't add a chord here: it would sit too close to another chord, or the playhead is outside the track."
+            )
+          }
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-muted/60 px-3 text-[11px] font-medium text-foreground hover:bg-muted sm:min-h-8"
+          title="Start a new chord at the current position"
+        >
+          <Music className="h-3.5 w-3.5" />
+          Add chord at {formatMs(positionMs)}
+        </button>
+
         <span className="text-[11px] text-muted-foreground">
-          {built.length} section{built.length === 1 ? '' : 's'}
+          {built.length} section{built.length === 1 ? '' : 's'} · {chordCount} chord
+          {chordCount === 1 ? '' : 's'}
         </span>
 
         <div className="ml-auto flex gap-2">
@@ -130,78 +190,96 @@ export function SectionEditor({ trackId, sections, onClose, className }: Section
 
       <div className="mt-3 space-y-1.5">
         {built.map((section, index) => (
-          <div
-            key={`${section.startMs}-${index}`}
-            className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 px-2 py-1.5"
-          >
-            <select
-              value={section.label}
-              onChange={(e) => setDraft((d) => setLabel(d, index, e.target.value as SectionLabel))}
-              aria-label={`Label for section starting at ${formatMs(section.startMs)}`}
-              className="h-7 rounded border border-border/60 bg-background px-1.5 text-[11px] capitalize"
-            >
-              {SECTION_LABELS.map((label) => (
-                <option key={label} value={label} className="capitalize">
-                  {label}
-                </option>
-              ))}
-            </select>
+          <div key={`${section.startMs}-${index}`} className="rounded-md bg-muted/40 px-2 py-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={section.label}
+                onChange={(e) => setDraft((d) => setLabel(d, index, e.target.value as SectionLabel))}
+                aria-label={`Label for section starting at ${formatMs(section.startMs)}`}
+                className="h-7 rounded border border-border/60 bg-background px-1.5 text-[11px] capitalize"
+              >
+                {SECTION_LABELS.map((label) => (
+                  <option key={label} value={label} className="capitalize">
+                    {label}
+                  </option>
+                ))}
+              </select>
 
-            <span className="text-[11px] tabular-nums text-muted-foreground">
-              {section.label} {section.ordinal}
-            </span>
-
-            {/* Seeking to a boundary is how you check you put it in the right
-                place - listen to the transition rather than trust the number. */}
-            <button
-              type="button"
-              onClick={() => seekTo(section.startMs / 1000)}
-              className="rounded px-1.5 py-0.5 font-mono text-[11px] tabular-nums hover:bg-background/70"
-              title="Jump here"
-            >
-              {formatMs(section.startMs)}–{formatMs(section.endMs)}
-            </button>
-
-            {index > 0 && (
-              <span className="inline-flex items-center">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraft((d) => moveBoundary(d, index, section.startMs - NUDGE_MS, safeDuration))
-                  }
-                  className="rounded p-1 text-muted-foreground hover:text-foreground"
-                  aria-label="Move this boundary earlier"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraft((d) => moveBoundary(d, index, section.startMs + NUDGE_MS, safeDuration))
-                  }
-                  className="rounded p-1 text-muted-foreground hover:text-foreground"
-                  aria-label="Move this boundary later"
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDraft((d) => removeBoundary(d, index))}
-                  className="rounded p-1 text-muted-foreground hover:text-destructive"
-                  aria-label="Remove this boundary"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {section.label} {section.ordinal}
               </span>
-            )}
+
+              {/* Seeking to a boundary is how you check you put it in the right
+                  place - listen to the transition rather than trust the number. */}
+              <button
+                type="button"
+                onClick={() => seekTo(section.startMs / 1000)}
+                className="rounded px-1.5 py-0.5 font-mono text-[11px] tabular-nums hover:bg-background/70"
+                title="Jump here"
+              >
+                {formatMs(section.startMs)}–{formatMs(section.endMs)}
+              </button>
+
+              {index > 0 && (
+                <span className="inline-flex items-center">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDraft((d) => moveBoundary(d, index, section.startMs - NUDGE_MS, safeDuration))
+                    }
+                    className="rounded p-1 text-muted-foreground hover:text-foreground"
+                    aria-label="Move this boundary earlier"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDraft((d) => moveBoundary(d, index, section.startMs + NUDGE_MS, safeDuration))
+                    }
+                    className="rounded p-1 text-muted-foreground hover:text-foreground"
+                    aria-label="Move this boundary later"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDraft((d) => removeBoundary(d, index))}
+                    className="rounded p-1 text-muted-foreground hover:text-destructive"
+                    aria-label="Remove this boundary"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              )}
+            </div>
+
+            <SectionChordList
+              spans={chordSpans[index] ?? []}
+              choices={choices}
+              mode={mode}
+              tonic={tonic}
+              onReplace={(chordIndex, numeral) => setChords((c) => replaceChord(c, chordIndex, numeral))}
+              onSplit={(chordIndex) =>
+                applyChordEdit(splitChord(chords, chordIndex, built), 'That chord is too short to split.')
+              }
+              onRemove={(chordIndex) => setChords((c) => removeChord(c, chordIndex))}
+              onAddFirst={() =>
+                applyChordEdit(
+                  addChord(chords, section.startMs, built, startingNumeral),
+                  "Couldn't add a chord to this section."
+                )
+              }
+              onSeek={(ms) => seekTo(ms / 1000)}
+            />
           </div>
         ))}
       </div>
 
       <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-        Saving replaces this track's stored sections. Chord timings aren't kept — moving a boundary
-        changes which chords fall inside a section, so they'd end up on the wrong part. Promote a
-        detection run to put chords back.
+        Saving replaces this track's stored sections and chords with what's shown here. A chord stays
+        where it is in the song when you move a boundary, and belongs to whichever section it lands
+        in. The first chord of a section plays from the start of that section.
       </p>
     </div>
   );

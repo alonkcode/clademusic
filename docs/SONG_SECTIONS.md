@@ -23,6 +23,14 @@ Section boundaries are stored and displayed in milliseconds so the UI can show v
 ### 3. Section-aware playback context
 A section card not only jumps to the right time but also keeps the harmonic readout and active-section highlighting aligned with the current track and playback position.
 
+### 4. Manual editing (admin)
+The section editor (the Edit button on `HarmonicHUD`, `src/components/SectionEditor.tsx`) marks structure and chords by ear against the playing track. Nothing is written until Save.
+
+- **Sections** are edited as boundaries (`src/lib/harmony/sectionDraft.ts`): mark at the playhead, nudge, relabel, remove.
+- **Chords** (`src/lib/harmony/chordDraft.ts`) can be replaced, added at the playhead, split into two half-length chords (a bar into two half bars), or removed. Each chord is kept at its place in the *track*, not inside a section, so moving a boundary never moves a chord in the audio - the chord simply belongs to whichever section it now falls in. A chord holds until the next one in its section (or the section's end), and the first chord of a section always plays from the section's start, as `chordIndexAt` already treats it.
+- **Storage:** each section saves `progression_roman` (Roman numerals, so harmony stays relative) and `chord_timings` (ms from the section's own start, one per numeral) - the shape a promoted detection run writes. Saving replaces every stored section *and its chords* with what the editor shows, and mirrors both onto `tracks.sections` for the feed.
+- **Database:** chord saving needs `supabase/sql-editor/32-save-track-sections-chords.sql` (after 19 and 31). A save that carries chords against a database without it fails with an instruction to run it, rather than reporting success for chords that were not stored. A save with no chords still works without it.
+
 ## Data shapes
 
 ### Legacy song-sections payload

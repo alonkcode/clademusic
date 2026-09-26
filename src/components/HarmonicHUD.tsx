@@ -263,18 +263,27 @@ export function HarmonicHUD({
     if (liveTonic !== null) setLoopTonic(liveTonic);
   }, [liveTonic, setLoopTonic]);
 
-  // What the section editor starts from: the stored sections, never the
-  // live-detected ones (effectiveSections) - those are a capture in progress.
+  // What the section editor starts from: the stored sections and their chords,
+  // never the live-detected ones (effectiveSections) - those are a capture in
+  // progress.
   const editorSections = useMemo(
     () =>
       (sections ?? []).map((s) => ({
         label: s.type,
         start_ms: Math.round(s.start_time * 1000),
+        end_ms: typeof s.end_time === 'number' ? Math.round(s.end_time * 1000) : undefined,
+        chords: s.chords,
+        chord_timings: s.chord_timings,
       })),
     [sections]
   );
+  // Chords are part of the key: a save (or a promotion) that changes only them
+  // has to re-seed the editor too, or it would keep offering the old ones.
   const editorSectionsKey = useMemo(
-    () => editorSections.map((s) => `${s.label}@${s.start_ms}`).join('|'),
+    () =>
+      editorSections
+        .map((s) => `${s.label}@${s.start_ms}#${(s.chords ?? []).join(',')}@${(s.chord_timings ?? []).join(',')}`)
+        .join('|'),
     [editorSections]
   );
 
@@ -318,6 +327,8 @@ export function HarmonicHUD({
             key={editorSectionsKey}
             trackId={trackId}
             sections={editorSections}
+            tonic={loop.tonic}
+            mode={effectiveMode}
             onClose={() => setEditingSections(false)}
           />
         </div>
