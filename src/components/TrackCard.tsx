@@ -1,7 +1,7 @@
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Heart, Bookmark, X, Sparkles, Waves, Play, Pause, Music, Youtube, MessageSquare } from 'lucide-react';
 import { HarmonyCard } from './HarmonyCard';
-import { TrackComments } from './TrackComments';
+import { TrackCommentsSheet } from './TrackCommentsSheet';
 import { NearbyListenersSheet } from './NearbyListenersSheet';
 import { ShareSheet } from './ShareSheet';
 import { AudioPreview } from './AudioPreview';
@@ -426,11 +426,14 @@ export function TrackCard({
           transition={{ delay: 0.25 }}
           className="flex items-center justify-center gap-2 sm:gap-4"
         >
-          {/* Comments - Now inline with count */}
+          {/* Comments - opens the thread in a sheet with its own scroll */}
           <motion.button
             whileTap={{ scale: 0.9 }}
-            onClick={() => setShowComments(!showComments)}
-            className="flex items-center gap-2 rounded-full bg-muted/50 px-3 py-1.5 text-muted-foreground transition-all hover:bg-muted hover:text-foreground sm:px-4 sm:py-2"
+            onClick={() => setShowComments(true)}
+            aria-label={`Comments, ${commentCount}`}
+            aria-haspopup="dialog"
+            aria-expanded={showComments}
+            className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-full bg-muted/50 px-3 py-1.5 text-muted-foreground transition-all hover:bg-muted hover:text-foreground sm:px-4 sm:py-2"
           >
             <MessageSquare className="w-5 h-5" />
             <span className="text-sm font-medium">{commentCount}</span>
@@ -447,23 +450,17 @@ export function TrackCard({
           <ShareSheet track={track} onShare={handleShare} />
         </motion.div>
 
-        {/* Expandable Comments Section */}
-        <AnimatePresence>
-          {showComments && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="overflow-hidden"
-            >
-              <div className="mt-3 border-t border-border/50 pt-3 sm:mt-6 sm:pt-6">
-                <TrackComments trackId={track.id} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
+
+      {/* Outside the card's fixed-height, overflow-hidden content: an inline
+          thread was clipped with nothing to scroll. */}
+      <TrackCommentsSheet
+        trackId={track.id}
+        trackTitle={track.title}
+        count={commentCount}
+        open={showComments}
+        onOpenChange={setShowComments}
+      />
     </motion.div>
     </SectionSelectionProvider>
   );

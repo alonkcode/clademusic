@@ -242,6 +242,10 @@ export default function FeedPage() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
+      // An open sheet or dialog (comments, share, nearby) owns the keyboard:
+      // scrolling its content with the arrow keys must not skip the track
+      // sitting behind it.
+      if (document.querySelector('[role="dialog"]')) return;
       if (e.key === 'ArrowDown' || e.key === 'j') {
         goToNext();
       } else if (e.key === 'ArrowUp' || e.key === 'k') {

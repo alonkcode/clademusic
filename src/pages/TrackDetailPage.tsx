@@ -9,17 +9,21 @@
  * - Auto-start from intro timestamp
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTrack } from '@/hooks/api/useTracks';
+import { useCommentCount } from '@/hooks/api/useComments';
+import { useAuth } from '@/hooks/useAuth';
+import { useInteractions } from '@/hooks/useInteractions';
+import { toast } from '@/hooks/use-toast';
 import { usePlayer } from '@/player/PlayerContext';
 import { BottomNav } from '@/components/BottomNav';
 import { ChordBadge } from '@/components/ChordBadge';
 import { TrackLineageView } from '@/components/TrackLineageView';
 import { TrackComments } from '@/components/TrackComments';
 import { LiveChat } from '@/components/LiveChat';
-import { TikTokStyleButtons } from '@/components/TikTokStyleButtons';
+import { TrackMobileActions } from '@/components/TrackMobileActions';
 import { QuickStreamButtons } from '@/components/QuickStreamButtons';
 import { ScrollingComments } from '@/components/ScrollingComments';
 import { getTrackSections } from '@/api/trackSections';
@@ -47,6 +51,12 @@ export default function TrackDetailPage() {
   const navigate = useNavigate();
   const { data: track, isLoading, isError } = useTrack(decodeURIComponent(trackId || ''));
   const { openPlayer, provider, trackId: activeTrackId, isPlaying } = usePlayer();
+  const { user } = useAuth();
+  const { interaction, toggleLike } = useInteractions(track?.id ?? null);
+  // Same id the comment thread below is given, so the count matches it.
+  const { data: commentCount = 0 } = useCommentCount(trackId || '');
+  const [activeTab, setActiveTab] = useState('sections');
+  const tabsRef = useRef<HTMLDivElement>(null);
   // IMPORTANT: There must NEVER be more than one playback surface.
   // YouTube must be played only through the universal player.
   const currentTime = 0;
@@ -206,6 +216,38 @@ export default function TrackDetailPage() {
       title: track.title,
       artist: track.artist,
     });
+  }
+
+  function handleLike() {
+    if (!user) {
+      navigate('/auth');
+      return;
+    }
+    toggleLike();
+  }
+
+  function openCommentsTab() {
+    setActiveTab('comments');
+    // Once the tab has switched, bring the tab strip to the top of the screen
+    // (scroll-mt on it clears the sticky header).
+    requestAnimationFrame(() => tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+
+  async function handleShare() {
+    if (!track) return;
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `${track.title} - ${track.artist}`, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      toast({ title: 'Link copied' });
+    } catch (err) {
+      // Dismissing the native share sheet rejects with AbortError - not a failure.
+      if ((err as { name?: string })?.name === 'AbortError') return;
+      toast({ title: "Couldn't share this track", description: 'Please try again.', variant: 'destructive' });
+    }
   }
 
   // Use YouTube search results, or fallback to track's youtube_id if available
@@ -396,19 +438,30 @@ export default function TrackDetailPage() {
                 size="lg"
               />
             </div>
+
+            <TrackMobileActions
+              className="pt-1"
+              liked={interaction.liked}
+              commentCount={commentCount}
+              onLike={handleLike}
+              onComments={openCommentsTab}
+              onShare={handleShare}
+            />
           </div>
         </motion.div>
 
         {/* IMPORTANT: Playback surfaces must live in the universal player. Use provider buttons above. */}
 
         {/* Tabs */}
-        <Tabs defaultValue="sections" className="w-full">
-          <TabsList className="w-full grid grid-cols-5">
-            <TabsTrigger value="sections">Sections</TabsTrigger>
-            <TabsTrigger value="chords">Chords</TabsTrigger>
-            <TabsTrigger value="samples">Samples</TabsTrigger>
-            <TabsTrigger value="videos">Videos</TabsTrigger>
-            <TabsTrigger value="comments">Comments</TabsTrigger>
+        <Tabs value={activeTab} onValueChange={setActiveTab} ref={tabsRef} className="w-full scroll-mt-24">
+          {/* 52px strip = 44px tabs on a phone (they were 32px); a little tighter
+              type and padding so "Comments" isn't edge to edge in its pill. */}
+          <TabsList className="grid h-[3.25rem] w-full grid-cols-5 items-stretch sm:h-10 sm:items-center">
+            <TabsTrigger className="px-1 text-[13px] sm:px-3 sm:text-sm" value="sections">Sections</TabsTrigger>
+            <TabsTrigger className="px-1 text-[13px] sm:px-3 sm:text-sm" value="chords">Chords</TabsTrigger>
+            <TabsTrigger className="px-1 text-[13px] sm:px-3 sm:text-sm" value="samples">Samples</TabsTrigger>
+            <TabsTrigger className="px-1 text-[13px] sm:px-3 sm:text-sm" value="videos">Videos</TabsTrigger>
+            <TabsTrigger className="px-1 text-[13px] sm:px-3 sm:text-sm" value="comments">Comments</TabsTrigger>
           </TabsList>
 
           {/* Sections Tab */}
@@ -620,12 +673,12 @@ export default function TrackDetailPage() {
           {/* Comments Tab */}
           <TabsContent value="comments" className="space-y-3">
             <Tabs defaultValue="discussion" className="w-full">
-              <TabsList className="w-full grid grid-cols-2">
+              <TabsList className="grid h-[3.25rem] w-full grid-cols-2 items-stretch sm:h-10 sm:items-center">
                 <TabsTrigger value="discussion">Discussion</TabsTrigger>
                 <TabsTrigger value="chat">Live chat</TabsTrigger>
               </TabsList>
               <TabsContent value="discussion" className="mt-3">
-                <Card className="p-6">
+                <Card className="p-4 sm:p-6">
                   <TrackComments trackId={trackId || ''} />
                 </Card>
               </TabsContent>
@@ -637,27 +690,10 @@ export default function TrackDetailPage() {
         </Tabs>
       </main>
 
-      {/* TikTok-style side buttons (mobile only) */}
-      <TikTokStyleButtons
-        trackId={trackId || ''}
-        likes={Math.floor(Math.random() * 1000)}
-        onComment={() => {
-          // Scroll to comments tab
-          const commentsTab = document.querySelector('[value="comments"]');
-          commentsTab?.scrollIntoView({ behavior: 'smooth' });
-        }}
-        onShare={() => {
-          if (navigator.share) {
-            navigator.share({
-              title: `${track.title} - ${track.artist}`,
-              url: window.location.href,
-            });
-          }
-        }}
-      />
-
       {/* Scrolling comments overlay */}
-      <ScrollingComments trackId={trackId} maxVisible={3} scrollSpeed={4000} />
+      {/* Hidden on the Comments tab: it floats snippets of the very thread that is
+          already on screen, on top of its Like/Reply controls. */}
+      {activeTab !== 'comments' && <ScrollingComments trackId={trackId} maxVisible={3} scrollSpeed={4000} />}
 
       <BottomNav />
     </div>
