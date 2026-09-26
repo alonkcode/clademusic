@@ -6,6 +6,16 @@ import type { ProviderControls } from './providers/adapter';
 import { focusUniversalPlayerFrame } from '@/player/universal/UniversalPlayerHost';
 import { preloadSpotifyIframeApi } from '@/services/spotifyIframeApi';
 import { isTestEnv } from '@/lib/env';
+import {
+  appendTrack,
+  clampQueueIndex,
+  insertTrackNext,
+  removeTrackAt,
+  shuffleUpcoming,
+  wrappedNextIndex,
+  wrappedPreviousIndex,
+} from './queueState';
+import { loadSavedQueue, saveQueue } from './queueStorage';
 
 interface ConnectedProviders {
   spotify?: { connected: boolean };
@@ -131,8 +141,6 @@ interface PlayerContextValue extends PlayerState {
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
-const QUEUE_STORAGE_KEY = 'clade_queue_v1';
-
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 /** Starting volume, and the level restored when unmuting from silence. */
@@ -156,11 +164,6 @@ const dedupeArtists = (artist: string | null) => {
       return true;
     });
   return parts.length ? parts.join(', ') : null;
-};
-
-const clampQueueIndex = (queueLength: number, index: number) => {
-  if (queueLength === 0) return -1;
-  return Math.max(0, Math.min(index, queueLength - 1));
 };
 
 const canonicalTrackIdFromProvider = (provider: MusicProvider, providerTrackId: string | null) => {
@@ -302,31 +305,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // Hydrate queue from localStorage on mount
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { queue?: import('@/types').Track[]; queueIndex?: number };
-      const queue = Array.isArray(parsed?.queue) ? parsed.queue : [];
-      const queueIndex = clampQueueIndex(queue.length, typeof parsed?.queueIndex === 'number' ? parsed.queueIndex : -1);
-      setState((prev) => ({ ...prev, queue, queueIndex }));
-    } catch (err) {
-      console.error('Failed to hydrate queue from storage', err);
-    }
+    const saved = loadSavedQueue();
+    if (saved) setState((prev) => ({ ...prev, ...saved }));
   }, []);
 
   // Persist queue to localStorage when it changes
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const payload = JSON.stringify({
-        queue: state.queue,
-        queueIndex: clampQueueIndex(state.queue.length, state.queueIndex),
-      });
-      localStorage.setItem(QUEUE_STORAGE_KEY, payload);
-    } catch (err) {
-      console.error('Failed to persist queue to storage', err);
-    }
+    saveQueue({ queue: state.queue, queueIndex: state.queueIndex });
   }, [state.queue, state.queueIndex]);
 
   const seekTo = useCallback((sec: number) => {
@@ -589,43 +574,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enqueueLater = useCallback((track: import('@/types').Track) => {
-    setState((prev) => {
-      const existingIdx = prev.queue.findIndex((t) => t.id === track.id);
-      if (existingIdx === prev.queueIndex) return prev;
-
-      let queue = prev.queue;
-      let queueIndex = prev.queueIndex;
-
-      if (existingIdx !== -1) {
-        queue = prev.queue.filter((_, i) => i !== existingIdx);
-        if (existingIdx < queueIndex) queueIndex -= 1;
-      }
-
-      queue = [...queue, track];
-      return { ...prev, queue, queueIndex: clampQueueIndex(queue.length, queueIndex) };
-    });
+    setState((prev) => appendTrack(prev, track));
   }, []);
 
   const enqueueNext = useCallback((track: import('@/types').Track) => {
-    setState((prev) => {
-      let baseIndex = prev.queueIndex;
-      const isValidBase = baseIndex >= 0 && baseIndex < prev.queue.length;
-      if (!isValidBase) baseIndex = -1;
-
-      const queue = [...prev.queue];
-      const existingIdx = queue.findIndex((t) => t.id === track.id);
-      if (existingIdx === baseIndex) return prev;
-
-      if (existingIdx !== -1) {
-        queue.splice(existingIdx, 1);
-        if (existingIdx < baseIndex) baseIndex -= 1;
-      }
-
-      const insertAt = baseIndex === -1 ? queue.length : baseIndex + 1;
-      queue.splice(insertAt, 0, track);
-
-      return { ...prev, queue, queueIndex: clampQueueIndex(queue.length, baseIndex) };
-    });
+    setState((prev) => insertTrackNext(prev, track));
   }, []);
 
   const addToQueue = useCallback((track: import('@/types').Track) => {
@@ -651,12 +604,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeFromQueue = useCallback((index: number) => {
-    setState((prev) => {
-      const newQueue = prev.queue.filter((_, i) => i !== index);
-      const adjustedIndex = index < prev.queueIndex ? prev.queueIndex - 1 : prev.queueIndex;
-      const queueIndex = clampQueueIndex(newQueue.length, adjustedIndex);
-      return { ...prev, queue: newQueue, queueIndex };
-    });
+    setState((prev) => removeTrackAt(prev, index));
   }, []);
 
   const reorderQueue = useCallback((newQueue: import('@/types').Track[]) => {
@@ -672,16 +620,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const shuffleQueue = useCallback(() => {
-    setState((prev) => {
-      const currentTrack = prev.queue[prev.queueIndex];
-      const remainingTracks = prev.queue.slice(prev.queueIndex + 1);
-      const shuffled = [...remainingTracks].sort(() => Math.random() - 0.5);
-      const newQueue = [
-        ...prev.queue.slice(0, prev.queueIndex + 1),
-        ...shuffled
-      ];
-      return { ...prev, queue: newQueue, queueIndex: clampQueueIndex(newQueue.length, prev.queueIndex) };
-    });
+    setState((prev) => shuffleUpcoming(prev));
   }, []);
 
   const nextTrack = useCallback(() => {
@@ -689,7 +628,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (prev.queue.length === 0) return prev;
       
       // Loop to first track if at the end
-      const nextIndex = prev.queueIndex >= prev.queue.length - 1 ? 0 : prev.queueIndex + 1;
+      const nextIndex = wrappedNextIndex(prev.queue.length, prev.queueIndex);
       const track = prev.queue[nextIndex];
       if (!track) return prev;
       const choice = pickProviderForTrack(track);
@@ -712,7 +651,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (prev.queue.length === 0) return prev;
       
       // Loop to last track if at the beginning
-      const prevIndex = prev.queueIndex <= 0 ? prev.queue.length - 1 : prev.queueIndex - 1;
+      const prevIndex = wrappedPreviousIndex(prev.queue.length, prev.queueIndex);
       const track = prev.queue[prevIndex];
       if (!track) return prev;
       const choice = pickProviderForTrack(track);
