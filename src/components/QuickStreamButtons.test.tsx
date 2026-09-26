@@ -63,7 +63,7 @@ describe('Spotify quicklink', () => {
     expect(spotifyButton().getAttribute('aria-busy')).toBe('true');
     expect(spotifyButton().getAttribute('aria-label')).toBe('Starting Song in Spotify');
     expect(spotifyButton().querySelector('svg.animate-spin')).not.toBeNull();
-    expect(screen.getByRole('status').textContent).toContain('Starting Song in Spotify');
+    expect(screen.getByRole('status').textContent).toBe('Starting Spotify playback');
   });
 
   it('keeps showing "starting" until the player has confirmed - not for a fixed 1.2 seconds', () => {
@@ -87,7 +87,22 @@ describe('Spotify quicklink', () => {
     expect(spotifyButton().getAttribute('aria-busy')).toBe('false');
     expect(spotifyButton().getAttribute('aria-label')).toBe('Song is playing in Spotify');
     expect(spotifyButton().querySelector('svg')).toBeNull();
-    expect(screen.getByRole('status').textContent).toContain('Now playing Song');
+    expect(screen.getByRole('status').textContent).toBe('Now playing in Spotify');
+  });
+
+  it('never repeats the track title as page text', () => {
+    // The player shows the title, and end-to-end tests locate it by text. A
+    // second copy - here, in the screen-reader announcement - makes that match
+    // ambiguous (Playwright strict mode), which failed the deploy pipeline.
+    // The button's aria-label carries the title for assistive tech instead.
+    const { rerender } = render(view());
+    fireEvent.click(spotifyButton());
+    expect(screen.queryByText(/Song/)).toBeNull();
+
+    set({ playRequestId: 2, provider: 'spotify', trackId: 's1', isPlaying: true, isStarting: false, durationMs: 200_000 });
+    rerender(view());
+    expect(spotifyButton().dataset.state).toBe('playing');
+    expect(screen.queryByText(/Song/)).toBeNull();
   });
 
   it('does not restart a song that is already confirmed playing', () => {

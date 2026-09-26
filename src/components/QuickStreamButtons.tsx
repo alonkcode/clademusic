@@ -376,9 +376,13 @@ export function QuickStreamButtons({
         )}
       </motion.button>
       {/* Spoken, not shown: the button's own label changes too, but a screen
-          reader does not re-read a label that changes under focus. */}
+          reader does not re-read a label that changes under focus. Deliberately
+          does NOT repeat the track title (the label already carries it): the
+          player's own title is matched by text in the end-to-end tests, and a
+          second copy of it in the page made those matches ambiguous - which
+          failed the deploy pipeline. */}
       <span className="sr-only" role="status" aria-live="polite">
-        {spotifyStarting ? `Starting ${trackTitle} in Spotify` : spotifyPlaying ? `Now playing ${trackTitle}` : ''}
+        {spotifyStarting ? 'Starting Spotify playback' : spotifyPlaying ? 'Now playing in Spotify' : ''}
       </span>
 
       <motion.button
