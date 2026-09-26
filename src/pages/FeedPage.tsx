@@ -13,6 +13,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLastFmRecentTracks } from '@/hooks/api/useLastFm';
 import { useSpotifyRecommendations } from '@/hooks/api/useSpotifyUser';
 import { usePlayHistory } from '@/hooks/api/usePlayEvents';
+import { useSetting } from '@/hooks/useSystemSettings';
 import { InteractionType, Track } from '@/types';
 import { ChevronUp, ChevronDown, LogIn, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,7 @@ import { NotificationBell } from '@/components/notifications/NotificationBell';
 
 export default function FeedPage() {
   const { user, loading: authLoading, guestMode, enterGuestMode } = useAuth();
+  const chatEnabled = useSetting('flag.chat_enabled');
   const { data: lastfmRecentRaw = [] } = useLastFmRecentTracks(200);
   const navigate = useNavigate();
   
@@ -523,8 +525,8 @@ export default function FeedPage() {
         </ResponsiveContainer>
       </main>
 
-      {/* Scrolling comments overlay for current track */}
-      {tracks[currentIndex] && (
+      {/* Ambient overlay of the global chat room; gone when an admin turns chat off */}
+      {chatEnabled && tracks[currentIndex] && (
         <Suspense fallback={null}>
           <ScrollingComments roomId="global" maxVisible={3} scrollSpeed={4000} />
         </Suspense>

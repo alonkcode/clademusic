@@ -16,6 +16,7 @@ import { useTrack } from '@/hooks/api/useTracks';
 import { useCommentCount } from '@/hooks/api/useComments';
 import { useAuth } from '@/hooks/useAuth';
 import { useInteractions } from '@/hooks/useInteractions';
+import { useSetting } from '@/hooks/useSystemSettings';
 import { toast } from '@/hooks/use-toast';
 import { usePlayer } from '@/player/PlayerContext';
 import { BottomNav } from '@/components/BottomNav';
@@ -52,6 +53,7 @@ export default function TrackDetailPage() {
   const { data: track, isLoading, isError } = useTrack(decodeURIComponent(trackId || ''));
   const { openPlayer, provider, trackId: activeTrackId, isPlaying } = usePlayer();
   const { user } = useAuth();
+  const chatEnabled = useSetting('flag.chat_enabled');
   const { interaction, toggleLike } = useInteractions(track?.id ?? null);
   // Same id the comment thread below is given, so the count matches it.
   const { data: commentCount = 0 } = useCommentCount(trackId || '');
@@ -672,20 +674,27 @@ export default function TrackDetailPage() {
 
           {/* Comments Tab */}
           <TabsContent value="comments" className="space-y-3">
-            <Tabs defaultValue="discussion" className="w-full">
-              <TabsList className="grid h-[3.25rem] w-full grid-cols-2 items-stretch sm:h-10 sm:items-center">
-                <TabsTrigger value="discussion">Discussion</TabsTrigger>
-                <TabsTrigger value="chat">Live chat</TabsTrigger>
-              </TabsList>
-              <TabsContent value="discussion" className="mt-3">
-                <Card className="p-4 sm:p-6">
-                  <TrackComments trackId={trackId || ''} />
-                </Card>
-              </TabsContent>
-              <TabsContent value="chat" className="mt-3">
-                {trackId && <LiveChat roomType="track" trackId={trackId} />}
-              </TabsContent>
-            </Tabs>
+            {chatEnabled ? (
+              <Tabs defaultValue="discussion" className="w-full">
+                <TabsList className="grid h-[3.25rem] w-full grid-cols-2 items-stretch sm:h-10 sm:items-center">
+                  <TabsTrigger value="discussion">Discussion</TabsTrigger>
+                  <TabsTrigger value="chat">Live chat</TabsTrigger>
+                </TabsList>
+                <TabsContent value="discussion" className="mt-3">
+                  <Card className="p-4 sm:p-6">
+                    <TrackComments trackId={trackId || ''} />
+                  </Card>
+                </TabsContent>
+                <TabsContent value="chat" className="mt-3">
+                  {trackId && <LiveChat roomType="track" trackId={trackId} />}
+                </TabsContent>
+              </Tabs>
+            ) : (
+              // Chat switched off by an admin: just the discussion, no empty sub-tab bar.
+              <Card className="p-4 sm:p-6">
+                <TrackComments trackId={trackId || ''} />
+              </Card>
+            )}
           </TabsContent>
         </Tabs>
       </main>

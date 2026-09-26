@@ -26,7 +26,10 @@ export function BottomNav() {
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const forumEnabled = useSetting('flag.forum_enabled');
-  const items = forumEnabled ? navItems : navItems.filter((item) => item.to !== '/forum');
+  const chatEnabled = useSetting('flag.chat_enabled');
+  const items = navItems.filter(
+    (item) => !(item.to === '/forum' && !forumEnabled) && !(item.to === '/chat' && !chatEnabled)
+  );
 
   return (
     <div className="fixed top-0 left-0 z-[70] p-3 md:p-4">

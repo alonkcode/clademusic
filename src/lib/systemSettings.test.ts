@@ -108,3 +108,22 @@ describe('registry', () => {
     expect(DEFAULT_SETTINGS['pref.announcement']).toBe('');
   });
 });
+
+describe('flag.chat_enabled', () => {
+  it('defaults to on and is described for the admin panel', () => {
+    expect(DEFAULT_SETTINGS['flag.chat_enabled']).toBe(true);
+    expect(SETTING_KEYS).toContain('flag.chat_enabled');
+    expect(SETTING_META['flag.chat_enabled'].label).toBe('Live chat');
+  });
+
+  it('turns off when an admin stores false, without touching the other flags', () => {
+    const merged = mergeSettings([{ key: 'flag.chat_enabled', value: false }]);
+    expect(merged['flag.chat_enabled']).toBe(false);
+    expect(merged['flag.forum_enabled']).toBe(true);
+    expect(merged['flag.comments_enabled']).toBe(true);
+  });
+
+  it('ignores a stored value of the wrong type and stays on', () => {
+    expect(sanitizeSetting('flag.chat_enabled', 'off')).toBe(true);
+  });
+});

@@ -2,10 +2,11 @@ import { useState, type ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, renderHook, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { SystemSettingsProvider, useRateLimitGuard, useSystemSettings } from '@/hooks/useSystemSettings';
 import { FeatureRoute } from '@/components/FeatureRoute';
 import { MaintenanceGate } from '@/components/MaintenanceGate';
+import { BottomNav } from '@/components/BottomNav';
 import { clearRateLimit } from '@/lib/security';
 
 // What the fake database returns, and who is signed in, are set per test.
@@ -186,5 +187,74 @@ describe('MaintenanceGate', () => {
 
     expect(await screen.findByText('Down for maintenance')).toBeInTheDocument();
     expect(screen.queryByText('the site')).not.toBeInTheDocument();
+  });
+});
+
+describe('chat flag', () => {
+  function renderChat() {
+    return render(
+      <Providers path="/chat">
+        <Routes>
+          <Route element={<FeatureRoute flag="flag.chat_enabled" name="Chat" />}>
+            <Route path="/chat" element={<div>chat content</div>} />
+          </Route>
+        </Routes>
+      </Providers>
+    );
+  }
+
+  it('is on by default, so chat works before an admin touches anything', async () => {
+    renderChat();
+    expect(await screen.findByText('chat content')).toBeInTheDocument();
+  });
+
+  it('replaces /chat with an unavailable notice once an admin turns it off', async () => {
+    db.rows = [{ key: 'flag.chat_enabled', value: false }];
+    renderChat();
+
+    expect(await screen.findByText('Chat is unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('chat content')).not.toBeInTheDocument();
+  });
+
+  it('does not affect the forum, which has its own flag', async () => {
+    db.rows = [{ key: 'flag.chat_enabled', value: false }];
+    renderForum();
+
+    expect(await screen.findByText('forum content')).toBeInTheDocument();
+  });
+
+  describe('navigation links', () => {
+    const navLink = (href: string) => document.querySelector(`nav a[href="${href}"]`);
+
+    // The links only exist once the sheet is open.
+    function renderNavOpen() {
+      render(
+        <Providers>
+          <BottomNav />
+        </Providers>
+      );
+      fireEvent.click(screen.getByLabelText('Open navigation'));
+    }
+
+    it('shows both Forums and Chat while their flags are on', async () => {
+      renderNavOpen();
+      await waitFor(() => expect(navLink('/chat')).not.toBeNull());
+      expect(navLink('/forum')).not.toBeNull();
+    });
+
+    it('hides only the Chat link when chat is off', async () => {
+      db.rows = [{ key: 'flag.chat_enabled', value: false }];
+      renderNavOpen();
+      await waitFor(() => expect(navLink('/chat')).toBeNull());
+      expect(navLink('/forum')).not.toBeNull();
+      expect(navLink('/feed')).not.toBeNull();
+    });
+
+    it('hides only the Forums link when forums are off', async () => {
+      db.rows = [{ key: 'flag.forum_enabled', value: false }];
+      renderNavOpen();
+      await waitFor(() => expect(navLink('/forum')).toBeNull());
+      expect(navLink('/chat')).not.toBeNull();
+    });
   });
 });

@@ -20,6 +20,7 @@ export interface RateLimitValue {
 export interface SettingValues {
   'flag.signups_enabled': boolean;
   'flag.forum_enabled': boolean;
+  'flag.chat_enabled': boolean;
   'flag.billing_enabled': boolean;
   'flag.comments_enabled': boolean;
   'limit.comments': RateLimitValue;
@@ -36,6 +37,7 @@ export type LimitKey = Extract<SettingKey, `limit.${string}`>;
 export const DEFAULT_SETTINGS: SettingValues = {
   'flag.signups_enabled': true,
   'flag.forum_enabled': true,
+  'flag.chat_enabled': true,
   'flag.billing_enabled': true,
   'flag.comments_enabled': true,
   'limit.comments': { max: 10, windowSeconds: 60 },
@@ -65,6 +67,11 @@ export const SETTING_META: Record<SettingKey, SettingMeta> = {
   'flag.forum_enabled': {
     label: 'Forums',
     description: 'When off, the /forum pages show an unavailable notice and forum links are hidden.',
+  },
+  'flag.chat_enabled': {
+    label: 'Live chat',
+    description:
+      'When off, the /chat page shows an unavailable notice, chat links are hidden, and live chat is removed from track pages and the feed.',
   },
   'flag.billing_enabled': {
     label: 'Pricing & billing',

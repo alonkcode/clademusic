@@ -39,6 +39,7 @@ import {
 const FLAG_KEYS: FlagKey[] = [
   'flag.signups_enabled',
   'flag.forum_enabled',
+  'flag.chat_enabled',
   'flag.billing_enabled',
   'flag.comments_enabled',
 ];

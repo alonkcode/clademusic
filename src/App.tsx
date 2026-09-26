@@ -175,7 +175,9 @@ const App = () => (
                       <Route path="/track/:trackId" element={<TrackDetailPage />} />
                       <Route path="/playlists" element={<PlaylistsPage />} />
                       <Route path="/playlist/:playlistId" element={<PlaylistDetailPage />} />
-                      <Route path="/chat" element={<ChatPage />} />
+                      <Route element={<FeatureRoute flag="flag.chat_enabled" name="Chat" />}>
+                        <Route path="/chat" element={<ChatPage />} />
+                      </Route>
                       <Route path="/notifications" element={<NotificationsPage />} />
                       <Route element={<FeatureRoute flag="flag.forum_enabled" name="Forums" />}>
                         <Route path="/forum" element={<ForumHomePage />} />
