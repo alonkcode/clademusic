@@ -54,7 +54,7 @@ const MIN_SPAN_SEC = 0.3;
  * that time passed - frames are timed against the player's real position, so
  * scrubbing moves the clock arbitrarily, backwards included.
  */
-const SEEK_DISCONTINUITY_SEC = 2;
+export const SEEK_DISCONTINUITY_SEC = 2;
 
 function sameChord(a: ChordRef | null, b: ChordRef | null): boolean {
   if (!a || !b) return a === b;

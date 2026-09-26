@@ -22,9 +22,9 @@
  * function and under Vitest alike.
  */
 
-import { ChordSmoother, chromaEnergy, chromaFromMagnitudes, matchChordTemplate } from './chordDetection.ts';
+import { chromaEnergy, chromaFromMagnitudes } from './chordDetection.ts';
 import type { ChordQuality } from './chordDetection.ts';
-import { ChordTimeline } from './chordTimeline.ts';
+import { ChordDecoder } from './chordDecoder.ts';
 import { estimateKey } from './keyEstimation.ts';
 import type { KeyEstimate } from './keyEstimation.ts';
 import { OnsetBuffer, estimateTempo, spectralFlux } from './tempoDetection.ts';
@@ -213,8 +213,7 @@ export function analyzePcm(samples: Float32Array, sampleRate: number): PreviewAn
   const onsetBinHz = sampleRate / ONSET_FFT_SIZE;
   const onsetMaxBin = Math.min(ONSET_FFT_SIZE / 2, Math.floor(ONSET_MAX_HZ / onsetBinHz));
 
-  const smoother = new ChordSmoother();
-  const timeline = new ChordTimeline();
+  const decoder = new ChordDecoder();
   const onsets = new OnsetBuffer();
   const snapshots: PreviewSnapshot[] = [];
   let tempo: TempoReading | null = null;
@@ -224,7 +223,7 @@ export function analyzePcm(samples: Float32Array, sampleRate: number): PreviewAn
     // A null reading means "not enough clear beats right now", not "the tempo
     // went away" - keep the last good one, as the live hook does.
     tempo = estimateTempo(onsets.samples()) ?? tempo;
-    snapshots.push({ atMs, key: estimateKey(timeline.toSpans()), tempo });
+    snapshots.push({ atMs, key: estimateKey(decoder.toSpans()), tempo });
   };
 
   for (let tick = 1; ; tick++) {
@@ -243,7 +242,7 @@ export function analyzePcm(samples: Float32Array, sampleRate: number): PreviewAn
       const linear = chordAnalyser.read(endSample);
       const chroma = chromaFromMagnitudes(linear, sampleRate, CHORD_FFT_SIZE);
       const energy = chromaEnergy(linear, sampleRate, CHORD_FFT_SIZE);
-      timeline.push(smoother.push(matchChordTemplate(chroma, energy)), timeSec);
+      decoder.push(chroma, energy, timeSec);
     }
 
     if (tick % ONSET_TICKS_PER_SNAPSHOT === 0) snapshot(Math.round(timeSec * 1000));
@@ -254,7 +253,7 @@ export function analyzePcm(samples: Float32Array, sampleRate: number): PreviewAn
 
   return {
     durationMs,
-    chords: timeline.toSpans().map((s) => ({
+    chords: decoder.toSpans().map((s) => ({
       root: s.root,
       quality: s.quality,
       startMs: Math.round(s.startSec * 1000),

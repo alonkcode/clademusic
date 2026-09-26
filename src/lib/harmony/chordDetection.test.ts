@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { ChordSmoother, chromaEnergy, chromaFromMagnitudes, matchChordTemplate } from './chordDetection';
+import {
+  CHORD_STATES,
+  ChordSmoother,
+  chromaEnergy,
+  chromaFromMagnitudes,
+  matchChordTemplate,
+  scoreChordTemplates,
+} from './chordDetection';
 
 /** Build a chroma vector with energy at the given pitch classes, rest at zero. */
 function chromaAt(...pitchClasses: number[]): number[] {
@@ -47,6 +54,39 @@ describe('matchChordTemplate', () => {
     const result = matchChordTemplate(chromaAt(0, 4, 7, 11), LOUD);
     expect(result?.root).toBe(0);
     expect(result?.quality).toBe('major');
+  });
+});
+
+describe('scoreChordTemplates', () => {
+  it('scores all 24 triads in CHORD_STATES order, with the played chord on top', () => {
+    const scores = scoreChordTemplates(chromaAt(9, 0, 4), LOUD); // A C E
+    expect(scores).toHaveLength(CHORD_STATES.length);
+
+    const best = scores!.indexOf(Math.max(...scores!));
+    expect(CHORD_STATES[best]).toEqual({ root: 9, quality: 'minor' });
+  });
+
+  it('lists each root major first, then minor', () => {
+    expect(CHORD_STATES).toHaveLength(24);
+    expect(CHORD_STATES.slice(0, 4)).toEqual([
+      { root: 0, quality: 'major' },
+      { root: 0, quality: 'minor' },
+      { root: 1, quality: 'major' },
+      { root: 1, quality: 'minor' },
+    ]);
+  });
+
+  it('returns null below the silence gate, like matchChordTemplate', () => {
+    expect(scoreChordTemplates(chromaAt(0, 4, 7), 1e-9)).toBeNull();
+    expect(scoreChordTemplates(chromaAt(0, 4, 7), LOUD)).not.toBeNull();
+  });
+
+  it('agrees with matchChordTemplate about the winner and its score', () => {
+    const chroma = chromaAt(7, 10, 2);
+    const scores = scoreChordTemplates(chroma, LOUD)!;
+    const match = matchChordTemplate(chroma, LOUD)!;
+    expect(CHORD_STATES[scores.indexOf(Math.max(...scores))]).toMatchObject({ root: match.root, quality: match.quality });
+    expect(Math.max(...scores)).toBeCloseTo(match.score, 12);
   });
 });
 

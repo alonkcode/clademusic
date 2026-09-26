@@ -6,9 +6,9 @@ import {
   matchChordTemplate,
   type DetectedChord,
 } from '@/lib/harmony/chordDetection';
+import { ChordDecoder } from '@/lib/harmony/chordDecoder';
 import { detectSections, type ChromaFrame, type DetectedSection } from '@/lib/harmony/sectionDetection';
 import {
-  ChordTimeline,
   sectionProgressions as buildSectionProgressions,
   type ChordSpan,
   type SectionProgression,
@@ -111,7 +111,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const smootherRef = useRef(new ChordSmoother());
-  const timelineRef = useRef(new ChordTimeline());
+  const chordDecoderRef = useRef(new ChordDecoder());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onsetIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onsetBufferRef = useRef(new OnsetBuffer());
@@ -168,7 +168,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
     const bucketSec = Math.max(1, Math.ceil(spannedSec / MAX_SECTION_BUCKETS));
 
     const sections = detectSections(frames, { bucketSec });
-    const spans = timelineRef.current.toSpans();
+    const spans = chordDecoderRef.current.toSpans();
     setDetectedSections(sections);
     setChordSpans(spans);
     setSectionProgressions(buildSectionProgressions(sections, spans));
@@ -184,7 +184,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
   }, []);
 
   const reset = useCallback(() => {
-    timelineRef.current.reset();
+    chordDecoderRef.current.reset();
     chromaHistoryRef.current = [];
     onsetBufferRef.current.reset();
     setChord(null);
@@ -339,11 +339,12 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
             ? clockSec
             : (now - captureStartedAtRef.current) / 1000;
         chromaHistoryRef.current.push({ chroma, timeSec });
-        // The same estimate that drives the live readout, kept this time:
-        // ChordTimeline extends the current span while the chord holds and
-        // closes it when it changes, which is what turns a stream of
-        // instants into a progression with real timestamps.
-        timelineRef.current.push(smoothed, timeSec);
+        // The recorded progression is NOT the live readout's per-frame vote:
+        // that follows whichever note is loudest right now, so a melody or an
+        // arpeggio put several chords in every bar. ChordDecoder keeps the
+        // frame itself and settles the chord from everything heard, the way
+        // the key is settled - see chordDecoder.ts.
+        chordDecoderRef.current.push(chroma, energy, timeSec);
       }, TICK_MS);
 
       onsetIntervalRef.current = setInterval(() => {

@@ -100,6 +100,19 @@ function rotate(template: number[], root: number): number[] {
   return template.map((_, i) => template[((i - root) % 12 + 12) % 12]);
 }
 
+/**
+ * Every chord the detector can name, in a fixed order: for each root 0-11, the
+ * major triad and then the minor. Index into this to read `scoreChordTemplates`.
+ */
+export const CHORD_STATES: ReadonlyArray<{ root: number; quality: ChordQuality }> = Array.from(
+  { length: 24 },
+  (_, i) => ({ root: i >> 1, quality: i % 2 === 0 ? ('major' as const) : ('minor' as const) })
+);
+
+const CHORD_TEMPLATES: number[][] = CHORD_STATES.map(({ root, quality }) =>
+  rotate(quality === 'major' ? MAJOR_TEMPLATE : MINOR_TEMPLATE, root)
+);
+
 function cosineSimilarity(a: number[], b: number[]): number {
   const dot = a.reduce((sum, v, i) => sum + v * b[i], 0);
   const normB = Math.sqrt(b.reduce((sum, v) => sum + v * v, 0));
@@ -141,27 +154,33 @@ function cosineSimilarity(a: number[], b: number[]): number {
 const SILENCE_ENERGY_THRESHOLD = 2e-7;
 
 /**
- * Match a chroma vector against all 24 major/minor triad templates.
- * `energy` is the chroma's pre-normalization magnitude (see chromaEnergy) -
- * chroma itself is always unit-normalized (or all-zero), so it alone can't
- * tell a quiet passage from a loud one. Returns null when there isn't
- * enough signal to trust a match (silence, or between chords) rather than
- * returning a low-confidence guess.
+ * Cosine similarity of a chroma vector to each of the 24 triad templates, in
+ * `CHORD_STATES` order. `energy` is the chroma's pre-normalization magnitude
+ * (see chromaEnergy) - chroma itself is always unit-normalized (or all-zero),
+ * so it alone can't tell a quiet passage from a loud one. Returns null when
+ * there isn't enough signal to trust any of them (silence, or between chords).
+ */
+export function scoreChordTemplates(chroma: number[], energy: number): number[] | null {
+  if (energy < SILENCE_ENERGY_THRESHOLD) return null;
+  return CHORD_TEMPLATES.map((template) => cosineSimilarity(chroma, template));
+}
+
+/**
+ * The single best-matching triad for one chroma vector, or null when there
+ * isn't enough signal to trust a match rather than a low-confidence guess.
+ *
+ * This is one frame's opinion. It follows whatever note is loudest at that
+ * instant, so it is right for a live "what is sounding now" readout and wrong as
+ * the record of a song's harmony - see ChordDecoder, which weighs every frame.
  */
 export function matchChordTemplate(chroma: number[], energy: number): DetectedChord | null {
-  if (energy < SILENCE_ENERGY_THRESHOLD) return null;
+  const scores = scoreChordTemplates(chroma, energy);
+  if (!scores) return null;
 
-  let best: DetectedChord | null = null;
+  let best = 0;
+  for (let i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
 
-  for (let root = 0; root < 12; root++) {
-    const majorScore = cosineSimilarity(chroma, rotate(MAJOR_TEMPLATE, root));
-    const minorScore = cosineSimilarity(chroma, rotate(MINOR_TEMPLATE, root));
-
-    if (!best || majorScore > best.score) best = { root, quality: 'major', score: majorScore };
-    if (!best || minorScore > best.score) best = { root, quality: 'minor', score: minorScore };
-  }
-
-  return best;
+  return { ...CHORD_STATES[best], score: scores[best] };
 }
 
 /**

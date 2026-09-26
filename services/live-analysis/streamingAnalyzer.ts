@@ -4,7 +4,7 @@
  * useLiveChordDetection (browser) and analyzePcm (whole buffer, edge function)
  * already run this pipeline. This is the third way in: chunks of PCM pushed
  * one at a time, results handed back as wire events. It reuses the same
- * SpectrumAnalyser, ChordSmoother, ChordTimeline, key, tempo and section code
+ * SpectrumAnalyser, ChordSmoother, ChordDecoder, key, tempo and section code
  * unchanged, so a chord heard through the microphone route means what it means
  * in the tab-capture route. The tick rates below mirror those two; keep the
  * three in step.
@@ -19,7 +19,7 @@
  */
 
 import { ChordSmoother, chromaEnergy, chromaFromMagnitudes, matchChordTemplate } from '../../supabase/functions/_shared/dsp/chordDetection.ts';
-import { ChordTimeline } from '../../supabase/functions/_shared/dsp/chordTimeline.ts';
+import { ChordDecoder } from '../../supabase/functions/_shared/dsp/chordDecoder.ts';
 import type { ChordSpan } from '../../supabase/functions/_shared/dsp/chordTimeline.ts';
 import { estimateKey } from '../../supabase/functions/_shared/dsp/keyEstimation.ts';
 import { SpectrumAnalyser } from '../../supabase/functions/_shared/dsp/previewAnalysis.ts';
@@ -114,7 +114,7 @@ export class StreamingAnalyzer {
   private havePreviousOnset = false;
 
   private readonly smoother = new ChordSmoother();
-  private readonly timeline = new ChordTimeline();
+  private readonly decoder = new ChordDecoder();
   private readonly onsets = new OnsetBuffer();
   private frames: ChromaFrame[] = [];
   private chromaSeen = 0;
@@ -154,7 +154,7 @@ export class StreamingAnalyzer {
     return {
       samplesProcessed: this.filled,
       chromaFrames: this.frames.length,
-      chordSpans: this.timeline.toSpans().length,
+      chordSpans: this.decoder.toSpans().length,
     };
   }
 
@@ -276,7 +276,9 @@ export class StreamingAnalyzer {
     const smoothed = this.smoother.push(matchChordTemplate(chroma, energy));
     const timeSec = this.trackSecAt(audioSec);
 
-    this.timeline.push(smoothed, timeSec);
+    // The recorded progression is decoded from every frame, not from the
+    // per-frame vote that drives the live chord events below - see ChordDecoder.
+    this.decoder.push(chroma, energy, timeSec);
     this.recordChroma({ chroma, timeSec });
 
     const wire: WireChord | null = smoothed ? [smoothed.root, smoothed.quality === 'minor' ? 1 : 0] : null;
@@ -309,7 +311,7 @@ export class StreamingAnalyzer {
     const bucketSec = Math.max(1, Math.ceil(spannedSec / MAX_SECTION_BUCKETS));
 
     const sections = detectSections(this.frames, { bucketSec });
-    const spans = this.timeline.toSpans();
+    const spans = this.decoder.toSpans();
     const key = estimateKey(spans);
     // A null reading means "not enough clear beats right now", not "the tempo
     // went away": keep the last good one.
