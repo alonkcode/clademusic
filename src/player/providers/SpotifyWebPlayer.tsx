@@ -1,82 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePlayer } from '../PlayerContext';
 import { useAuth } from '@/hooks/useAuth';
-import { getValidAccessToken } from '@/services/spotifyAuthService';
+import { forceRefreshAccessToken, getValidAccessToken } from '@/services/spotifyAuthService';
 import { isTestEnv } from '@/lib/env';
-
-declare global {
-  interface Window {
-    Spotify?: any;
-    onSpotifyWebPlaybackSDKReady?: () => void;
-  }
-}
-
-type SpotifyPlayerInstance = {
-  connect: () => Promise<boolean>;
-  disconnect: () => void;
-  getCurrentState: () => Promise<any>;
-  pause: () => Promise<void>;
-  resume: () => Promise<void>;
-  seek: (positionMs: number) => Promise<void>;
-  setVolume: (volume: number) => Promise<void>;
-  addListener: (event: string, cb: (data: any) => void) => boolean;
-  removeListener: (event: string, cb?: (data: any) => void) => boolean;
-  /** Unlocks audio after the browser's autoplay policy blocks a /play call
-   *  with no preceding user gesture. Newer SDK versions only. */
-  activateElement?: () => Promise<void>;
-};
-
-const SDK_URL = 'https://sdk.scdn.co/spotify-player.js';
-let sdkPromise: Promise<void> | null = null;
+import { SpotifyPlaybackSession, stateHasTrack, type PlayOutcome } from './spotifyPlayback';
 
 // How long after a track request the poll may ignore a device that still
 // reports some other track. Past this, whatever the device says is reality.
 const TRACK_SWITCH_GRACE_MS = 6000;
-
-function loadSpotifyWebPlaybackSdk(): Promise<void> {
-  if (typeof window === 'undefined') return Promise.reject(new Error('No window'));
-  if (window.Spotify?.Player) return Promise.resolve();
-  if (sdkPromise) return sdkPromise;
-
-  sdkPromise = new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${SDK_URL}"]`);
-    if (existing) {
-      // If script is already present, wait for readiness.
-      const check = () => {
-        if (window.Spotify?.Player) return resolve();
-        setTimeout(check, 50);
-      };
-      check();
-      return;
-    }
-
-    const timeout = setTimeout(() => reject(new Error('Spotify Web Playback SDK load timeout')), 15000);
-    window.onSpotifyWebPlaybackSDKReady = () => {
-      clearTimeout(timeout);
-      resolve();
-    };
-
-    const script = document.createElement('script');
-    script.src = SDK_URL;
-    script.async = true;
-    script.onerror = () => reject(new Error('Failed to load Spotify Web Playback SDK'));
-    document.body.appendChild(script);
-  });
-
-  return sdkPromise;
-}
-
-async function spotifyApiFetch(token: string, path: string, init?: RequestInit) {
-  const res = await fetch(`https://api.spotify.com/v1${path}`, {
-    ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  return res;
-}
 
 interface SpotifyWebPlayerProps {
   providerTrackId: string | null;
@@ -87,14 +18,35 @@ interface SpotifyWebPlayerProps {
    *  (UniversalPlayerHost's singleton) rather than this component also
    *  mounting a second, competing Spotify iframe of its own. */
   onFallback?: (reason: string) => void;
+  /** Something the listener should be told that is NOT a reason to leave full
+   *  playback: a start that did not take, or a browser that blocked autoplay.
+   *  This component renders inside the collapsed video panel, so it cannot show
+   *  these itself. */
+  onNotice?: (message: string) => void;
+}
+
+interface LatestValues {
+  /** `${playRequestId}:${trackId}` of the request currently being asked for. */
+  key: string | null;
+  uri: string | null;
+  trackId: string | null;
+  shouldAutoplay: boolean;
+  seekToSec: number | null;
+  volume: number;
+  isMuted: boolean;
+  onNotice?: (message: string) => void;
 }
 
 /**
  * Spotify full-track playback via Web Playback SDK (requires Spotify Premium).
  * Calls onFallback when SDK/auth/device isn't available so the caller can
  * switch to the embed player.
+ *
+ * All of the device handling - connecting, retrying, confirming that a start
+ * took - lives in SpotifyPlaybackSession. This component only decides WHEN a
+ * start is wanted, and mirrors the device's state into the player context.
  */
-export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: SpotifyWebPlayerProps) {
+export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback, onNotice }: SpotifyWebPlayerProps) {
   const { user } = useAuth();
   const {
     provider,
@@ -104,38 +56,68 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     clearSeek,
     volume,
     isMuted,
+    isStarting,
     registerProviderControls,
     updatePlaybackState,
   } = usePlayer();
+  const userId = user?.id ?? null;
 
   const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
   // True once the SDK itself has reported that the browser's autoplay policy
   // blocked the automatic /play call - a hard platform limit, not a bug:
   // browsers deliberately refuse to start audio with zero preceding user
   // interaction on the page, and a JS-synthesized click doesn't count as one
-  // either, specifically to prevent working around exactly this. Waiting for
-  // the next REAL interaction and resuming from it then is the actual fix,
-  // not pretending true unattended autoplay is achievable.
+  // either, specifically to prevent working around exactly this. Pressing play
+  // (a real gesture) resumes the track the device already has loaded.
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
-  const playerRef = useRef<SpotifyPlayerInstance | null>(null);
-  const deviceIdRef = useRef<string | null>(null);
-  const pollRef = useRef<number | null>(null);
+  // State so the effects that need a session run when it appears; the ref is for
+  // callbacks that must reach the current one without re-registering.
+  const [session, setSession] = useState<SpotifyPlaybackSession | null>(null);
+  const sessionRef = useRef<SpotifyPlaybackSession | null>(null);
+
+  const shouldAutoplay = autoplay ?? autoplaySpotify ?? true;
+  const uri = providerTrackId ? `spotify:track:${providerTrackId}` : null;
+
+  // Live values, read by async code and by effects that must NOT be re-run by
+  // them. The context's isPlaying is rewritten by the poll below several times a
+  // second, and mute/seek change at any moment; none of those is a reason to load
+  // a track again. Declared first so it is current before any later effect of the
+  // same commit reads it.
+  const latest = useRef<LatestValues>({
+    key: null,
+    uri: null,
+    trackId: null,
+    shouldAutoplay,
+    seekToSec,
+    volume,
+    isMuted,
+    onNotice,
+  });
+  useEffect(() => {
+    latest.current = {
+      key: providerTrackId ? `${playRequestId}:${providerTrackId}` : null,
+      uri,
+      trackId: providerTrackId,
+      shouldAutoplay,
+      seekToSec,
+      volume,
+      isMuted,
+      onNotice,
+    };
+  });
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Which request a start is currently in flight for, if any.
+  const startingKeyRef = useRef<string | null>(null);
   const lastTrackIdRef = useRef<string | null>(null);
   const lastTrackRequestedAtRef = useRef(0);
-  // Which `${playRequestId}:${trackId}` has already been handed to
-  // `PUT /me/player/play`, so a re-run of the setup effect never replays a
-  // track the listener is already partway through.
-  const startedPlayKeyRef = useRef<string | null>(null);
-  // Keep overlapping track changes in order so an old Spotify request cannot
-  // finish after a newer quicklink and restore the previous song.
-  const latestPlayKeyRef = useRef<string | null>(null);
-  const playQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const volumeRef = useRef<number>(volume);
-
-  useEffect(() => {
-    volumeRef.current = volume;
-  }, [volume]);
 
   // Reported via a ref-based dedupe rather than a plain dependency on
   // `error`: onFallback's identity can change across renders (it's an
@@ -150,124 +132,182 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
 
-  const shouldAutoplay = useMemo(() => autoplay ?? autoplaySpotify ?? true, [autoplay, autoplaySpotify]);
-  const uri = useMemo(() => (providerTrackId ? `spotify:track:${providerTrackId}` : null), [providerTrackId]);
-  latestPlayKeyRef.current = providerTrackId ? `${playRequestId}:${providerTrackId}` : null;
-
-  // Live transport values, mirrored into refs so the setup effect below can
-  // READ them without being RE-RUN by them. The caller passes
-  // autoplay={isPlaying} and the 500ms poll further down writes the SDK's
-  // real paused-state back into that same isPlaying, so every one of these
-  // changes several times a second during ordinary playback. Having them as
-  // effect dependencies meant a full re-setup - transfer playback, then
-  // `PUT /me/player/play` at position_ms - on every such change, which is
-  // what restarted the track from 0:00 over and over. Whether the listener
-  // is currently playing, muted, or has just sought is not a reason to load
-  // a track again; the registered ProviderControls handle all three on the
-  // already-connected player.
-  const shouldAutoplayRef = useRef(shouldAutoplay);
-  const seekToSecRef = useRef(seekToSec);
-  const isMutedRef = useRef(isMuted);
+  // A new track: forget the last one's error and hint, and show the new
+  // request as underway. Keyed on the track alone - the request id changes on
+  // every tap of the same track, which must not wipe anything.
   useEffect(() => {
-    shouldAutoplayRef.current = shouldAutoplay;
-    seekToSecRef.current = seekToSec;
-    isMutedRef.current = isMuted;
-  }, [shouldAutoplay, seekToSec, isMuted]);
+    if (provider !== 'spotify' || !providerTrackId) return;
+    setError(null);
+    setAutoplayBlocked(false);
+    lastTrackIdRef.current = providerTrackId;
+    lastTrackRequestedAtRef.current = Date.now();
+    updatePlaybackState({
+      durationMs: 0,
+      isPlaying: latest.current.shouldAutoplay,
+    });
+  }, [provider, providerTrackId, updatePlaybackState]);
+
+  useEffect(() => {
+    if (provider === 'spotify' && providerTrackId && !userId) {
+      setError('Sign in to play full Spotify tracks.');
+    }
+  }, [provider, providerTrackId, userId]);
+
+  // One session per signed-in listener, created as soon as there is a Spotify
+  // track to play so the device is already connecting before the first click
+  // has to wait on it, and shared by every request after that. Not tied to the
+  // track: a session that came and went with each track was the source of
+  // duplicate devices and of a fresh connect on every click.
+  const wantsSession = provider === 'spotify' && !!providerTrackId && !!userId && !isTestEnv;
+  useEffect(() => {
+    if (!wantsSession || !userId) return;
+    const next = new SpotifyPlaybackSession({
+      getToken: (forceRefresh) => (forceRefresh ? forceRefreshAccessToken(userId) : getValidAccessToken(userId)),
+      getVolume: () => (latest.current.isMuted ? 0 : latest.current.volume),
+      onFatal: (failure) => setError(failure.message),
+      onAutoplayBlocked: () => setAutoplayBlocked(true),
+    });
+    sessionRef.current = next;
+    setSession(next);
+    next.ensureDevice().catch(() => {
+      // Surfaced by the first play request, which retries the connection.
+    });
+    return () => {
+      next.dispose();
+      if (sessionRef.current === next) sessionRef.current = null;
+      setSession((current) => (current === next ? null : current));
+    };
+  }, [wantsSession, userId]);
+
+  const applyOutcome = useCallback(
+    (outcome: PlayOutcome, startSec: number | null) => {
+      switch (outcome.status) {
+        case 'started':
+          if (startSec != null) clearSeek();
+          updatePlaybackState({ isStarting: false });
+          break;
+        case 'blocked':
+          updatePlaybackState({ isStarting: false });
+          latest.current.onNotice?.('Your browser blocked autoplay. Press play to start Spotify.');
+          break;
+        case 'unavailable':
+          // The transport must say what is true: nothing is playing.
+          updatePlaybackState({ isStarting: false, isPlaying: false });
+          latest.current.onNotice?.("Spotify didn't respond. Press play to try again.");
+          break;
+        case 'failed':
+          updatePlaybackState({ isStarting: false, isPlaying: false });
+          setError(outcome.failure.message);
+          break;
+        case 'superseded':
+          // A newer request owns the transport state now.
+          break;
+      }
+    },
+    [clearSeek, updatePlaybackState]
+  );
+
+  // Asks the session to play the CURRENT request and applies whatever came of
+  // it. Called when a track is opened already playing, and when the listener
+  // presses play on a device that was never handed the track.
+  const beginStart = useCallback(
+    async (active: SpotifyPlaybackSession, startSec: number | null) => {
+      const { key, uri: requestUri, trackId } = latest.current;
+      if (!key || !requestUri || !trackId) return;
+      // The same request is already being started (a double-invoked handler).
+      if (startingKeyRef.current === key) return;
+
+      startingKeyRef.current = key;
+      lastTrackIdRef.current = trackId;
+      lastTrackRequestedAtRef.current = Date.now();
+      updatePlaybackState({ isStarting: true });
+
+      let outcome: PlayOutcome;
+      try {
+        outcome = await active.play({
+          uri: requestUri,
+          trackId,
+          // Start where the caller asked - tapping a chorus should land on the
+          // chorus, not at 0:00 with a seek racing the SDK's connect.
+          positionMs: startSec != null ? Math.max(0, Math.round(startSec * 1000)) : 0,
+          isCurrent: () => latest.current.key === key,
+          wantsPlaying: () => latest.current.shouldAutoplay,
+        });
+      } finally {
+        if (startingKeyRef.current === key) startingKeyRef.current = null;
+      }
+
+      if (!mountedRef.current || latest.current.key !== key) return;
+      applyOutcome(outcome, startSec);
+    },
+    [applyOutcome, updatePlaybackState]
+  );
 
   // Register controls even if we end up falling back; PlayerContext expects these for seek/volume.
   useEffect(() => {
     if (provider !== 'spotify') return;
     registerProviderControls('spotify', {
       play: async (startSec) => {
-        const player = playerRef.current;
-        if (!player) return;
-        if (typeof startSec === 'number') await player.seek(Math.max(0, startSec * 1000));
-        await player.resume();
+        const active = sessionRef.current;
+        if (!active) return;
+        const seconds = typeof startSec === 'number' ? startSec : null;
+
+        // resume() only continues a track the device already has loaded. If the
+        // device was never handed this one - the /play request failed, or the
+        // listener pressed play before the device was up - resume is a silent
+        // no-op and the press looked like it did nothing at all. Detect that and
+        // issue the real start instead.
+        const state = await active.currentState();
+        if (stateHasTrack(state, latest.current.trackId)) {
+          if (seconds != null) await active.seek(seconds * 1000);
+          await active.resume();
+          return;
+        }
+        await beginStart(active, seconds);
       },
       pause: async () => {
-        const player = playerRef.current;
-        if (!player) return;
-        await player.pause();
+        await sessionRef.current?.pause();
       },
       seekTo: async (seconds) => {
-        const player = playerRef.current;
-        if (!player) return;
-        await player.seek(Math.max(0, seconds * 1000));
+        await sessionRef.current?.seek(seconds * 1000);
       },
       setVolume: async (vol) => {
-        const player = playerRef.current;
-        if (!player) return;
-        await player.setVolume(Math.max(0, Math.min(1, vol)));
+        await sessionRef.current?.setVolume(vol);
       },
       setMute: async (muted) => {
-        const player = playerRef.current;
-        if (!player) return;
-        await player.setVolume(muted ? 0 : Math.max(0, Math.min(1, volumeRef.current)));
+        await sessionRef.current?.setVolume(muted ? 0 : latest.current.volume);
       },
+      // Disconnects the device but leaves the session able to build a new one.
       teardown: async () => {
-        try {
-          playerRef.current?.disconnect();
-        } catch {
-          // ignore
-        } finally {
-          playerRef.current = null;
-          deviceIdRef.current = null;
-        }
+        sessionRef.current?.release();
       },
     });
-  }, [provider, registerProviderControls]);
+  }, [provider, registerProviderControls, beginStart]);
 
-  // Keyed on the track alone. With shouldAutoplay in the dependency list this
-  // ran on every play/pause and on every poll tick that changed isPlaying:
-  // each run called setReady(false), and the SDK's `ready` event only fires
-  // once per device, so nothing ever set it back - "Starting Spotify
-  // playback…" latched on permanently even though playback was connected.
-  // The same runs also reset durationMs to 0, collapsing the seekbar until
-  // the next poll refilled it 500ms later.
+  // A track was opened (or opened again): start it. Keyed on the request, never
+  // on isPlaying/mute/seek - see `latest` - so it cannot re-fire from the poll.
   useEffect(() => {
-    if (provider !== 'spotify' || !providerTrackId) return;
-    setError(null);
-    setReady(false);
-    setAutoplayBlocked(false);
-    // Mark the newly-requested track as current right away, before the
-    // /play PUT below has even been sent - the poll below reads this to
-    // reject state for whatever track the device is still reporting.
-    lastTrackIdRef.current = providerTrackId;
-    lastTrackRequestedAtRef.current = Date.now();
-    updatePlaybackState({
-      durationMs: 0,
-      isPlaying: shouldAutoplayRef.current,
-    });
-  }, [provider, providerTrackId, updatePlaybackState]);
+    if (!session || provider !== 'spotify' || !providerTrackId) return;
+    // Opened paused: nothing to start until the listener presses play.
+    if (!latest.current.shouldAutoplay) return;
+    void beginStart(session, latest.current.seekToSec);
+  }, [session, provider, providerTrackId, playRequestId, beginStart]);
 
-  // The very first real gesture after a new autoplay-intended track loads
-  // unlocks playback if the browser ends up blocking the automatic /play
-  // call - activateElement() is the SDK's own documented unlock for this
-  // (see https://developer.spotify.com/documentation/web-playback-sdk).
-  // This used to only start listening once autoplayBlocked (set from the
-  // SDK's autoplay_failed event) went true - so a gesture made earlier, e.g.
-  // tapping the chevron to expand the player while the SDK was still
-  // connecting, didn't count: nothing was listening for it yet. Playback
-  // then sat stuck until a second, later gesture arrived after the block was
-  // actually detected, which is what made a single tap feel like it required
-  // two - open the panel, then separately press play. Listening from the
-  // moment autoplay is intended, rather than waiting for confirmation it was
-  // blocked, means whichever gesture comes first is the one that unlocks it,
-  // as soon as a player instance exists to unlock (an even earlier gesture
-  // just no-ops and leaves the listener attached for the next one).
+  // Unlocks audio on the first real gesture if the browser ends up blocking
+  // the automatic start - activateElement() is the SDK's own documented unlock
+  // for this (see https://developer.spotify.com/documentation/web-playback-sdk).
+  // It only unlocks: resuming here would run before the click has updated the
+  // requested track, and could restart the previous song.
   useEffect(() => {
     if (provider !== 'spotify' || !providerTrackId || !shouldAutoplay) return;
 
     let unlocked = false;
     const unlock = () => {
-      const player = playerRef.current;
-      if (!player || unlocked) return;
+      const active = sessionRef.current;
+      if (!active || unlocked) return;
       unlocked = true;
       setAutoplayBlocked(false);
-      // Unlock audio in the user's gesture. Do not resume here: this capture
-      // handler runs before the quicklink updates the requested track, so
-      // resume() can restart the previous song.
-      void player.activateElement?.();
+      void active.activateElement().catch(() => {});
       window.removeEventListener('pointerdown', unlock, { capture: true });
       window.removeEventListener('keydown', unlock, { capture: true });
     };
@@ -280,302 +320,77 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
     };
   }, [provider, providerTrackId, shouldAutoplay]);
 
-  // Starts the CURRENT play request on the connected device, at most once.
-  // Two callers funnel through it: the setup effect below (the ordinary path,
-  // where a track is opened already playing) and the deferred effect after it
-  // (the listener pressed play before the device was ready, or the track was
-  // opened paused). Both share startedPlayKeyRef, so a track the listener is
-  // already partway through is never yanked back to its start.
-  const startPlaybackOnce = useCallback(
-    async (token: string, deviceId: string) => {
-      if (!uri || !providerTrackId) return;
-      const playKey = `${playRequestId}:${providerTrackId}`;
-      if (startedPlayKeyRef.current === playKey) return;
-      startedPlayKeyRef.current = playKey;
-      lastTrackIdRef.current = providerTrackId;
-      lastTrackRequestedAtRef.current = Date.now();
-
-      // Start where the caller asked - tapping a chorus should land on the
-      // chorus, not at 0:00 with a seek racing the SDK's connect.
-      const seekAtStartSec = seekToSecRef.current;
-      const startMs = seekAtStartSec != null ? Math.max(0, Math.round(seekAtStartSec * 1000)) : 0;
-      const queuedPlay = playQueueRef.current.then(async () => {
-        // A newer click may replace this request while it waits in the queue.
-        if (latestPlayKeyRef.current !== playKey) return;
-        const playRes = await spotifyApiFetch(token, `/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
-          method: 'PUT',
-          body: JSON.stringify({ uris: [uri], position_ms: startMs }),
-        });
-
-        if (!playRes.ok && playRes.status !== 204) {
-          const details = await playRes.json().catch(() => null);
-          console.warn('[Spotify Web Player] play failed', playRes.status, details);
-          // This request never actually started, so allow a later retry.
-          startedPlayKeyRef.current = null;
-          if (latestPlayKeyRef.current === playKey && playRes.status === 403) {
-            setError(
-              'Spotify playback not permitted (403). Using preview mode. If this account should have full access, add it under the Spotify Developer Dashboard → your app → Users and Access.'
-            );
-          }
-          return;
-        }
-
-        if (seekAtStartSec != null) clearSeek();
-      });
-      playQueueRef.current = queuedPlay.catch((error) => {
-        console.error('[Spotify Web Player] queued play failed', error);
-      });
-      await queuedPlay;
-    },
-    [uri, providerTrackId, playRequestId, clearSeek]
-  );
-
+  // Mirrors the device into the player context for the seekbar and the bar.
   useEffect(() => {
-    if (provider !== 'spotify' || !providerTrackId) return;
-    if (!user) {
-      setError('Sign in to play full Spotify tracks.');
-      return;
-    }
-    if (isTestEnv) return;
-
-    let cancelled = false;
-
-    const start = async () => {
+    if (!session) return;
+    let polling = false;
+    const id = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
       try {
-        await loadSpotifyWebPlaybackSdk();
-        if (cancelled) return;
-
-        const getToken = async () => {
-          const token = await getValidAccessToken(user.id);
-          return token;
-        };
-
-        const token = await getToken();
-        if (!token) {
-          setError('Spotify connection missing or expired. Reconnect Spotify.');
-          return;
-        }
-
-        // Create player once.
-        if (!playerRef.current) {
-          const PlayerCtor = window.Spotify?.Player;
-          if (!PlayerCtor) throw new Error('Spotify SDK not available');
-
-          const instance: SpotifyPlayerInstance = new PlayerCtor({
-            name: 'Clade Player',
-            volume: isMutedRef.current ? 0 : volumeRef.current,
-            getOAuthToken: async (cb: (t: string) => void) => {
-              const next = await getToken();
-              if (next) cb(next);
-            },
-          });
-
-          instance.addListener('ready', ({ device_id }: any) => {
-            deviceIdRef.current = device_id;
-            setReady(true);
-          });
-
-          instance.addListener('not_ready', () => {
-            setReady(false);
-          });
-
-          instance.addListener('initialization_error', (e: any) => {
-            console.error('[Spotify Web Player] init error', e);
-            setError('Spotify player failed to initialize.');
-          });
-
-          instance.addListener('authentication_error', (e: any) => {
-            console.error('[Spotify Web Player] auth error', e);
-            setError('Spotify authentication failed. Reconnect Spotify.');
-          });
-
-          // Common: non-premium accounts cannot use Web Playback SDK.
-          instance.addListener('account_error', (e: any) => {
-            console.error('[Spotify Web Player] account error', e);
-            setError('Spotify Premium is required for full-track playback. Using preview mode.');
-          });
-
-          instance.addListener('playback_error', (e: any) => {
-            console.error('[Spotify Web Player] playback error', e);
-            // Spotify emits this for transient and stale playback failures as
-            // well as permanent ones. Falling back here disconnects the SDK
-            // even while a newer quicklink request is in flight. Keep the
-            // device connected; explicit API/auth/account failures below
-            // remain responsible for switching to the preview player.
-          });
-
-          // Not an error - the browser's own autoplay policy refused the
-          // /play call below because it didn't originate from a fresh user
-          // gesture (e.g. the track was opened by a deep link or navigation,
-          // not a click). See the resume-on-next-interaction listener set up
-          // where this fires, further down.
-          instance.addListener('autoplay_failed', () => {
-            setAutoplayBlocked(true);
-          });
-
-          const ok = await instance.connect();
-          if (!ok) {
-            setError('Failed to connect Spotify player. Using preview mode.');
-            return;
-          }
-
-          playerRef.current = instance;
-        }
-
-        // Wait for device id before controlling playback.
-        const waitForDevice = async () => {
-          const start = Date.now();
-          while (!deviceIdRef.current && Date.now() - start < 8000) {
-            await new Promise((r) => setTimeout(r, 50));
-          }
-          return deviceIdRef.current;
-        };
-
-        const deviceId = await waitForDevice();
-        if (cancelled) return;
-        if (!deviceId) {
-          setError('Spotify device not ready. Using preview mode.');
-          return;
-        }
-        // The SDK's own `ready` event fires once per player instance, and the
-        // player is only constructed for the FIRST track (see `if
-        // (!playerRef.current)` above). Every later track therefore had its
-        // ready flag cleared by the reset effect with no event left to raise
-        // it again, latching "Starting Spotify playback…" on for the rest of
-        // the session while playback was in fact fine. Having a live device
-        // id in hand is the same fact that event reports, so report it here.
-        setReady(true);
-
-        // Transfer playback to this device (required before play calls work reliably).
-        const transfer = await spotifyApiFetch(token, '/me/player', {
-          method: 'PUT',
-          body: JSON.stringify({ device_ids: [deviceId], play: false }),
+        const state = await session.currentState();
+        if (!state) return;
+        const track = state.track_window?.current_track;
+        // The device keeps reporting the OUTGOING track for a moment after a
+        // switch - the /play request that actually changes it is a real network
+        // round trip, not instant. Relaying that overwrote the just-set new
+        // title/artist/position with the track being replaced, which is what
+        // made switching songs look like it "jumped back".
+        //
+        // Two ways this guard must NOT hold: Spotify relinks a track that isn't
+        // available in the listener's market (stateHasTrack knows), and the
+        // device may simply never land on the requested track. Either way an
+        // unbounded guard drops every tick, so the seekbar, duration and play
+        // state would freeze while audio plays on - hence the time limit.
+        const requestedId = lastTrackIdRef.current;
+        const isRequestedTrack = !track?.id || !requestedId || stateHasTrack(state, requestedId);
+        const startInFlight = startingKeyRef.current !== null;
+        const stillSwitching = startInFlight || Date.now() - lastTrackRequestedAtRef.current < TRACK_SWITCH_GRACE_MS;
+        if (!isRequestedTrack && stillSwitching) return;
+        const artistNames = Array.isArray(track?.artists)
+          ? track.artists.map((a) => a?.name).filter(Boolean).join(', ')
+          : null;
+        updatePlaybackState({
+          positionMs: state.position ?? 0,
+          durationMs: state.duration ?? 0,
+          // A device that has only just been handed a track reports `paused` for
+          // a tick or two before audio starts. Relayed straight through, that
+          // flipped the transport back to "play" a few hundred ms after the
+          // listener asked for it. While a start is in flight only the start's
+          // own outcome may say it failed; once it has settled, `paused` is
+          // reality and is reported.
+          isPlaying: startInFlight && state.paused ? undefined : !state.paused,
+          trackTitle: track?.name ?? null,
+          trackArtist: artistNames,
+          trackAlbum: track?.album?.name ?? null,
         });
-        if (cancelled) return;
-        if (!transfer.ok && transfer.status !== 204) {
-          const details = await transfer.json().catch(() => null);
-          console.warn('[Spotify Web Player] transfer failed', transfer.status, details);
-        }
-
-        // Play the requested track, if the listener actually wants it playing
-        // right now. startPlaybackOnce is what keeps a re-run of this effect
-        // from replaying a track that is already partway through.
-        if (shouldAutoplayRef.current) {
-          await startPlaybackOnce(token, deviceId);
-          if (cancelled) return;
-        }
-
-        // Poll playback state for seekbar sync.
-        if (pollRef.current == null) {
-          pollRef.current = window.setInterval(async () => {
-            const player = playerRef.current;
-            if (!player) return;
-            const state = await player.getCurrentState().catch(() => null);
-            if (!state) return;
-            const track = state.track_window?.current_track;
-            // The device keeps reporting the OUTGOING track for a moment
-            // after a switch - the /play PUT that actually changes it is a
-            // real network round trip, not instant. Relaying that here
-            // overwrote the just-set new title/artist/position with the
-            // track being replaced, which is what made switching songs look
-            // like it "jumped back" to whatever was playing before.
-            //
-            // Two ways this guard must NOT hold: Spotify relinks a track that
-            // isn't available in the listener's market, and then reports the
-            // substitute's id in `id` with the requested one in `linked_from`;
-            // and the device may simply never land on the requested track.
-            // Either way an unbounded guard drops every poll tick, so the
-            // seekbar, duration and play state freeze while audio plays on.
-            const requestedId = lastTrackIdRef.current;
-            const isRequestedTrack =
-              !track?.id || !requestedId || track.id === requestedId || track.linked_from?.id === requestedId;
-            const stillSwitching = Date.now() - lastTrackRequestedAtRef.current < TRACK_SWITCH_GRACE_MS;
-            if (!isRequestedTrack && stillSwitching) return;
-            const artistNames = Array.isArray(track?.artists)
-              ? track.artists.map((a: any) => a?.name).filter(Boolean).join(', ')
-              : null;
-            updatePlaybackState({
-              positionMs: state.position ?? 0,
-              durationMs: state.duration ?? 0,
-              isPlaying: !state.paused,
-              trackTitle: track?.name ?? null,
-              trackArtist: artistNames,
-              trackAlbum: track?.album?.name ?? null,
-            });
-          }, 500) as unknown as number;
-        }
-      } catch (e) {
-        if (cancelled) return;
-        console.error('[Spotify Web Player] setup failed', e);
-        setError('Spotify full playback failed to start. Using preview mode.');
+      } finally {
+        polling = false;
       }
-    };
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [session, updatePlaybackState]);
 
-    void start();
-
-    return () => {
-      cancelled = true;
-    };
-    // Deliberately narrow: only a different track, a new play request, a
-    // different signed-in user, or a provider switch is a reason to tear down
-    // and set the SDK up again. Mute/seek/isPlaying are read from the refs
-    // above instead - see the comment where they're declared. `user` is keyed
-    // by id rather than by object identity so a background token refresh,
-    // which hands back an equal-but-new User object, doesn't restart playback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playRequestId, provider, providerTrackId, uri, user?.id, updatePlaybackState, startPlaybackOnce]);
-
-  // A play press that arrived before the device was ready, and the case of a
-  // track opened paused. ProviderControls.play() calls player.resume(), which
-  // does nothing on a device that has never been handed this track, and the
-  // setup effect above deliberately no longer re-runs when shouldAutoplay
-  // flips (that re-run WAS the restart loop). So the first real start for a
-  // given play request lands here instead - once, behind the same
-  // startedPlayKeyRef, and only while the listener still wants it playing.
+  // A start position that arrives without a start to carry it (opened paused,
+  // or a seek while playing). While a start IS in flight it carries the
+  // position itself, and seeking the device first would move whatever it is
+  // still playing from before.
   useEffect(() => {
-    if (provider !== 'spotify' || !providerTrackId || !uri || !user) return;
-    if (isTestEnv) return;
-    if (!shouldAutoplay || !ready) return;
-    const deviceId = deviceIdRef.current;
-    if (!deviceId) return;
-
-    let cancelled = false;
-    void (async () => {
-      const token = await getValidAccessToken(user.id);
-      if (cancelled || !token) return;
-      await startPlaybackOnce(token, deviceId);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [provider, providerTrackId, uri, user, shouldAutoplay, ready, startPlaybackOnce]);
-
-  useEffect(() => {
-    if (provider !== 'spotify') return;
-    if (seekToSec == null) return;
-    // If we're in full playback mode, ProviderControls will handle seek; this is just belt-and-suspenders.
-    const player = playerRef.current;
-    if (player) {
-      void player.seek(Math.max(0, seekToSec * 1000));
-    }
+    if (provider !== 'spotify' || seekToSec == null) return;
+    if (startingKeyRef.current) return;
+    const active = sessionRef.current;
+    if (active) void active.seek(seekToSec * 1000);
     clearSeek();
   }, [provider, seekToSec, clearSeek]);
 
-  useEffect(() => {
-    return () => {
-      if (pollRef.current != null) {
-        window.clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      try {
-        playerRef.current?.disconnect();
-      } catch {
-        // ignore
-      }
-      playerRef.current = null;
-      deviceIdRef.current = null;
-    };
-  }, []);
+  // Leaving with a start unconfirmed (dropped to the embed, provider switched)
+  // must not leave the "starting" flag set for whatever plays next.
+  useEffect(
+    () => () => {
+      if (startingKeyRef.current) updatePlaybackState({ isStarting: false });
+    },
+    [updatePlaybackState]
+  );
 
   if (provider !== 'spotify' || !providerTrackId) return null;
 
@@ -591,9 +406,8 @@ export function SpotifyWebPlayer({ providerTrackId, autoplay, onFallback }: Spot
       {autoplayBlocked ? (
         <div className="text-[11px] text-white/70">Tap anywhere to start playback (your browser blocked autoplay).</div>
       ) : (
-        !ready && <div className="text-[11px] text-white/50">Starting Spotify playback…</div>
+        isStarting && <div className="text-[11px] text-white/50">Starting Spotify playback…</div>
       )}
     </div>
   );
 }
-

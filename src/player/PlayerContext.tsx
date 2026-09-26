@@ -34,6 +34,13 @@ export interface PlayerState {
   autoplaySpotify: boolean;
   autoplayYoutube: boolean;
   isPlaying: boolean;
+  /** A start has been asked for and the provider has not yet confirmed audio.
+   *  `isPlaying` is optimistic (true the instant a track is opened), so it cannot
+   *  tell "starting" from "playing" - this can. Set by openPlayer, cleared by the
+   *  Spotify player once the device is really playing or the start failed, and by
+   *  a backstop timer so a provider that never reports back cannot leave a
+   *  spinner on screen. */
+  isStarting: boolean;
   isMinimized: boolean;
   isMini: boolean;
   isCinema: boolean;
@@ -109,7 +116,7 @@ interface PlayerContextValue extends PlayerState {
   readonly isHidden: boolean;
   toggleHidden: () => void;
   registerProviderControls: (provider: MusicProvider, controls: ProviderControls) => void;
-  updatePlaybackState: (updates: Partial<Pick<PlayerState, 'positionMs' | 'durationMs' | 'isPlaying' | 'volume' | 'isMuted' | 'trackTitle' | 'trackArtist' | 'trackAlbum' | 'lastKnownTitle' | 'lastKnownArtist' | 'lastKnownAlbum'>>) => void;
+  updatePlaybackState: (updates: Partial<Pick<PlayerState, 'positionMs' | 'durationMs' | 'isPlaying' | 'isStarting' | 'volume' | 'isMuted' | 'trackTitle' | 'trackArtist' | 'trackAlbum' | 'lastKnownTitle' | 'lastKnownArtist' | 'lastKnownAlbum'>>) => void;
   enqueueNext: (track: import('@/types').Track) => void;
   enqueueLater: (track: import('@/types').Track) => void;
   addToQueue: (track: import('@/types').Track) => void;
@@ -130,6 +137,10 @@ const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 /** Starting volume, and the level restored when unmuting from silence. */
 const DEFAULT_VOLUME = 0.7;
+
+/** Longest an unconfirmed start may show as "starting". Longer than the Spotify
+ *  player's own retry budget, so it only ever fires when that player is gone. */
+const STARTING_BACKSTOP_MS = 30_000;
 
 const dedupeArtists = (artist: string | null) => {
   if (!artist) return null;
@@ -229,6 +240,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     autoplaySpotify: false,
     autoplayYoutube: false,
     isPlaying: false,
+    isStarting: false,
     isMinimized: false,
     isMini: false,
     isCinema: false,
@@ -432,6 +444,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return {
           ...prev,
           isPlaying: false,
+          isStarting: false,
           autoplaySpotify: false,
           autoplayYoutube: false,
         };
@@ -456,7 +469,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     controls.setMute?.(mutedRef.current);
   }, []);
 
-  const updatePlaybackState = useCallback((updates: Partial<Pick<PlayerState, 'positionMs' | 'durationMs' | 'isPlaying' | 'volume' | 'isMuted' | 'trackTitle' | 'trackArtist' | 'trackAlbum' | 'lastKnownTitle' | 'lastKnownArtist' | 'lastKnownAlbum'>>) => {
+  const updatePlaybackState = useCallback((updates: Partial<Pick<PlayerState, 'positionMs' | 'durationMs' | 'isPlaying' | 'isStarting' | 'volume' | 'isMuted' | 'trackTitle' | 'trackArtist' | 'trackAlbum' | 'lastKnownTitle' | 'lastKnownArtist' | 'lastKnownAlbum'>>) => {
     setState((prev) => {
       const next: PlayerState = { ...prev };
 
@@ -466,6 +479,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }
       if (updates.durationMs !== undefined) next.durationMs = Math.max(updates.durationMs, 0);
       if (updates.isPlaying !== undefined) next.isPlaying = updates.isPlaying;
+      if (updates.isStarting !== undefined) next.isStarting = updates.isStarting;
       if (updates.volume !== undefined) next.volume = clamp01(updates.volume);
       if (updates.isMuted !== undefined) next.isMuted = updates.isMuted;
 
@@ -507,8 +521,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // only ever fills the gaps between reports rather than competing with them.
   // Ticking at 250ms keeps each step inside useAnimatedSeekbar's re-anchor
   // tolerance, so filling those gaps cannot make the bar stutter.
+  //
+  // It holds still while a start is unconfirmed (isStarting): isPlaying is
+  // already true then, so the bar used to advance for seconds over a device that
+  // had not begun, which read as "playing, but no sound".
   useEffect(() => {
-    if (!state.isPlaying || !state.provider || !state.trackId) return;
+    if (!state.isPlaying || state.isStarting || !state.provider || !state.trackId) return;
     let last = Date.now();
     const id = window.setInterval(() => {
       const now = Date.now();
@@ -525,7 +543,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       });
     }, 250);
     return () => window.clearInterval(id);
-  }, [state.isPlaying, state.provider, state.trackId]);
+  }, [state.isPlaying, state.isStarting, state.provider, state.trackId]);
+
+  // Backstop for isStarting. The provider that owns a start is the one that
+  // clears it; if that provider never reports back (unmounted, crashed, or a
+  // path that has no confirmation at all) the flag would otherwise sit on
+  // forever and so would every spinner reading it. Keyed on playRequestId so a
+  // newer request gets its own full window.
+  useEffect(() => {
+    if (!state.isStarting) return;
+    const id = window.setTimeout(() => {
+      setState((prev) => (prev.isStarting ? { ...prev, isStarting: false } : prev));
+    }, STARTING_BACKSTOP_MS);
+    return () => window.clearTimeout(id);
+  }, [state.isStarting, state.playRequestId]);
 
   const setMinimized = useCallback((value: boolean) => {
     setState((prev) => ({ ...prev, isMinimized: value }));
@@ -735,12 +766,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           updates.autoplaySpotify = true;
           updates.youtubeOpen = false;
           updates.autoplayYoutube = false;
+          updates.isStarting = true;
         } else {
           updates.youtubeOpen = true;
           updates.youtubeTrackId = providerTrackId ?? prev.youtubeTrackId;
           updates.autoplayYoutube = true;
           updates.spotifyOpen = false;
           updates.autoplaySpotify = false;
+          updates.isStarting = false;
         }
 
         updates.isPlaying = true;
@@ -768,7 +801,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (active) {
       providerControlsRef.current[active]?.pause?.();
     }
-    setState((prev) => ({ ...prev, isPlaying: false, autoplaySpotify: false, autoplayYoutube: false }));
+    setState((prev) => ({ ...prev, isPlaying: false, isStarting: false, autoplaySpotify: false, autoplayYoutube: false }));
   }, []);
 
   const stop = useCallback(() => {
@@ -778,6 +811,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setState((prev) => ({
         ...prev,
         isPlaying: false,
+        isStarting: false,
         spotifyOpen: false,
         youtubeOpen: false,
         spotifyTrackId: null,
@@ -859,6 +893,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           isMini: false,
           isCinema: false,
           isPlaying: payload.autoplay ?? true,
+          isStarting: payload.provider === 'spotify' && (payload.autoplay ?? true),
           currentSectionId: isSameCanonical ? prev.currentSectionId : null,
           loopSectionId: isSameCanonical ? prev.loopSectionId : null,
           spotifyOpen: payload.provider === 'spotify',
@@ -904,6 +939,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         trackTitle: prev.trackTitle,
         trackArtist: prev.trackArtist,
         isPlaying: false,
+        isStarting: false,
         isMinimized: false,
         isMini: false,
         isCinema: false,
@@ -949,6 +985,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           isMini: false,
           isCinema: false,
           isPlaying: true,
+          isStarting: provider === 'spotify',
           isMuted: false,
           seekToSec: handoffStartSec,
           durationMs: 0,

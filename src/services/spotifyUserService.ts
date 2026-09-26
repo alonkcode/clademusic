@@ -129,27 +129,31 @@ export async function getSpotifyConnectionStatus(userId: string): Promise<Spotif
   const accessToken = await getValidAccessToken(userId);
   if (!accessToken) return 'disconnected';
 
-  const fromResponse = (res: Response): SpotifyConnectionStatus =>
-    res.ok ? 'connected' : res.status === 403 ? 'blocked' : 'disconnected';
+  // A rate limit, a Spotify outage or a dropped connection says nothing about
+  // whether the account is connected. Reporting 'disconnected' for those was
+  // cached for minutes by React Query, and the player treats "not connected"
+  // as "use the free preview embed and offer Reconnect" - so one bad request
+  // silently downgraded a working Premium session. Throwing instead makes the
+  // query retry, and keeps the last known status if the retries fail too.
+  const isTransient = (res: Response) => res.status === 429 || res.status >= 500;
+  const fromResponse = (res: Response): SpotifyConnectionStatus => {
+    if (isTransient(res)) throw new Error(`Spotify /me answered ${res.status}`);
+    return res.ok ? 'connected' : res.status === 403 ? 'blocked' : 'disconnected';
+  };
 
-  try {
-    const res = await fetch(`${SPOTIFY_API_BASE}/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+  const res = await fetch(`${SPOTIFY_API_BASE}/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-    if (res.status !== 401) return fromResponse(res);
+  if (res.status !== 401) return fromResponse(res);
 
-    const creds = await getSpotifyCredentials(userId);
-    const refreshed = creds?.refresh_token ? await refreshSpotifyToken(userId, creds.refresh_token) : null;
-    if (!refreshed) return 'disconnected';
-    const retry = await fetch(`${SPOTIFY_API_BASE}/me`, {
-      headers: { Authorization: `Bearer ${refreshed}` },
-    });
-    return fromResponse(retry);
-  } catch (err) {
-    console.warn('[Spotify] connection validation failed', err);
-    return 'disconnected';
-  }
+  const creds = await getSpotifyCredentials(userId);
+  const refreshed = creds?.refresh_token ? await refreshSpotifyToken(userId, creds.refresh_token) : null;
+  if (!refreshed) return 'disconnected';
+  const retry = await fetch(`${SPOTIFY_API_BASE}/me`, {
+    headers: { Authorization: `Bearer ${refreshed}` },
+  });
+  return fromResponse(retry);
 }
 
 /**

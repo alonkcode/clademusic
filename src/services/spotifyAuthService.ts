@@ -206,6 +206,18 @@ export async function refreshSpotifyToken(
 }
 
 /**
+ * Refresh the access token now, even though the cached one still looks valid.
+ * For when Spotify itself has just rejected it (401) - clock skew or a revoked
+ * grant make the stored expiry unreliable, and `getValidAccessToken` would hand
+ * the same rejected token straight back.
+ */
+export async function forceRefreshAccessToken(userId: string): Promise<string | null> {
+  const credentials = await getSpotifyCredentials(userId, { fresh: true });
+  if (!credentials?.refresh_token) return null;
+  return refreshSpotifyToken(userId, credentials.refresh_token);
+}
+
+/**
  * Get valid access token, refreshing if needed
  */
 export async function getValidAccessToken(userId: string): Promise<string | null> {

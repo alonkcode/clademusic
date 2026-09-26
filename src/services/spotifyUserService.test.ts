@@ -41,17 +41,35 @@ describe('getSpotifyConnectionStatus', () => {
     expect(await getSpotifyConnectionStatus('u1')).toBe('blocked');
   });
 
-  it('is disconnected for other failures', async () => {
-    fetchMock.mockResolvedValue(res(500));
+  it('is disconnected for a definite refusal such as 404', async () => {
+    fetchMock.mockResolvedValue(res(404));
 
     expect(await getSpotifyConnectionStatus('u1')).toBe('disconnected');
   });
 
-  it('is disconnected when the request itself throws', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  // Transient failures must not be reported as a disconnection: the player
+  // reads that as "drop to the free preview and show Reconnect", and React
+  // Query would cache the wrong answer. Throwing lets it retry and keep the
+  // last known status.
+  it.each([429, 500, 502, 503])('throws instead of reporting disconnected when /me answers %i', async (status) => {
+    fetchMock.mockResolvedValue(res(status));
+
+    await expect(getSpotifyConnectionStatus('u1')).rejects.toThrow(String(status));
+  });
+
+  it('throws instead of reporting disconnected when the request itself fails', async () => {
     fetchMock.mockRejectedValue(new Error('offline'));
 
-    expect(await getSpotifyConnectionStatus('u1')).toBe('disconnected');
+    await expect(getSpotifyConnectionStatus('u1')).rejects.toThrow('offline');
+  });
+
+  it('throws when the retry after a token refresh is itself rate limited', async () => {
+    fetchMock.mockResolvedValueOnce(res(401));
+    vi.mocked(getSpotifyCredentials).mockResolvedValue({ refresh_token: 'r1' } as never);
+    vi.mocked(refreshSpotifyToken).mockResolvedValue('token-2');
+    fetchMock.mockResolvedValueOnce(res(429));
+
+    await expect(getSpotifyConnectionStatus('u1')).rejects.toThrow('429');
   });
 
   describe('expired token (401)', () => {

@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { Loader2, Music } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TrackProviderInfo, getProviderLinks } from '@/lib/providers';
@@ -40,6 +40,28 @@ const YouTubeIcon = ({ className }: { className?: string }) => (
 
 let latestQuickStreamClick = 0;
 
+/** How long a click may show as "starting" without the player taking it up. */
+const CLICK_PENDING_MAX_MS = 8_000;
+
+/** Three bars that bounce while a track is really playing. Holds still for
+ *  listeners who ask for reduced motion. */
+const EqualizerIcon = ({ className }: { className?: string }) => {
+  const reduceMotion = useReducedMotion();
+  return (
+    <span className={cn('flex items-end justify-center gap-[2px]', className)} aria-hidden="true">
+      {[0, 0.25, 0.5].map((delay) => (
+        <motion.span
+          key={delay}
+          className="w-[3px] rounded-sm bg-current"
+          style={{ height: '100%', originY: 1 }}
+          animate={reduceMotion ? { scaleY: 0.7 } : { scaleY: [0.35, 1, 0.5, 0.9, 0.35] }}
+          transition={reduceMotion ? undefined : { duration: 1, repeat: Infinity, ease: 'easeInOut', delay }}
+        />
+      ))}
+    </span>
+  );
+};
+
 /**
  * Provider buttons for Spotify and YouTube.
  * Clickable buttons that trigger autoplay in the universal player.
@@ -55,13 +77,40 @@ export function QuickStreamButtons({
   const links = getProviderLinks(track);
   const spotifyLink = links.find((l) => l.provider === 'spotify');
   const youtubeLink = links.find((l) => l.provider === 'youtube');
-  const { openPlayer, positionMs, provider: currentProvider, canonicalTrackId: currentTrackId, trackId: currentProviderTrackId } = usePlayer();
-  const [spotifyStarting, setSpotifyStarting] = useState(false);
-  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {
+    openPlayer,
+    positionMs,
+    durationMs,
+    provider: currentProvider,
+    canonicalTrackId: currentTrackId,
+    trackId: currentProviderTrackId,
+    isPlaying,
+    isStarting,
+    playRequestId,
+  } = usePlayer();
+  // From the click until the player has taken the request up. After that the
+  // player's own isStarting says whether audio has actually begun; this only
+  // covers the gap before it (looking the track up, the queued open), so the
+  // button answers the press at once instead of sitting idle for a beat.
+  const [awaitingPlayer, setAwaitingPlayer] = useState(false);
+  const requestIdAtClickRef = useRef<number | undefined>(undefined);
+  const awaitingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopAwaiting = useCallback(() => {
+    if (awaitingTimerRef.current) clearTimeout(awaitingTimerRef.current);
+    awaitingTimerRef.current = null;
+    setAwaitingPlayer(false);
+  }, []);
 
   useEffect(() => () => {
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    if (awaitingTimerRef.current) clearTimeout(awaitingTimerRef.current);
   }, []);
+
+  // The player took the request up (openPlayer bumps the request id): from here
+  // isStarting is the truth, so hand over.
+  useEffect(() => {
+    if (awaitingPlayer && playRequestId !== requestIdAtClickRef.current) stopAwaiting();
+  }, [awaitingPlayer, playRequestId, stopAwaiting]);
 
   const normalizeSpotifyId = useCallback((raw?: string | null) => {
     if (!raw) return null;
@@ -104,6 +153,15 @@ export function QuickStreamButtons({
     || (currentProvider === 'youtube' && youtubeTrackId && currentProviderTrackId === youtubeTrackId);
   const currentPositionSec = isCurrentTrack && positionMs ? positionMs / 1000 : undefined;
 
+  // What THIS button's track is doing right now, as reported by the player.
+  const isSpotifyTrackCurrent =
+    currentProvider === 'spotify' && !!spotifyTrackId && currentProviderTrackId === spotifyTrackId;
+  const spotifyStarting = awaitingPlayer || (isSpotifyTrackCurrent && !!isStarting);
+  // "Playing" is only claimed once a device has confirmed it: durationMs is
+  // filled in from the device's own state, so it stays 0 on the guest embed,
+  // which cannot report back and so must not be shown as playing.
+  const spotifyPlaying = isSpotifyTrackCurrent && !!isPlaying && !isStarting && (durationMs ?? 0) > 0;
+
   const spotifyDeepLink = useMemo(
     () => (spotifyTrackId ? buildProviderDeepLink('spotify', spotifyTrackId) : null),
     [spotifyTrackId]
@@ -115,9 +173,15 @@ export function QuickStreamButtons({
 
   const handleSpotifyClick = useCallback(async () => {
     const clickGeneration = ++latestQuickStreamClick;
-    setSpotifyStarting(true);
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     setPreferredProvider('spotify');
+    // Already confirmed playing: nothing to start, and asking again would only
+    // re-buffer the song the listener is hearing.
+    if (spotifyPlaying) return;
+
+    requestIdAtClickRef.current = playRequestId;
+    setAwaitingPlayer(true);
+    if (awaitingTimerRef.current) clearTimeout(awaitingTimerRef.current);
+    awaitingTimerRef.current = setTimeout(() => setAwaitingPlayer(false), CLICK_PENDING_MAX_MS);
 
     // Same fallback YouTube has had: a card without a cached Spotify id - a
     // Last.fm scrobble that isn't in the catalog, say - is still playable, we
@@ -131,26 +195,26 @@ export function QuickStreamButtons({
     if (!resolvedId) {
       const query = [trackArtist, trackTitle].filter(Boolean).join(' ').trim();
       if (!query) {
-        setSpotifyStarting(false);
+        stopAwaiting();
         return;
       }
       try {
         const { tracks: found } = await searchSpotifyPublic(query, 1);
         if (clickGeneration !== latestQuickStreamClick) {
-          setSpotifyStarting(false);
+          stopAwaiting();
           return;
         }
         resolvedId = found[0]?.spotify_id ?? null;
       } catch (err) {
         console.warn('Spotify search failed; cannot play', err);
-        setSpotifyStarting(false);
+        stopAwaiting();
         toast.error('Spotify search failed. Please try again.');
         return;
       }
     }
 
     if (!resolvedId) {
-      setSpotifyStarting(false);
+      stopAwaiting();
       toast.error(`Couldn't find "${trackTitle ?? 'this track'}" on Spotify`);
       return;
     }
@@ -171,8 +235,17 @@ export function QuickStreamButtons({
       artist: trackArtist,
       startSec: currentPositionSec,
     });
-    feedbackTimerRef.current = setTimeout(() => setSpotifyStarting(false), 1200);
-  }, [canonicalTrackId, trackTitle, trackArtist, openPlayer, currentPositionSec, spotifyTrackId]);
+  }, [
+    canonicalTrackId,
+    trackTitle,
+    trackArtist,
+    openPlayer,
+    currentPositionSec,
+    spotifyTrackId,
+    spotifyPlaying,
+    playRequestId,
+    stopAwaiting,
+  ]);
 
   const handleYouTubeClick = useCallback(async () => {
     const clickGeneration = ++latestQuickStreamClick;
@@ -234,7 +307,7 @@ export function QuickStreamButtons({
     <div className={cn('flex items-center gap-2', className)}>
       <motion.button
         whileHover={{ scale: canFindSpotify ? 1.05 : 1 }}
-        whileTap={{ scale: canFindSpotify ? 0.97 : 1 }}
+        whileTap={{ scale: canFindSpotify ? 0.88 : 1 }}
         onMouseDown={(e) => {
           // Middle-click / cmd-click / ctrl-click opens provider page in a new tab.
           // Only possible with a known id - there is no deep link to a track
@@ -249,34 +322,64 @@ export function QuickStreamButtons({
         onClick={canFindSpotify ? handleSpotifyClick : undefined}
         data-provider="spotify"
         aria-busy={spotifyStarting}
+        data-state={spotifyStarting ? 'starting' : spotifyPlaying ? 'playing' : 'idle'}
         disabled={!canFindSpotify}
         className={cn(
           sizeClasses[size],
-          'rounded-full flex items-center justify-center transition-all',
+          'relative rounded-full flex items-center justify-center transition-all',
           canFindSpotify
             ? 'bg-gradient-to-br from-[#1DB954] to-[#1ed760] text-white shadow-lg hover:shadow-xl hover:from-[#1ed760] hover:to-[#1DB954] cursor-pointer'
             : 'bg-muted text-muted-foreground cursor-not-allowed opacity-60',
           currentProvider === 'spotify' && isCurrentTrack && 'ring-2 ring-white ring-offset-2 ring-offset-background',
-          spotifyStarting && 'scale-110 ring-4 ring-white ring-offset-2 ring-offset-background',
+          spotifyPlaying && 'shadow-[0_0_0_5px_rgba(29,185,84,0.35)]',
+          spotifyStarting && 'ring-4 ring-white ring-offset-2 ring-offset-background',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
         )}
-        title={spotifyStarting ? 'Opening Spotify…' : hasSpotify ? 'Play in Spotify' : canFindSpotify ? 'Find on Spotify' : 'Spotify unavailable'}
+        title={
+          spotifyStarting
+            ? 'Starting in Spotify…'
+            : spotifyPlaying
+              ? 'Playing in Spotify'
+              : hasSpotify
+                ? 'Play in Spotify'
+                : canFindSpotify
+                  ? 'Find on Spotify'
+                  : 'Spotify unavailable'
+        }
         aria-label={
           spotifyStarting
-            ? `Opening ${trackTitle} in Spotify`
-            : hasSpotify
+            ? `Starting ${trackTitle} in Spotify`
+            : spotifyPlaying
+              ? `${trackTitle} is playing in Spotify`
+              : hasSpotify
             ? `Play ${trackTitle} in Spotify`
             : canFindSpotify
               ? `Find ${trackTitle} on Spotify`
               : 'Spotify unavailable'
         }
       >
+        {/* A ring that expands and fades from the button: the press has visibly
+            landed. A separate element, so the spinner itself stays fully opaque
+            (pulsing the whole button dimmed it to a low-contrast grey). */}
+        {spotifyStarting && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-white/70 animate-ping motion-reduce:animate-none"
+          />
+        )}
         {spotifyStarting ? (
           <Loader2 className={cn(iconSizes[size], 'animate-spin')} aria-hidden="true" />
+        ) : spotifyPlaying ? (
+          <EqualizerIcon className={iconSizes[size]} />
         ) : (
           <SpotifyIcon className={iconSizes[size]} />
         )}
       </motion.button>
+      {/* Spoken, not shown: the button's own label changes too, but a screen
+          reader does not re-read a label that changes under focus. */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {spotifyStarting ? `Starting ${trackTitle} in Spotify` : spotifyPlaying ? `Now playing ${trackTitle}` : ''}
+      </span>
 
       <motion.button
         whileHover={{ scale: hasYouTube ? 1.05 : 1 }}

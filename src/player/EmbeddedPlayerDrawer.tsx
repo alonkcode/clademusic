@@ -17,6 +17,7 @@ import { shouldOfferAnalysis } from '@/hooks/useAnalyzeTrack';
 import { buildProviderDeepLink } from '@/player/universal/buildEmbedSrc';
 import { isTestEnv } from '@/lib/env';
 import { toast } from '@/hooks/use-toast';
+import { toast as sonnerToast } from 'sonner';
 import { providerMeta, formatTime } from './embeddedPlayer/constants';
 import { useAnimatedSeekbar } from './embeddedPlayer/useAnimatedSeekbar';
 import { usePlayerHarmony } from './embeddedPlayer/usePlayerHarmony';
@@ -52,6 +53,8 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     enterCinema,
     exitCinema,
     isPlaying,
+    isStarting,
+    updatePlaybackState,
     togglePlayPause,
     setVolumeLevel,
     toggleMute,
@@ -75,7 +78,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   } = usePlayer();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { data: isSpotifyConnected } = useSpotifyConnected();
+  const { data: isSpotifyConnected, isLoading: isConnectionLoading } = useSpotifyConnected();
   const { data: isSpotifyBlocked } = useSpotifyBlocked();
   const connectSpotify = useConnectSpotify();
   const { data: isAdmin } = useIsAdmin();
@@ -113,6 +116,17 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     setSpotifySdkFailed(false);
   }, [provider, trackId]);
   const useSpotifySdk = provider === 'spotify' && !!user && isSpotifyConnected === true && !spotifySdkFailed;
+
+  // Only the Web Playback SDK confirms that a start took, so it is the only path
+  // that ever clears isStarting. On any other path (guest, not connected,
+  // blocked, or dropped to the embed) nothing would, and the play button and the
+  // quicklink would spin until the context's backstop. Waits for the connection
+  // check to settle first: until it does the SDK simply has not mounted yet.
+  useEffect(() => {
+    if (provider === 'spotify' && isStarting && !useSpotifySdk && !isConnectionLoading) {
+      updatePlaybackState({ isStarting: false });
+    }
+  }, [provider, isStarting, useSpotifySdk, isConnectionLoading, updatePlaybackState]);
 
   const commitSeek = useCallback(
     (sec: number) => {
@@ -512,7 +526,18 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               <div className="mt-3">
                 <SpotifyWebPlayer
                   providerTrackId={trackId}
-                  autoplay={autoplay}
+                  // Deliberately no `autoplay` prop. It used to be passed
+                  // `isPlaying`, which is what this player reports back a few
+                  // times a second - so "should be playing" and "is playing"
+                  // were the same value, and the first real `paused` reading
+                  // from the device turned the recovery path off. SpotifyWebPlayer
+                  // already reads `autoplaySpotify` from the context, which is
+                  // the listener's intent and is kept correct by openPlayer and
+                  // togglePlayPause.
+                  // A start that did not take is not a reason to leave full
+                  // playback, so it gets a message rather than a fallback. Shown
+                  // here because the player itself lives in the collapsed panel.
+                  onNotice={(message) => sonnerToast(message, { id: 'spotify-playback-notice' })}
                   onFallback={(reason) => {
                     setSpotifySdkFailed(true);
                     const lower = reason.toLowerCase();
@@ -633,9 +658,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               onClick={togglePlayPause}
               className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full border-2 border-primary/70 bg-primary/20 text-primary transition hover:border-primary hover:bg-primary hover:text-white sm:h-10 sm:w-10"
               aria-label={isPlaying ? 'Pause' : 'Play'}
-              title={isPlaying ? 'Pause' : 'Play'}
+              aria-busy={isStarting || undefined}
+              title={isStarting ? 'Starting… (press to cancel)' : isPlaying ? 'Pause' : 'Play'}
             >
-              {isPlaying ? <Pause className="h-4 w-4 md:h-5 md:w-5" /> : <Play className="h-4 w-4 md:h-5 md:w-5" />}
+              {/* While a start is unconfirmed the button says so instead of
+                  claiming "playing" - that claim, followed a moment later by
+                  "paused", is what read as play flipping back to pause. */}
+              {isStarting ? (
+                <Loader2 className="h-4 w-4 animate-spin md:h-5 md:w-5" />
+              ) : isPlaying ? (
+                <Pause className="h-4 w-4 md:h-5 md:w-5" />
+              ) : (
+                <Play className="h-4 w-4 md:h-5 md:w-5" />
+              )}
             </button>
             <button
               type="button"
