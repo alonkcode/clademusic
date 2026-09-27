@@ -181,7 +181,7 @@ export default function FeedPage() {
       setAuthPromptOffset(0);
       return;
     }
-    const update = () => setAuthPromptOffset(authPromptEl.offsetHeight + 16 /* mb-4 */);
+    const update = () => setAuthPromptOffset(authPromptEl.offsetHeight + 16 /* mt-4 */);
     update();
     const observer = new ResizeObserver(update);
     observer.observe(authPromptEl);
@@ -333,7 +333,10 @@ export default function FeedPage() {
 
   if (authLoading || tracksLoading || recommendationsLoading) {
     return (
-      <div className="min-h-[100dvh] overflow-hidden bg-background">
+      // pt-[4.5rem] = the loaded feed's own offset (main pt-16 + card pt-2), so
+      // the title placeholder sits where the real title lands instead of at
+      // the top edge and then jumping down.
+      <div className="min-h-[100dvh] overflow-hidden bg-background pt-[4.5rem]">
         <FeedSkeleton />
         <BottomNav />
       </div>
@@ -439,53 +442,18 @@ export default function FeedPage() {
             own real height. pb-6 for breathing room above pb-24's player-bar
             clearance is kept; just the top half was the dead space. */}
         <ResponsiveContainer maxWidth="full" className="flex h-full min-h-0 flex-col pt-2 pb-14">
-          {/* The guest prompt sits above the card in normal flow, so its real
-              height comes out of the card's dvh budget below via
-              authPromptOffset (measured, not guessed) - it does push the
-              feed down, however the comment this replaced claimed otherwise.
-              Without that offset the card kept its usual full height on top
-              of the banner's, overflowing the viewport by the banner's
-              height and leaving a scroll that reached nothing but blank
-              space below the last row of controls. */}
-          {showAuthPrompt && !user && (
-            <div
-              ref={setAuthPromptEl}
-              className="mx-auto mb-4 w-full max-w-lg lg:max-w-2xl rounded-xl border border-border/60 bg-background/70 px-4 py-3 shadow-md backdrop-blur"
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">Exploring as a guest</p>
-                  <p className="text-xs text-muted-foreground">
-                    Browsing and playback stay open. Sign in to like, comment, follow and save.
-                  </p>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <Button size="sm" onClick={() => navigate('/auth')}>
-                    Sign in
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      enterGuestMode();
-                      setShowAuthPrompt(false);
-                    }}
-                  >
-                    Not now
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
           {/*
             Center-focused stage. Uses dvh so the card is not cut off by mobile
-            browser chrome, minus authPromptOffset so the guest banner above
+            browser chrome, minus authPromptOffset so the guest banner below
             (when shown) doesn't push this past the viewport, with a
             min-height floor so short landscape viewports scroll instead of
             squashing the card.
           */}
           <div
-            className="mx-auto min-h-0 w-full max-w-lg flex-1 lg:max-w-2xl"
+            // Clipped only while the guest prompt below is showing: on a short
+            // phone the card's content is taller than the space left for it,
+            // and unclipped it spilled over the prompt.
+            className={`mx-auto min-h-0 w-full max-w-lg flex-1 lg:max-w-2xl${authPromptEl ? ' overflow-hidden' : ''}`}
             style={{
               height: `calc(100dvh - 10rem - var(--clade-player-height, 0px) - ${authPromptOffset}px)`,
             }}
@@ -522,6 +490,43 @@ export default function FeedPage() {
               )}
             </AnimatePresence>
           </div>
+          {/* The guest prompt sits BELOW the card, in normal flow: above it, it
+              pushed the title down by its own height (~150px) and put a gap
+              between the header and the song. Its real height still comes
+              out of the card's dvh budget via authPromptOffset (measured,
+              not guessed) - without that the card kept its usual full height
+              on top of the banner's, overflowing the viewport and leaving a
+              scroll that reached nothing but blank space. */}
+          {showAuthPrompt && !user && (
+            <div
+              ref={setAuthPromptEl}
+              className="mx-auto mt-4 w-full max-w-lg lg:max-w-2xl rounded-xl border border-border/60 bg-background/70 px-4 py-3 shadow-md backdrop-blur"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">Exploring as a guest</p>
+                  <p className="text-xs text-muted-foreground">
+                    Browsing and playback stay open. Sign in to like, comment, follow and save.
+                  </p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" onClick={() => navigate('/auth')}>
+                    Sign in
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      enterGuestMode();
+                      setShowAuthPrompt(false);
+                    }}
+                  >
+                    Not now
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </ResponsiveContainer>
       </main>
 

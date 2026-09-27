@@ -9,7 +9,7 @@ export function FeedSkeleton() {
       </div>
 
       {/* Content */}
-      <div className="relative z-10 flex-1 flex flex-col justify-end p-6 pb-8 space-y-4">
+      <div className="relative z-10 flex-1 flex flex-col justify-start p-4 pb-5 space-y-4 sm:p-6 sm:pb-8">
         {/* Track info skeleton */}
         <div className="space-y-3">
           <motion.div

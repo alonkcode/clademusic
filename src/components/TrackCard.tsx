@@ -211,7 +211,10 @@ export function TrackCard({
       </div>
 
       {/* Content */}
-      <div className="relative z-10 flex-1 flex flex-col justify-end p-4 pb-5 space-y-3 sm:p-6 sm:pb-8 sm:space-y-4">
+      {/* justify-start, not -end: bottom-anchoring left a dead band of bare
+          cover art above the title whenever the content was shorter than the
+          card, and the title sat lower than the skeleton's did. */}
+      <div className="relative z-10 flex-1 flex flex-col justify-start p-4 pb-5 space-y-3 sm:p-6 sm:pb-8 sm:space-y-4">
         {/* Track info with menu */}
         <div className="space-y-1.5 sm:space-y-2">
           <div className="flex items-start justify-between gap-2">
