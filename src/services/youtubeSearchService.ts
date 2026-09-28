@@ -7,6 +7,7 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import type { Track } from '@/types';
 
 const YT_FUNCTION = 'search-youtube';
 
@@ -101,7 +102,7 @@ export interface VideoResult {
 /**
  * Fetch a single YouTube video by ID and return minimal metadata as a Track-like object
  */
-export async function getYouTubeVideo(videoId: string) {
+export async function getYouTubeVideo(videoId: string): Promise<Track | null> {
   try {
     const data = await invokeYouTube<YouTubeVideosResult>({
       endpoint: 'videos',

@@ -2,7 +2,8 @@ import { createContext, useContext, useMemo, useState, useCallback, useEffect, u
 import { recordPlayEvent, recordPlayHistory } from '@/api/playEvents';
 import { MusicProvider } from '@/types';
 import { getPreferredProvider } from '@/lib/preferences';
-import type { ProviderControls } from './providers/adapter';
+import type { ProviderControls, ProviderPlaybackUpdate } from './providers/adapter';
+import type { OpenPlayerIntent } from './controller/interfaces';
 import { focusUniversalPlayerFrame } from '@/player/universal/UniversalPlayerHost';
 import { preloadSpotifyIframeApi } from '@/services/spotifyIframeApi';
 import { isTestEnv } from '@/lib/env';
@@ -81,22 +82,9 @@ const stopActiveProvider = async (
   }
 };
 
-type OpenPlayerPayload = {
-  canonicalTrackId: string | null;
-  provider: MusicProvider;
-  providerTrackId: string | null;
-  title?: string;
-  artist?: string;
-  album?: string;
-  autoplay?: boolean;
-  context?: string;
-  /** Optional start time in seconds */
-  startSec?: number;
-};
-
 interface PlayerContextValue extends PlayerState {
   readonly isOpen: boolean;
-  openPlayer: (payload: OpenPlayerPayload) => void;
+  openPlayer: (payload: OpenPlayerIntent) => void;
   /** High-level play API: canonicalTrackId may be the app track id (optional), provider selects the provider, providerTrackId is the provider-specific id, startSec optional */
   play: (canonicalTrackId: string | null, provider: MusicProvider, providerTrackId?: string | null, startSec?: number) => void;
   pause: () => void;
@@ -126,7 +114,7 @@ interface PlayerContextValue extends PlayerState {
   readonly isHidden: boolean;
   toggleHidden: () => void;
   registerProviderControls: (provider: MusicProvider, controls: ProviderControls) => void;
-  updatePlaybackState: (updates: Partial<Pick<PlayerState, 'positionMs' | 'durationMs' | 'isPlaying' | 'isStarting' | 'volume' | 'isMuted' | 'trackTitle' | 'trackArtist' | 'trackAlbum' | 'lastKnownTitle' | 'lastKnownArtist' | 'lastKnownAlbum'>>) => void;
+  updatePlaybackState: (updates: ProviderPlaybackUpdate) => void;
   enqueueNext: (track: import('@/types').Track) => void;
   enqueueLater: (track: import('@/types').Track) => void;
   addToQueue: (track: import('@/types').Track) => void;
@@ -213,6 +201,26 @@ const pickProviderForTrack = (track: import('@/types').Track) => {
   return { provider: null, trackId: null };
 };
 
+/**
+ * The state after moving playback to `queue[index]`. Unchanged when there is no
+ * such entry, or it has no provider it can be played on.
+ */
+const selectQueueEntry = (prev: PlayerState, index: number): PlayerState => {
+  const track = prev.queue[index];
+  if (!track) return prev;
+  const choice = pickProviderForTrack(track);
+  if (!choice.provider || !choice.trackId) return prev;
+  return {
+    ...prev,
+    queueIndex: index,
+    canonicalTrackId: track.id,
+    provider: choice.provider,
+    trackId: choice.trackId,
+    spotifyOpen: choice.provider === 'spotify',
+    youtubeOpen: choice.provider === 'youtube',
+  };
+};
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   // Fetch Spotify's embed API as soon as the app starts, not on the first
   // Spotify click - see spotifyIframeApi.ts for why the timing matters for
@@ -234,7 +242,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     lastKnownAlbum: null,
     positionMs: 0,
     durationMs: 0,
-    volume: 0.7,
+    volume: DEFAULT_VOLUME,
     isMuted: false,
     spotifyOpen: false,
     youtubeOpen: false,
@@ -255,6 +263,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     queue: [],
     queueIndex: -1,
   });
+  // The latest committed state, for handlers that must read it without being
+  // re-created every time it changes.
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const providerControlsRef = useRef<Partial<Record<MusicProvider, ProviderControls>>>({});
   const activeProviderRef = useRef<MusicProvider | null>(null);
   const positionMsRef = useRef<number>(0);
@@ -388,61 +400,61 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Both toggles below command the provider, so they read the committed state
+  // through stateRef and set state with pure updaters. Sending the command from
+  // inside the updater instead ran it once per updater call, and React may call
+  // an updater more than once (StrictMode does, on purpose).
   const toggleMute = useCallback(() => {
-    setState((prev) => {
-      const nextMuted = !prev.isMuted;
-      // Unmuting at zero volume would stay silent and look like a dead button,
-      // so restore an audible level.
-      const nextVolume = !nextMuted && prev.volume === 0 ? DEFAULT_VOLUME : prev.volume;
+    const nextMuted = !mutedRef.current;
+    // Unmuting at zero volume would stay silent and look like a dead button,
+    // so restore an audible level.
+    const nextVolume = !nextMuted && volumeRef.current === 0 ? DEFAULT_VOLUME : volumeRef.current;
+    const volumeChanged = nextVolume !== volumeRef.current;
 
-      volumeRef.current = nextVolume;
-      mutedRef.current = nextMuted;
+    volumeRef.current = nextVolume;
+    mutedRef.current = nextMuted;
+    setState((prev) => ({ ...prev, isMuted: nextMuted, volume: nextVolume }));
 
-      const activeProvider = activeProviderRef.current ?? prev.provider;
-      if (activeProvider) {
-        const controls = providerControlsRef.current[activeProvider];
-        if (nextVolume !== prev.volume) controls?.setVolume?.(nextVolume);
-        controls?.setMute?.(nextMuted);
-      }
-      return { ...prev, isMuted: nextMuted, volume: nextVolume };
-    });
+    const activeProvider = activeProviderRef.current ?? stateRef.current.provider;
+    const controls = activeProvider ? providerControlsRef.current[activeProvider] : undefined;
+    if (volumeChanged) controls?.setVolume?.(nextVolume);
+    controls?.setMute?.(nextMuted);
   }, []);
 
   const togglePlayPause = useCallback(() => {
-    setState((prev) => {
-      const activeProvider = prev.provider;
-      // Nothing open at all - genuinely nothing to toggle.
-      if (!activeProvider) return prev;
+    const { provider: activeProvider, isPlaying, seekToSec } = stateRef.current;
+    // Nothing open at all - genuinely nothing to toggle.
+    if (!activeProvider) return;
 
-      const controls = providerControlsRef.current[activeProvider];
-      // The provider is still connecting (Spotify's SDK setup in particular
-      // is a multi-step async chain - load the SDK, get a token, create the
-      // device, wait for it to report ready - easily a second or more).
-      // Bailing out here entirely, as this used to, silently dropped the
-      // press: the button did nothing, with no error and no retry. State
-      // still updates below regardless of whether controls exist yet; each
-      // provider's own setup effect reads isPlaying/autoplay* once it
-      // finishes connecting and starts playback then, so a press made before
-      // "ready" is honored the moment it is, not lost.
-      if (prev.isPlaying) {
-        controls?.pause?.();
-        return {
-          ...prev,
-          isPlaying: false,
-          isStarting: false,
-          autoplaySpotify: false,
-          autoplayYoutube: false,
-        };
-      }
-
-      controls?.play?.(prev.seekToSec ?? null);
-      return {
+    const controls = providerControlsRef.current[activeProvider];
+    // The provider is still connecting (Spotify's SDK setup in particular
+    // is a multi-step async chain - load the SDK, get a token, create the
+    // device, wait for it to report ready - easily a second or more).
+    // Bailing out here entirely, as this used to, silently dropped the
+    // press: the button did nothing, with no error and no retry. State
+    // still updates below regardless of whether controls exist yet; each
+    // provider's own setup effect reads isPlaying/autoplay* once it
+    // finishes connecting and starts playback then, so a press made before
+    // "ready" is honored the moment it is, not lost.
+    if (isPlaying) {
+      controls?.pause?.();
+      setState((prev) => ({
         ...prev,
-        isPlaying: true,
-        autoplaySpotify: activeProvider === 'spotify',
-        autoplayYoutube: activeProvider === 'youtube',
-      };
-    });
+        isPlaying: false,
+        isStarting: false,
+        autoplaySpotify: false,
+        autoplayYoutube: false,
+      }));
+      return;
+    }
+
+    controls?.play?.(seekToSec ?? null);
+    setState((prev) => ({
+      ...prev,
+      isPlaying: true,
+      autoplaySpotify: activeProvider === 'spotify',
+      autoplayYoutube: activeProvider === 'youtube',
+    }));
   }, []);
 
   const registerProviderControls = useCallback((provider: MusicProvider, controls: ProviderControls) => {
@@ -454,7 +466,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     controls.setMute?.(mutedRef.current);
   }, []);
 
-  const updatePlaybackState = useCallback((updates: Partial<Pick<PlayerState, 'positionMs' | 'durationMs' | 'isPlaying' | 'isStarting' | 'volume' | 'isMuted' | 'trackTitle' | 'trackArtist' | 'trackAlbum' | 'lastKnownTitle' | 'lastKnownArtist' | 'lastKnownAlbum'>>) => {
+  const updatePlaybackState = useCallback((updates: ProviderPlaybackUpdate) => {
     setState((prev) => {
       const next: PlayerState = { ...prev };
 
@@ -586,21 +598,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [enqueueLater]);
 
   const playFromQueue = useCallback((index: number) => {
-    setState((prev) => {
-      const track = prev.queue[index];
-      if (!track) return prev;
-      const choice = pickProviderForTrack(track);
-      if (!choice.provider || !choice.trackId) return prev;
-      return {
-        ...prev,
-        queueIndex: index,
-        canonicalTrackId: track.id,
-        provider: choice.provider,
-        trackId: choice.trackId,
-        spotifyOpen: choice.provider === 'spotify',
-        youtubeOpen: choice.provider === 'youtube',
-      };
-    });
+    setState((prev) => selectQueueEntry(prev, index));
   }, []);
 
   const removeFromQueue = useCallback((index: number) => {
@@ -626,46 +624,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const nextTrack = useCallback(() => {
     setState((prev) => {
       if (prev.queue.length === 0) return prev;
-      
       // Loop to first track if at the end
-      const nextIndex = wrappedNextIndex(prev.queue.length, prev.queueIndex);
-      const track = prev.queue[nextIndex];
-      if (!track) return prev;
-      const choice = pickProviderForTrack(track);
-      if (!choice.provider || !choice.trackId) return prev;
-
-      return {
-        ...prev,
-        queueIndex: nextIndex,
-        canonicalTrackId: track.id,
-        provider: choice.provider,
-        trackId: choice.trackId,
-        spotifyOpen: choice.provider === 'spotify',
-        youtubeOpen: choice.provider === 'youtube',
-      };
+      return selectQueueEntry(prev, wrappedNextIndex(prev.queue.length, prev.queueIndex));
     });
   }, []);
 
   const previousTrack = useCallback(() => {
     setState((prev) => {
       if (prev.queue.length === 0) return prev;
-      
       // Loop to last track if at the beginning
-      const prevIndex = wrappedPreviousIndex(prev.queue.length, prev.queueIndex);
-      const track = prev.queue[prevIndex];
-      if (!track) return prev;
-      const choice = pickProviderForTrack(track);
-      if (!choice.provider || !choice.trackId) return prev;
-
-      return {
-        ...prev,
-        queueIndex: prevIndex,
-        canonicalTrackId: track.id,
-        provider: choice.provider,
-        trackId: choice.trackId,
-        spotifyOpen: choice.provider === 'spotify',
-        youtubeOpen: choice.provider === 'youtube',
-      };
+      return selectQueueEntry(prev, wrappedPreviousIndex(prev.queue.length, prev.queueIndex));
     });
   }, []);
 
@@ -772,7 +740,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, [enqueuePlayerOp]);
 
-  const openPlayer = useCallback((payload: OpenPlayerPayload) => {
+  const openPlayer = useCallback((payload: OpenPlayerIntent) => {
     // Capture a user-gesture focus on the universal player iframe to improve autoplay behavior
     // for providers that allow it (e.g., YouTube embed). Safe no-op if iframe isn't mounted yet.
     focusUniversalPlayerFrame();

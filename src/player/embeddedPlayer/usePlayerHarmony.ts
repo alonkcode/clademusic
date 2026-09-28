@@ -27,6 +27,10 @@ export interface PlayerHarmony {
   catalogDurationMs: number | undefined;
 }
 
+/** A catalog tempo is only usable when it is a finite, positive number. */
+const isUsableTempo = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+
 /**
  * Section, key/mode/progression/tempo data for whichever track is loaded -
  * feeds both HarmonicHUD (the rotating chord readout) and the section-jump
@@ -57,8 +61,7 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
   // the chord/section grid that IS stored. Only computed when the catalog has
   // no real value - a stored tempo is always preferred over an inferred one.
   const estimatedBpm = useMemo(() => {
-    const known = trackQuery.data?.tempo;
-    if (typeof known === 'number' && Number.isFinite(known) && known > 0) return null;
+    if (isUsableTempo(trackQuery.data?.tempo)) return null;
     return estimateTempoFromSections(sections);
   }, [sections, trackQuery.data?.tempo]);
 
@@ -66,22 +69,23 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
     const track = trackQuery.data ?? null;
     const fingerprint = fingerprintQuery.data ?? null;
 
-    const detectedKey = (fingerprint as any)?.detected_key ?? (track as any)?.detected_key ?? null;
-    const detectedMode = (fingerprint as any)?.detected_mode ?? (track as any)?.detected_mode ?? null;
-    const cadenceType = (fingerprint as any)?.cadence_type ?? (track as any)?.cadence_type ?? null;
+    const detectedKey = (fingerprint as any)?.detected_key ?? track?.detected_key ?? null;
+    const detectedMode = (fingerprint as any)?.detected_mode ?? track?.detected_mode ?? null;
+    const cadenceType = (fingerprint as any)?.cadence_type ?? track?.cadence_type ?? null;
     const confidenceScore =
       typeof (fingerprint as any)?.confidence_score === 'number'
         ? (fingerprint as any).confidence_score
-        : typeof (track as any)?.confidence_score === 'number'
-          ? (track as any).confidence_score
+        : typeof track?.confidence_score === 'number'
+          ? track.confidence_score
           : null;
 
-    const fromTrack: string[] = Array.isArray((track as any)?.progression_roman) ? (track as any).progression_roman : [];
+    const fromTrack: string[] = Array.isArray(track?.progression_roman) ? track.progression_roman : [];
     const fromFingerprint: string[] = Array.isArray((fingerprint as any)?.roman_progression)
       ? (fingerprint as any).roman_progression.map((c: any) => c?.numeral).filter(Boolean)
       : [];
 
     const progression = fromTrack.length ? fromTrack : fromFingerprint;
+    const catalogBpm = isUsableTempo(track?.tempo) ? track.tempo : undefined;
 
     return {
       detectedKey,
@@ -89,14 +93,10 @@ export function usePlayerHarmony(canonicalTrackId: string | null | undefined) {
       cadenceType,
       confidenceScore,
       progression,
-      bpm:
-        typeof track?.tempo === 'number' && Number.isFinite(track.tempo) && track.tempo > 0
-          ? track.tempo
-          : (estimatedBpm?.bpm ?? undefined),
-      bpmIsEstimated: !(typeof track?.tempo === 'number' && Number.isFinite(track.tempo) && track.tempo > 0)
-        && estimatedBpm != null,
+      bpm: catalogBpm ?? estimatedBpm?.bpm ?? undefined,
+      bpmIsEstimated: catalogBpm === undefined && estimatedBpm != null,
       loopLengthBars: typeof track?.loop_length_bars === 'number' ? track.loop_length_bars : undefined,
-      catalogDurationMs: typeof (track as any)?.duration_ms === 'number' ? (track as any).duration_ms : undefined,
+      catalogDurationMs: typeof track?.duration_ms === 'number' ? track.duration_ms : undefined,
     };
   }, [fingerprintQuery.data, trackQuery.data, estimatedBpm]);
 

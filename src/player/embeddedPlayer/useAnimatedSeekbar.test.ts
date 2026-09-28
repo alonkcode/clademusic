@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useAnimatedSeekbar } from './useAnimatedSeekbar';
+import { useAnimatedSeekbar, type SeekIntent } from './useAnimatedSeekbar';
 
 /**
  * Regression: dragging the volume slider made the seekbar flick to 0:00 and
@@ -84,5 +84,116 @@ describe('useAnimatedSeekbar', () => {
     const { result, rerender } = setup(30_000);
     rerender({ positionMs: Number.NaN });
     expect(result.current).toBe(30_000);
+  });
+});
+
+/**
+ * Regression: a single click on the seekbar did not stick. The click seeks the
+ * provider and optimistically moves the player's position to the target, but
+ * the provider keeps reporting where it WAS for a moment (a poll already in
+ * flight, an infoDelivery already on the wire). The bar treated the first
+ * backward reading as suspect and the stale ones as truth, so the thumb went
+ * back to the old spot after the click while the audio had already moved.
+ */
+describe('useAnimatedSeekbar - a seek made by the listener', () => {
+  let now = 0;
+  const clock = vi.spyOn(performance, 'now');
+  const advance = (ms: number) => {
+    now += ms;
+  };
+
+  function setupSeek(initialMs: number, isPlaying = true) {
+    now = 1_000;
+    clock.mockImplementation(() => now);
+    return renderHook(
+      ({ positionMs, seek }: { positionMs: number; seek: SeekIntent | null }) =>
+        useAnimatedSeekbar(positionMs, DURATION, isPlaying, seek),
+      { initialProps: { positionMs: initialMs, seek: null as SeekIntent | null } }
+    );
+  }
+
+  afterEach(() => {
+    clock.mockReset();
+  });
+
+  it('moves the bar to a backward seek at once, without waiting for a second reading', () => {
+    const { result, rerender } = setupSeek(120_000);
+    // What the click does: seek intent plus the optimistic position, one commit.
+    rerender({ positionMs: 40_000, seek: { ms: 40_000 } });
+    expect(result.current).toBe(40_000);
+  });
+
+  it('moves the bar to a forward seek at once', () => {
+    const { result, rerender } = setupSeek(20_000);
+    rerender({ positionMs: 158_000, seek: { ms: 158_000 } });
+    expect(result.current).toBe(158_000);
+  });
+
+  it('ignores the provider still reporting the old position after a backward seek', () => {
+    const { result, rerender } = setupSeek(120_000);
+    const seek = { ms: 40_000 };
+    rerender({ positionMs: 40_000, seek });
+    advance(250);
+    rerender({ positionMs: 120_250, seek }); // stale
+    advance(250);
+    rerender({ positionMs: 120_500, seek }); // stale again - two agreeing readings used to be believed
+    expect(result.current).toBe(40_000);
+  });
+
+  it('ignores the provider still reporting the old position after a forward seek', () => {
+    const { result, rerender } = setupSeek(20_000);
+    const seek = { ms: 158_000 };
+    rerender({ positionMs: 158_000, seek });
+    advance(250);
+    rerender({ positionMs: 20_250, seek });
+    advance(250);
+    rerender({ positionMs: 20_500, seek });
+    expect(result.current).toBe(158_000);
+  });
+
+  it('follows the provider once it reports the new position', () => {
+    const { result, rerender } = setupSeek(120_000);
+    const seek = { ms: 40_000 };
+    rerender({ positionMs: 40_000, seek });
+    advance(250);
+    rerender({ positionMs: 120_250, seek }); // stale, dropped
+    advance(250);
+    rerender({ positionMs: 41_500, seek }); // provider caught up, a bit ahead of the bar
+    expect(result.current).toBe(41_500);
+  });
+
+  it('keeps the seek while paused, and ignores a stale reading then too', () => {
+    const { result, rerender } = setupSeek(120_000, false);
+    const seek = { ms: 40_000 };
+    rerender({ positionMs: 40_000, seek });
+    expect(result.current).toBe(40_000);
+    advance(250);
+    rerender({ positionMs: 120_000, seek });
+    expect(result.current).toBe(40_000);
+  });
+
+  it('believes the provider again once the seek window has passed', () => {
+    const { result, rerender } = setupSeek(120_000);
+    const seek = { ms: 40_000 };
+    rerender({ positionMs: 40_000, seek });
+    advance(3_500); // provider never acted on the seek
+    rerender({ positionMs: 120_000, seek });
+    expect(result.current).toBe(120_000);
+  });
+
+  it('treats a second seek to the same spot as a new seek', () => {
+    const { result, rerender } = setupSeek(120_000);
+    const first = { ms: 40_000 };
+    rerender({ positionMs: 40_000, seek: first });
+    advance(3_500);
+    rerender({ positionMs: 120_000, seek: first }); // window over, provider believed
+    expect(result.current).toBe(120_000);
+
+    const again = { ms: 40_000 }; // the listener clicks the same spot again
+    rerender({ positionMs: 40_000, seek: again });
+    expect(result.current).toBe(40_000);
+    advance(250);
+    rerender({ positionMs: 120_250, seek: again }); // stale
+    expect(result.current).toBe(40_000);
   });
 });

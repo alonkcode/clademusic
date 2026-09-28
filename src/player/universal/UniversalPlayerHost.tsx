@@ -94,7 +94,9 @@ export function UniversalPlayerHost({ request, className, onEmbedError }: Univer
   }
   const { autoplay: loadAutoplay, startSec: loadStartSec } = loadIntentRef.current;
 
-  const [embedError, setEmbedError] = useState<EmbedError | null>(null);
+  // Only the code is kept locally: the message is derived from it at render
+  // time, and reported up to the caller separately via onEmbedError.
+  const [embedError, setEmbedError] = useState<Pick<EmbedError, 'code'> | null>(null);
   const lastErrorKeyRef = useRef<string | null>(null);
   // Held in a ref so the message listener never has to re-subscribe merely
   // because the caller passed a fresh arrow function this render.

@@ -21,6 +21,8 @@ export type ProviderPlaybackUpdate = {
   positionMs?: number;
   durationMs?: number;
   isPlaying?: boolean;
+  /** Whether a requested start is still unconfirmed - see PlayerState.isStarting. */
+  isStarting?: boolean;
   volume?: number;
   isMuted?: boolean;
   trackTitle?: string | null;

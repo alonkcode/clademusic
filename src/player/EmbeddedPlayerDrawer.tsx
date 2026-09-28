@@ -1,7 +1,7 @@
-import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
+import { useMemo, useEffect, useState, useCallback, useRef, type SyntheticEvent } from 'react';
 import { motion } from 'framer-motion';
 import { usePlayer } from './PlayerContext';
-import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Repeat, Loader2, EyeOff } from 'lucide-react';
+import { Volume2, VolumeX, Maximize2, X, ChevronDown, ChevronUp, Play, Pause, SkipBack, SkipForward, ListMusic, Loader2, EyeOff } from 'lucide-react';
 import { QueueSheet } from './QueueSheet';
 import { useConnectSpotify } from '@/hooks/api/useSpotifyConnect';
 import { useSpotifyBlocked, useSpotifyConnected } from '@/hooks/api/useSpotifyUser';
@@ -19,13 +19,18 @@ import { isTestEnv } from '@/lib/env';
 import { toast } from '@/hooks/use-toast';
 import { toast as sonnerToast } from 'sonner';
 import { providerMeta, formatTime } from './embeddedPlayer/constants';
-import { useAnimatedSeekbar } from './embeddedPlayer/useAnimatedSeekbar';
+import { useAnimatedSeekbar, type SeekIntent } from './embeddedPlayer/useAnimatedSeekbar';
 import { usePlayerHarmony } from './embeddedPlayer/usePlayerHarmony';
 import { useActiveSection } from './embeddedPlayer/useActiveSection';
 import { usePlayerLayout } from './embeddedPlayer/usePlayerLayout';
 import { useTransportControls } from './embeddedPlayer/useTransportControls';
 import { BeatIndicator } from './embeddedPlayer/BeatIndicator';
 import { useDevPlayerInvariants } from './embeddedPlayer/useDevInvariants';
+import { BarIconButton } from './embeddedPlayer/BarIconButton';
+import { SectionChips } from './embeddedPlayer/SectionChips';
+import { describeSpotifyFallback } from './embeddedPlayer/spotifyFallbackNotice';
+import { usePublishPlayerHeight } from './embeddedPlayer/usePublishPlayerHeight';
+import { useSwipeNavigation } from './embeddedPlayer/useSwipeNavigation';
 
 type EmbeddedPlayerDrawerProps = {
   onNext?: () => void;
@@ -89,9 +94,9 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const safeQueue = Array.isArray(queue) ? queue : [];
   const safeQueueIndex = typeof queueIndex === 'number' ? queueIndex : -1;
   const autoplay = isPlaying;
-  const canSeekInEmbed = true; // Enable seekbar - commit seek immediately to sync positionMs and provider
   const [queueOpen, setQueueOpen] = useState(false);
   const [scrubSec, setScrubSec] = useState<number | null>(null);
+  const [seekIntent, setSeekIntent] = useState<SeekIntent | null>(null);
   // Why the embed refused to play, when it does. Lives here rather than in
   // UniversalPlayerHost because the host renders inside the video panel, which
   // is collapsed (and aria-hidden) most of the time - the bar is the only part
@@ -132,10 +137,16 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     (sec: number) => {
       if (!Number.isFinite(sec)) return;
       seekToMs(sec * 1000);
+      // Tells the bar the position is now the listener's, not the provider's:
+      // until the provider has acted on the seek it keeps reporting where it
+      // WAS, and the thumb used to follow it back to the old spot.
+      setSeekIntent({ ms: sec * 1000 });
       setScrubSec(null);
     },
     [seekToMs]
   );
+  // Releasing the pointer and releasing a key both commit wherever the slider was left.
+  const commitSeekFromInput = (e: SyntheticEvent<HTMLInputElement>) => commitSeek(Number(e.currentTarget.value));
 
   const resolvedTitle = trackTitle ?? lastKnownTitle ?? '';
   const resolvedArtist = trackArtist ?? lastKnownArtist ?? '';
@@ -152,7 +163,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   const durationMsSafe = safeMs(durationMs) || safeMs(harmony.catalogDurationMs ?? 0);
 
   // Use animated seekbar for smooth visual updates
-  const animatedPositionMs = useAnimatedSeekbar(safeMs(positionMs), durationMsSafe, isPlaying);
+  const animatedPositionMs = useAnimatedSeekbar(safeMs(positionMs), durationMsSafe, isPlaying, seekIntent);
   const positionSec = Math.max(0, animatedPositionMs / 1000);
   const effectivePositionSec = scrubSec ?? positionSec;
   const durationSec = Math.max(0, durationMsSafe / 1000);
@@ -251,28 +262,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playRequestId]);
 
-  // Publish the docked player's real rendered height so the page reserves
-  // exactly that much bottom space (see body.clade-player-open in index.css).
-  // The chord readout above the bar makes the player 200-350px tall, but the
-  // reservation was hard-coded at 52px - so the panel sat on top of the
-  // page's own content (the login form's submit button, most visibly).
-  useEffect(() => {
-    const el = cinemaRef.current;
-    if (typeof window === 'undefined' || !el) return;
-    const publish = () => {
-      document.body.style.setProperty('--clade-player-height', `${Math.round(el.getBoundingClientRect().height)}px`);
-    };
-    publish();
-    if (typeof ResizeObserver === 'undefined') {
-      return () => document.body.style.removeProperty('--clade-player-height');
-    }
-    const ro = new ResizeObserver(publish);
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-      document.body.style.removeProperty('--clade-player-height');
-    };
-  }, [cinemaRef]);
+  usePublishPlayerHeight(cinemaRef);
 
   const { handlePrev, handleNext, effectiveCanNext, effectiveCanPrev } = useTransportControls({
     isIdle,
@@ -287,62 +277,10 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
     canPrev,
   });
 
-  // Horizontal swipe on the title/artist block for prev/next track. Mirrors
-  // FeedPage.tsx's vertical swipe-to-advance pattern, but deliberately on the
-  // X axis instead of Y - a vertical swipe here would fight the browser's
-  // native pull-to-refresh gesture, which this bar sits on top of on every
-  // page.
-  //
-  // handlePrev/handleNext are recreated on every positionMs tick (they need
-  // the live position to decide restart-vs-previous), so reading them via a
-  // ref updated on every render - rather than depending on them directly -
-  // keeps the listeners from being torn down and re-attached several times a
-  // second while a track plays. The effect itself only needs to re-run when
-  // the element mounts/unmounts, which tracks isIdle.
-  const transportRef = useRef({ handlePrev, handleNext, effectiveCanPrev, effectiveCanNext });
-  transportRef.current = { handlePrev, handleNext, effectiveCanPrev, effectiveCanNext };
-
+  // Swipe the title/artist block for prev/next track. The block only exists
+  // while a track is loaded, hence `!isIdle`.
   const titleSwipeRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = titleSwipeRef.current;
-    if (!el) return;
-
-    let startX = 0;
-    let startY = 0;
-    let startTime = 0;
-
-    const handleTouchStart = (e: TouchEvent) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      startTime = Date.now();
-    };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      const endX = e.changedTouches[0].clientX;
-      const endY = e.changedTouches[0].clientY;
-      const diffX = startX - endX;
-      const diffY = Math.abs(startY - endY);
-      const timeDiff = Date.now() - startTime;
-
-      // Swipe threshold: at least 50px horizontal, mostly horizontal (not vertical), completed within 500ms
-      if (Math.abs(diffX) > 50 && Math.abs(diffX) > diffY && timeDiff < 500) {
-        const { effectiveCanNext, effectiveCanPrev, handleNext, handlePrev } = transportRef.current;
-        if (diffX > 0) {
-          if (effectiveCanNext) handleNext();
-        } else {
-          if (effectiveCanPrev) handlePrev();
-        }
-      }
-    };
-
-    el.addEventListener('touchstart', handleTouchStart, { passive: true });
-    el.addEventListener('touchend', handleTouchEnd, { passive: true });
-
-    return () => {
-      el.removeEventListener('touchstart', handleTouchStart);
-      el.removeEventListener('touchend', handleTouchEnd);
-    };
-  }, [isIdle]);
+  useSwipeNavigation(titleSwipeRef, { handlePrev, handleNext, effectiveCanPrev, effectiveCanNext }, !isIdle);
 
   // NOT an early return on isIdle: UniversalPlayerHost mounts a single,
   // persistent <iframe id="universal-player"> that every provider switch
@@ -424,66 +362,19 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   sections={hudSections}
                 />
 
-                {sections.length > 0 && (
-                  <div className="mt-3 flex items-center gap-2">
-                    <div className="flex-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-                      {sections.map((section, index) => {
-                        const isActive = currentSectionId === section.id;
-                        const sectionName = sectionNames[index];
-                        return (
-                          <button
-                            key={section.id}
-                            type="button"
-                            onClick={() => {
-                              if (typeof setCurrentSection === 'function') {
-                                setCurrentSection(section.id);
-                              }
-                              if (canSeekInEmbed) {
-                                seekToMs(section.start_ms);
-                                return;
-                              }
-                              if (provider && trackId) {
-                                const url = buildProviderDeepLink(provider, trackId, { startSec: Math.floor(section.start_ms / 1000) });
-                                window.open(url, '_blank', 'noopener,noreferrer');
-                              }
-                            }}
-                            className={[
-                              'flex-shrink-0 rounded-full px-3 py-1 text-[11px] md:text-xs font-semibold transition border',
-                              isActive
-                                ? 'bg-primary text-primary-foreground border-primary/50'
-                                : 'bg-muted/60 text-muted-foreground border-border/60 hover:bg-muted',
-                            ].join(' ')}
-                            aria-label={`Jump to ${sectionName}`}
-                            title={`Jump to ${sectionName}${sectionWhy && isActive ? ` — ${sectionWhy}` : ''}`}
-                          >
-                            {sectionName}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {activeSection && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (typeof setLoopSection !== 'function') return;
-                          const next = loopSectionId === activeSection.id ? null : activeSection.id;
-                          setLoopSection(next);
-                        }}
-                        className={[
-                          'inline-flex h-8 w-8 items-center justify-center rounded-full border transition',
-                          loopSectionId === activeSection.id
-                            ? 'border-primary/50 bg-primary/20 text-primary'
-                            : 'border-border/60 bg-muted/60 text-muted-foreground hover:bg-muted',
-                        ].join(' ')}
-                        aria-label={loopSectionId === activeSection.id ? 'Disable section loop' : 'Loop section'}
-                        title={loopSectionId === activeSection.id ? 'Disable section loop' : 'Loop section'}
-                      >
-                        <Repeat className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                )}
+                <SectionChips
+                  sections={sections}
+                  sectionNames={sectionNames}
+                  currentSectionId={currentSectionId}
+                  sectionWhy={sectionWhy}
+                  activeSection={activeSection}
+                  loopSectionId={loopSectionId}
+                  onSelect={(section) => {
+                    setCurrentSection(section.id);
+                    seekToMs(section.start_ms);
+                  }}
+                  onSetLoop={setLoopSection}
+                />
               </>
             )}
           </div>
@@ -540,27 +431,11 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                   onNotice={(message) => sonnerToast(message, { id: 'spotify-playback-notice' })}
                   onFallback={(reason) => {
                     setSpotifySdkFailed(true);
-                    const lower = reason.toLowerCase();
-                    const isDevModeBlock = lower.includes('403') || lower.includes('developer dashboard');
-                    toast({
-                      title: isDevModeBlock
-                        ? 'Spotify app in Development Mode'
-                        : lower.includes('premium')
-                          ? 'Spotify Premium required'
-                          : 'Falling back to Spotify preview',
-                      // This toast stays until dismissed (see use-toast.ts's
-                      // TOAST_REMOVE_DELAY) specifically so actionable detail
-                      // like the 403/dev-mode guidance below doesn't flash
-                      // past before it can be read.
-                      //
-                      // The raw reason tells the LISTENER to go add their own
-                      // account in the Spotify Developer Dashboard - fine
-                      // advice for the app's own admin, a dead end for
-                      // everyone else who has no access to that dashboard.
-                      description: isDevModeBlock && !isAdmin
-                        ? "Full-track playback isn't available for this account yet. Playing a preview instead."
-                        : reason,
-                    });
+                    // This toast stays until dismissed (see use-toast.ts's
+                    // TOAST_REMOVE_DELAY) specifically so actionable detail
+                    // like the 403/dev-mode guidance doesn't flash past
+                    // before it can be read.
+                    toast(describeSpotifyFallback(reason, isAdmin));
                   }}
                 />
               </div>
@@ -643,16 +518,14 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 + expand + hide + close on one line without the title
                 collapsing to nothing; Spotify's own mobile bar drops to just
                 play/pause too, leaving prev/next to the expanded view. */}
-            <button
-              type="button"
-              onClick={() => (effectiveCanPrev ? handlePrev() : null)}
+            <BarIconButton
+              label="Previous track"
+              onClick={handlePrev}
               disabled={!effectiveCanPrev}
-              className="hidden h-8 w-8 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed sm:inline-flex md:h-9 md:w-9"
-              aria-label="Previous track"
-              title="Previous track"
+              className="hidden h-8 w-8 sm:inline-flex md:h-9 md:w-9"
             >
               <SkipBack className="h-4 w-4" />
-            </button>
+            </BarIconButton>
             <button
               type="button"
               onClick={togglePlayPause}
@@ -672,16 +545,14 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 <Play className="h-4 w-4 md:h-5 md:w-5" />
               )}
             </button>
-            <button
-              type="button"
-              onClick={() => (effectiveCanNext ? handleNext() : null)}
+            <BarIconButton
+              label="Next track"
+              onClick={handleNext}
               disabled={!effectiveCanNext}
-              className="hidden h-8 w-8 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed sm:inline-flex md:h-9 md:w-9"
-              aria-label="Next track"
-              title="Next track"
+              className="hidden h-8 w-8 sm:inline-flex md:h-9 md:w-9"
             >
               <SkipForward className="h-4 w-4" />
-            </button>
+            </BarIconButton>
           </div>
 
           {/* Tempo, as a dot flashing on each beat next to the number. Sits
@@ -741,28 +612,15 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
                 // interrupting the last, which is what made this feel
                 // laggy/uncontrollable rather than a clean single seek.
                 onChange={(e) => {
-                  if (!canSeekInEmbed) return;
                   const nextSec = Number(e.target.value);
                   if (!Number.isFinite(nextSec)) return;
                   setScrubSec(nextSec); // visual feedback only while dragging
                 }}
-                onPointerUp={(e) => {
-                  if (!canSeekInEmbed) return;
-                  const target = e.currentTarget as HTMLInputElement;
-                  const nextSec = Number(target.value);
-                  if (!Number.isFinite(nextSec)) return;
-                  commitSeek(nextSec);
-                }}
-                onKeyUp={(e) => {
-                  // Arrow-key/Home/End seeking generates no pointer events, so
-                  // this is the commit path for keyboard users.
-                  if (!canSeekInEmbed) return;
-                  const target = e.currentTarget as HTMLInputElement;
-                  const nextSec = Number(target.value);
-                  if (!Number.isFinite(nextSec)) return;
-                  commitSeek(nextSec);
-                }}
-                disabled={isIdle || !canSeekInEmbed || !hasDuration}
+                onPointerUp={commitSeekFromInput}
+                // Arrow-key/Home/End seeking generates no pointer events, so
+                // this is the commit path for keyboard users.
+                onKeyUp={commitSeekFromInput}
+                disabled={isIdle || !hasDuration}
                 className="relative z-10 w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer
                          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5
                          [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full
@@ -783,13 +641,9 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
           {/* Secondary controls - collapse on narrow viewports rather than
               wrapping the bar to a second row. */}
           <div className="hidden shrink-0 items-center gap-1 sm:flex">
-            <button
-              onClick={toggleMute}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-            >
+            <BarIconButton label={isMuted ? 'Unmute' : 'Mute'} onClick={toggleMute} className="inline-flex h-9 w-9">
               {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            </button>
+            </BarIconButton>
             <input
               type="range"
               min="0"
@@ -830,69 +684,40 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             )}
 
             {showVideo && (
-              <button
-                type="button"
+              <BarIconButton
+                label={isCinema ? 'Exit full screen' : 'Enter full screen'}
                 onClick={toggleFullscreen}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
-                aria-label={isCinema ? 'Exit full screen' : 'Enter full screen'}
-                title={isCinema ? 'Exit full screen' : 'Enter full screen'}
+                className="inline-flex h-9 w-9"
               >
                 <Maximize2 className="h-4 w-4" />
-              </button>
+              </BarIconButton>
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setQueueOpen(true)}
-            className="hidden h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground md:inline-flex"
-            aria-label="Show queue"
-            title="Show queue"
-          >
+          <BarIconButton label="Show queue" onClick={() => setQueueOpen(true)} className="hidden h-9 w-9 md:inline-flex">
             <ListMusic className="h-4 w-4" />
-          </button>
+          </BarIconButton>
 
-          {showVideo ? (
-            <button
-              type="button"
-              onClick={() => setShowVideo(false)}
-              className="inline-flex h-8 w-8 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground sm:h-9 sm:w-9"
-              aria-label="Compact player and hide video"
-              title="Hide details"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowVideo(true)}
-              className="inline-flex h-8 w-8 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground sm:h-9 sm:w-9"
-              aria-label="Show video and expand player"
-              title="Show details"
-            >
-              <ChevronUp className="h-4 w-4" />
-            </button>
-          )}
+          <BarIconButton
+            label={showVideo ? 'Compact player and hide video' : 'Show video and expand player'}
+            title={showVideo ? 'Hide details' : 'Show details'}
+            onClick={() => setShowVideo(!showVideo)}
+            className="inline-flex h-8 w-8 sm:h-9 sm:w-9"
+          >
+            {showVideo ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </BarIconButton>
 
-          <button
-            type="button"
+          <BarIconButton
+            label="Hide player (keeps playing)"
             onClick={toggleHidden}
-            className="inline-flex h-8 w-8 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground sm:h-9 sm:w-9"
-            aria-label="Hide player (keeps playing)"
-            title="Hide player (keeps playing)"
+            className="inline-flex h-8 w-8 sm:h-9 sm:w-9"
           >
             <EyeOff className="h-4 w-4" />
-          </button>
+          </BarIconButton>
 
-          <button
-            type="button"
-            onClick={closePlayer}
-            className="inline-flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
-            aria-label="Close player"
-            title="Close player"
-          >
+          <BarIconButton label="Close player" onClick={closePlayer} className="inline-flex h-9 w-9">
             <X className="h-4 w-4" />
-          </button>
+          </BarIconButton>
         </div>
         )}
       </div>
