@@ -183,7 +183,7 @@ scripts/                 # Seeding, SQL bundling, asset generation, QA tooling
 ```bash
 bun run dev          # dev server at http://localhost:8080/clademusic/
 bun run lint         # ESLint
-bun run typecheck    # tsc --noEmit
+bun run typecheck    # tsc --noEmit -p tsconfig.app.json
 bun run build        # production build to dist/
 bun run preview      # serve the production build
 ```

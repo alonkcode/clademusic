@@ -1,5 +1,13 @@
 # Repository Instructions
 
+This file is the source of truth for every coding agent working in this
+repo (Claude Code and Codex both read it directly by convention). A
+tool-specific file — currently just `.github/COPILOT-INSTRUCTIONS.md` — may
+add behavior genuinely specific to that tool's editing interface, but must
+not restate or override what's here. One-off task prompts (e.g.
+`.github/prompts/*.prompt.md`) are invoked deliberately for occasional work;
+they are not standing policy and defer to this file for everyday rules.
+
 ## Clade (clademusic) Development Rules
 
 - Fix bugs with the smallest possible change.
@@ -88,7 +96,10 @@ For the harmonic analysis, chord detection, section detection, and similarity en
 
 ## TypeScript and React
 
-* Preserve strict TypeScript type safety.
+* Preserve type safety in the code you touch. The compiler itself is
+  configured loosely (`tsconfig.app.json` has `strict: false`), so this is a
+  discipline to hold yourself to, not something `bun run typecheck` will
+  catch for you.
 * Do not use `any` unless an external boundary makes it unavoidable and the reason is documented.
 * Fix type errors at their source rather than suppressing them.
 * Use descriptive names for components, functions, variables, and types.
