@@ -4,6 +4,8 @@
 
 Clade uses a **hybrid harmonic analysis pipeline** that prioritizes cost-efficiency and user experience. The system analyzes songs by their relative harmonic structure (Roman numerals), not absolute chords or genre metadata.
 
+> **Two analysis paths exist today, and they are not connected.** The pipeline described under [Analysis Pipeline](#analysis-pipeline) (cache → job → store) is the *fingerprint/job path*; its analysis step is still a stub. Real chord, key, tempo and section detection runs separately as a live capture, described under [Live Detection Pipeline](#live-detection-pipeline-implemented).
+
 ## Core Principles
 
 ### 1. Relative Theory First
@@ -148,8 +150,8 @@ return {
 
 ### Phase 3: Audio Analysis
 
-**Current**: Placeholder mock analysis  
-**TODO**: Integrate ML model (e.g., Essentia.js, Chord.js, or custom model)
+**Current**: Stub. `src/services/audioAnalysis.ts` returns mock results, and the ML step of the `harmonic-analysis` Edge Function is a stub. The `useHarmonicAnalysis` hook and `AnalysisStatusBadge` component that sit on this path are not used by app code yet.  
+**TODO**: Integrate ML model (e.g., Essentia.js, Chord.js, or custom model), or reuse the live-detection DSP described below
 
 ```typescript
 async function runAnalysisJob(job: AnalysisJob) {
@@ -177,6 +179,19 @@ await supabase
 ```
 
 Results are cached for **90 days minimum**, reanalyzed after **365 days** if model improves.
+
+## Live Detection Pipeline (implemented)
+
+A listener can run a live capture while a track plays. The result is stored as *evidence* for review, not as truth.
+
+1. **Capture and DSP.** `useLiveChordDetection` (`src/hooks`) captures tab audio with `getDisplayMedia` (desktop Chrome/Edge; `supported` reports availability) and runs the DSP: chord templates over chroma, key estimation, tempo and section boundaries. The DSP lives in `supabase/functions/_shared/dsp/`; `src/lib/harmony/` re-exports it, and `services/live-analysis` imports it directly. Timestamps follow the player position; when the player never reports a moving position the hook sets `timingAligned` to false, and such a capture must not be stored.
+2. **Payload.** `buildDetectionRunPayload` (`src/api/detectionRuns.ts`) turns chords and sections into Roman numerals relative to the estimated key, so the relative-theory rule holds. `submitDetectionRun` sends it to the `ingest-detection` Edge Function. Every run carries `DETECTION_ANALYSIS_VERSION`.
+3. **Ingest.** `ingest-detection` is the only write path into the detection tables, which RLS closes to clients. It validates the payload (`_shared/detectionPayload.ts`), enforces a per-user daily cap, finds or creates the catalog row for a provider id, and stores `detection_runs` (status `pending`), `detection_run_sections` and `detection_run_chords`.
+4. **Promotion.** It then calls `auto_promote_detection_run`. A run becomes the track's saved analysis automatically only when the track has no analysis yet and the capture clears the thresholds in `_shared/autoPromotion.ts` (`AUTO_PROMOTION`). The browser runs the same code to know when to submit. Otherwise an admin promotes the run after review. The database refuses to overwrite an existing analysis.
+
+The detection tables are defined in `supabase/sql-editor/17-live-detection-runs.sql`; the promotion functions are in `18-*`, `29-*` and `30-*` (later files redefine `_promote_detection_run_core`). All of it is included in `supabase/schema_bundle.sql`, and none of it is in `supabase/migrations/`.
+
+For devices that cannot capture tab audio, `services/live-analysis` is a separate Bun WebSocket service that analyses the listener's microphone. As of September 26, 2026 its server side exists (see its README) and no app code connects to it.
 
 ## Similarity Engine
 
@@ -332,22 +347,40 @@ src/
 │   ├── harmony.ts           # Core harmonic types
 │   └── index.ts             # Track type (existing)
 │
+├── lib/
+│   ├── harmony/             # Detection (re-exports of _shared/dsp), theory, clocks, auto-promotion policy
+│   └── liveAnalysis/        # Tests only: rules of services/live-analysis
+│
+├── api/
+│   └── detectionRuns.ts     # Live-capture payload builder and submit
+│
 ├── services/
-│   ├── harmonicAnalysis.ts  # Analysis pipeline
-│   └── similarityEngine.ts  # Track matching
+│   ├── harmonicAnalysis.ts  # Fingerprint/job pipeline
+│   ├── audioAnalysis.ts     # v0 stub: mock analysis
+│   └── similarityEngine.ts  # Track matching (no app callers yet)
 │
 ├── components/
-│   └── AnalysisStatusBadge.tsx  # UI for confidence display
+│   ├── HarmonicHUD.tsx          # Live chord readout
+│   └── AnalysisStatusBadge.tsx  # UI for confidence display (not used yet)
 │
 └── hooks/
-    └── useHarmonicAnalysis.ts   # React hook (TODO)
+    ├── useLiveChordDetection.ts # Live capture
+    ├── useAnalyzeTrack.ts       # Capture → auto-submit for unanalysed tracks
+    └── useHarmonicAnalysis.ts   # Hook over the fingerprint pipeline (not used yet)
+
+supabase/functions/
+├── ingest-detection/        # Only write path into detection_runs
+├── harmonic-analysis/       # Fingerprint job runner (ML step is a stub)
+└── _shared/                 # dsp/, autoPromotion.ts, detectionPayload.ts
+
+services/live-analysis/      # Bun WebSocket service for microphone analysis
 ```
 
 ## Future Improvements
 
 ### Short-term (MVP+)
-- [ ] Integrate real ML audio analysis model
-- [ ] Add Supabase Edge Function for background processing
+- [ ] Integrate real ML audio analysis model (or reuse the live-detection DSP) for the job path
+- [ ] Replace the stub ML step in the `harmonic-analysis` Edge Function
 - [ ] Implement progression rotation matching
 - [ ] Add user feedback mechanism for corrections
 

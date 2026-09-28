@@ -1,6 +1,6 @@
 # Clade Architecture Summary
 
-**Last Updated**: January 21, 2026
+**Last Updated**: January 21, 2026 (analysis layer, file structure, schema and status sections reconciled with the code on September 26, 2026)
 
 ## Product Vision
 
@@ -54,21 +54,44 @@ Store result → Update confidence score
 - ✅ **Idempotent**: Same audio = same result
 - ✅ **Replaceable**: Model versioning support
 
-### 3. Audio Analysis Layer 🚧
+### 3. Audio Analysis Layer ✅ live detection · 🚧 background jobs
 
-**Status**: Placeholder implementation (TODO: integrate ML model)
+Two analysis paths exist. They are **not connected to each other**.
 
-**Requirements:**
+#### Live detection (implemented)
+
+A listener runs one capture while a track plays; the browser does the analysis.
+
+```
+Browser DSP: chords, key, tempo, sections
+  (implemented in supabase/functions/_shared/dsp, re-exported by src/lib/harmony)
+     ↓ detection payload (src/api/detectionRuns.ts)
+`ingest-detection` Edge Function: validates, stores a `detection_runs` row as pending
+     ↓
+`auto_promote_detection_run` (SQL): saves it as the track's analysis only if the
+track has none and the capture clears supabase/functions/_shared/autoPromotion.ts;
+otherwise an admin promotes it after review
+```
+
+- `ingest-detection` is the only write path into the detection tables (closed to clients by RLS).
+- The DSP has one copy, in `supabase/functions/_shared/dsp/`. The browser imports it through the re-exports in `src/lib/harmony/`, and `services/live-analysis` imports it directly.
+- `services/live-analysis` is a separate Bun WebSocket service for devices that cannot capture tab audio. The server side exists (see its README). As of September 26, 2026 no app code connects to it.
+- The detection tables (`detection_runs`, `detection_run_sections`, `detection_run_chords`) are defined in `supabase/sql-editor/17-live-detection-runs.sql`. The promotion functions are in `18-*`, `29-*` and `30-*` (later files redefine `_promote_detection_run_core`). All of it is included in `supabase/schema_bundle.sql`, and none of it is in `supabase/migrations/`.
+
+#### Fingerprint and job pipeline (stub)
+
+`src/services/harmonicAnalysis.ts` implements cache check → job → store, but the analysis step is a placeholder: `src/services/audioAnalysis.ts` returns mock results, and the ML step of the `harmonic-analysis` Edge Function is a stub. The `useHarmonicAnalysis` hook and `AnalysisStatusBadge` component sit on top of it; nothing in app code imports either yet.
+
+**Requirements (both paths):**
 - Extract chroma/harmonic features from audio
 - Detect: key center, chord sequence, section boundaries
 - Output relative structures with confidence scores
 - Never block UI during analysis
 
 **TODO:**
-- [ ] Integrate Essentia.js or custom ML model
-- [ ] Add Supabase Edge Function for background processing
-- [ ] Implement section boundary detection
-- [ ] Add real-time progress updates
+- [ ] Replace the mock in `audioAnalysis.ts` and the stub in `harmonic-analysis` with a real analysis step (Essentia.js or a custom model), or route the job path through the live-detection DSP
+- [ ] Decide how the two paths relate; today live detection writes `detection_runs`, while the job path writes `harmonic_fingerprints`
+- [ ] Add real-time progress updates for background jobs
 
 ### 4. UX Requirements ✅
 
@@ -113,6 +136,8 @@ Store result → Update confidence score
 
 **Genre/artist/instrumentation are secondary signals only.**
 
+**Status**: implemented in `src/services/similarityEngine.ts`; nothing in app code calls `findSimilarTracks` yet (only tests do).
+
 ```typescript
 const results = await findSimilarTracks({
   reference_track_id: 'abc123',
@@ -140,23 +165,47 @@ const results = await findSimilarTracks({
 ```
 src/
 ├── types/
-│   ├── harmony.ts                 # ✅ Core harmonic types
-│   └── index.ts                   # ✅ Track type (updated)
+│   ├── harmony.ts                 # Core harmonic types
+│   └── index.ts                   # Track type
+│
+├── lib/
+│   ├── harmony/                   # Chord/key/tempo/section detection (re-exports of
+│   │                              #   supabase/functions/_shared/dsp), theory, playback
+│   │                              #   clocks, auto-promotion policy
+│   └── liveAnalysis/              # Tests only: rules of services/live-analysis
+│
+├── api/
+│   └── detectionRuns.ts           # Builds and submits a live-capture payload
 │
 ├── services/
-│   ├── harmonicAnalysis.ts        # ✅ Analysis pipeline
-│   └── similarityEngine.ts        # ✅ Track matching
+│   ├── harmonicAnalysis.ts        # Fingerprint/job pipeline (cache → job → store)
+│   ├── audioAnalysis.ts           # v0 stub: mock analysis
+│   └── similarityEngine.ts        # Track matching (no app callers yet)
+│
+├── hooks/
+│   ├── useLiveChordDetection.ts   # Live capture → chords, sections, key, tempo
+│   ├── useAnalyzeTrack.ts         # Capture → auto-submit for unanalysed tracks
+│   └── useHarmonicAnalysis.ts     # Hook over the fingerprint pipeline (not used yet)
 │
 ├── components/
-│   ├── AnalysisStatusBadge.tsx    # ✅ Confidence UI
+│   ├── HarmonicHUD.tsx            # Live chord readout
+│   ├── AnalysisStatusBadge.tsx    # Confidence UI (not used yet)
 │   └── layout/
-│       └── ResponsiveLayout.tsx   # ✅ Desktop layouts
+│       └── ResponsiveLayout.tsx   # Desktop layouts
 │
-└── hooks/
-    └── useHarmonicAnalysis.ts     # 🚧 TODO: React hook
+└── player/                        # See docs/PLAYER_ARCHITECTURE.md
+
+supabase/functions/
+├── ingest-detection/              # Only write path into detection_runs
+├── harmonic-analysis/             # Fingerprint job runner (ML step is a stub)
+├── autoPromotion + detectionPayload + dsp/   # In _shared/: code the browser also runs
+
+services/live-analysis/            # Bun WebSocket service for microphone analysis
 ```
 
-## Database Schema (TODO)
+## Database Schema
+
+`harmonic_fingerprints` and `analysis_jobs` exist (`supabase/migrations/20260125_harmonic_analysis_core.sql`). The SQL below is a simplified excerpt; the migration is authoritative. Live detection uses separate tables, described in the Audio Analysis Layer section above.
 
 ### `harmonic_fingerprints` Table
 
@@ -202,29 +251,30 @@ CREATE TABLE analysis_jobs (
 - [x] Queue management system
 - [x] Song credits (songwriter, producer, label)
 - [x] BPM and genre metadata
+- [x] Live detection pipeline: browser DSP (chords, key, tempo, sections) → `detection_runs` via `ingest-detection`, with auto-promotion
+- [x] `harmonic_fingerprints` and `analysis_jobs` tables (migration exists)
+- [x] `harmonic-analysis` Edge Function (ML step is a stub)
+- [x] `services/live-analysis` Bun WebSocket service (server side only; no app client yet)
 
 ### 🚧 In Progress
 
-- [ ] Database schema migration (Supabase)
-- [ ] ML audio analysis integration (Essentia.js or custom)
-- [ ] Supabase Edge Function for background processing
+- [ ] Real analysis step for the fingerprint/job path (today it is mock data)
+- [ ] Wiring `useHarmonicAnalysis`, `AnalysisStatusBadge` and `findSimilarTracks` into the app
+- [ ] App client for `services/live-analysis`
 - [ ] Real-time job progress updates
 
 ### 📋 TODO (Priority Order)
 
 1. **Database Integration**
-   - Create `harmonic_fingerprints` and `analysis_jobs` tables
    - Add indexes for similarity queries
-   - Implement cache lookup/storage
+   - Implement cache lookup/storage against `harmonic_fingerprints`
 
 2. **ML Model Integration**
-   - Research: Essentia.js vs Chord.js vs custom model
-   - Implement chroma feature extraction
-   - Add key/chord detection
+   - Research: Essentia.js vs Chord.js vs custom model, or reuse the live-detection DSP for jobs
    - Calculate confidence scores
 
 3. **Background Processing**
-   - Create Supabase Edge Function for async analysis
+   - Replace the stub in the `harmonic-analysis` Edge Function
    - Implement job queue system
    - Add progress tracking (WebSockets)
 
@@ -259,8 +309,8 @@ CREATE TABLE analysis_jobs (
 
 ## Next Steps
 
-1. **Immediate**: Create database tables via Supabase migration
-2. **Short-term**: Integrate ML audio analysis model
+1. **Immediate**: Decide how the live-detection and fingerprint/job paths relate
+2. **Short-term**: Replace the mock analysis step, or reuse the live-detection DSP
 3. **Medium-term**: Add real-time progress tracking
 4. **Long-term**: Build harmonic clustering visualization
 
@@ -270,6 +320,9 @@ CREATE TABLE analysis_jobs (
 - **Types**: [`src/types/harmony.ts`](../src/types/harmony.ts)
 - **Services**: [`src/services/harmonicAnalysis.ts`](../src/services/harmonicAnalysis.ts), [`src/services/similarityEngine.ts`](../src/services/similarityEngine.ts)
 - **UI**: [`src/components/AnalysisStatusBadge.tsx`](../src/components/AnalysisStatusBadge.tsx)
+- **Live detection**: [`src/api/detectionRuns.ts`](../src/api/detectionRuns.ts), [`supabase/functions/ingest-detection`](../supabase/functions/ingest-detection/index.ts), [`supabase/functions/_shared/dsp`](../supabase/functions/_shared/dsp)
+- **Microphone analysis service**: [`services/live-analysis/README.md`](../services/live-analysis/README.md)
+- **Player**: [`docs/PLAYER_ARCHITECTURE.md`](./PLAYER_ARCHITECTURE.md)
 
 ---
 

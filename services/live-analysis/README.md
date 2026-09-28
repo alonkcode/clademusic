@@ -51,7 +51,7 @@ docker build -f services/live-analysis/Dockerfile -t clade-live-analysis .   # f
 docker run -p 8787:8787 \
   -e SUPABASE_URL=https://<ref>.supabase.co \
   -e SUPABASE_ANON_KEY=<publishable key> \
-  -e ALLOWED_ORIGINS=https://www.clademusic.com,https://alonkcode.github.io \
+  -e ALLOWED_ORIGINS=https://www.clademusic.com,https://kaospan.github.io \
   clade-live-analysis
 ```
 
