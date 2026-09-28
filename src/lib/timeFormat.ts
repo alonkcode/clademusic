@@ -58,3 +58,28 @@ export function formatDuration(ms: number): string {
 export function formatDurationFull(ms: number): string {
   return formatTime(ms);
 }
+
+/**
+ * Read a typed timecode back into milliseconds.
+ *
+ * Accepts what {@link formatTime} writes and the shorter forms people type:
+ * `1:23.456`, `1:23`, `23.4`, `83` (a bare number is seconds), with an
+ * optional hours field. The fraction is a fraction of a second, so `.4` is
+ * 400ms and `.456` is 456ms - the same reading either way round.
+ *
+ * Returns null for anything that is not a time, so a half-typed value can be
+ * left alone rather than snapped to a number nobody asked for.
+ */
+export function parseTimecode(input: string): number | null {
+  const parts = input.trim().split(':');
+  if (parts.length > 3) return null;
+
+  const seconds = parts.pop();
+  if (seconds === undefined || !/^\d+(\.\d+)?$/.test(seconds)) return null;
+  if (!parts.every((part) => /^\d+$/.test(part))) return null;
+
+  const minutes = parts.length > 0 ? Number(parts[parts.length - 1]) : 0;
+  const hours = parts.length > 1 ? Number(parts[0]) : 0;
+
+  return Math.round((hours * 3600 + minutes * 60 + Number(seconds)) * 1000);
+}

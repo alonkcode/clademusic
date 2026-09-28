@@ -209,6 +209,42 @@ export function replaceChord(chords: ChordMarker[], index: number, numeral: stri
   return chords.map((c, i) => (i === index ? { ...c, numeral } : c));
 }
 
+/**
+ * Move a chord's onset, keeping it inside the section it was heard in and
+ * clear of its neighbours - the same clamping moveBoundary does, for the same
+ * reason: dragging one past the next would reorder the progression without
+ * anything looking wrong in the data.
+ *
+ * A section's first chord is refused: it plays from the section's start
+ * whatever its stored onset says, so moving it would change nothing anyone
+ * hears. Moving the boundary is what that edit actually is.
+ */
+export function moveChord(
+  chords: ChordMarker[],
+  index: number,
+  toMs: number,
+  sections: DraftSection[]
+): ChordMarker[] {
+  if (index < 0 || index >= chords.length || !Number.isFinite(toMs)) return chords;
+
+  const spans = chordSpansBySection(chords, sections).find((list) =>
+    list.some((s) => s.index === index)
+  );
+  if (!spans) return chords;
+
+  const position = spans.findIndex((s) => s.index === index);
+  if (position === 0) return chords;
+
+  const lowerBound = spans[position - 1].startMs + MIN_CHORD_MS;
+  // The last span ends where the section does, so this is the section's end
+  // for the last chord and the next chord's onset for any other.
+  const upperBound = spans[position].endMs - MIN_CHORD_MS;
+  if (upperBound < lowerBound) return chords;
+
+  const next = Math.min(Math.max(clampInt(toMs), lowerBound), upperBound);
+  return inOrder(chords.map((c, i) => (i === index ? { ...c, startMs: next } : c)));
+}
+
 /** Remove a chord. Its neighbour before it holds on through the freed time. */
 export function removeChord(chords: ChordMarker[], index: number): ChordMarker[] {
   if (index < 0 || index >= chords.length) return chords;
