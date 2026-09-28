@@ -33,6 +33,7 @@
 -- parameter makes a new function rather than replacing the old one, and
 -- leaving the two-argument version would make every two-argument call
 -- ambiguous. Grants are restated because they are what keeps this admin-only.
+-- Safe to re-run: the three-argument version is created or replaced.
 -- Run AFTER 19-save-track-sections.sql and 31-save-track-sections-mirror.sql.
 -- ============================================================
 
@@ -40,7 +41,7 @@ begin;
 
 drop function if exists public.save_track_sections(uuid, jsonb);
 
-create function public.save_track_sections(
+create or replace function public.save_track_sections(
   p_track_id uuid,
   p_sections jsonb,
   p_with_chords boolean default false
