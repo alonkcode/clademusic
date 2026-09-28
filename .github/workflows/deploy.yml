@@ -109,6 +109,10 @@ jobs:
       - name: Build application
         run: bun run build
         env:
+          # GitHub Pages with no custom domain serves from /<repo>/, not the
+          # root, so asset URLs, the router basename and 404.html need that
+          # prefix. Every other target (and Pages with CUSTOM_DOMAIN) is root.
+          VITE_BASE_PATH: ${{ (vars.DEPLOY_TARGET == 'github-pages' || vars.DEPLOY_TARGET == '') && vars.CUSTOM_DOMAIN == '' && format('/{0}/', github.event.repository.name) || '/' }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
