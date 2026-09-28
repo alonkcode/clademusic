@@ -479,18 +479,22 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
             visually hidden) while idle, so there is no empty-looking strip
             reserved at the bottom of every page before anything has played;
             the iframe host above keeps mounting regardless (see isIdle
-            comment above the DetailsPanel setup). The transport stays a
-            single row at every width so the seekbar is always directly
-            controllable beside play/pause and the other bar actions. */}
+            comment above the DetailsPanel setup). Below lg the row wraps: the
+            seekbar block (order-last, w-full) takes its own line under every
+            other control, so on a phone the track gets the full bar width
+            instead of the sliver left over beside the buttons. In one row it
+            measured ~40px wide anywhere from 640px to ~850px (phones in
+            landscape, tablets), so the wrap can't stop at the phone
+            breakpoint. lg+ is one non-wrapping row. */}
         {!isIdle && (
-        <div className="flex min-w-0 flex-nowrap items-center gap-1 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2 md:gap-3 md:px-4 md:py-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2 md:gap-3 md:px-4 md:py-2.5 lg:flex-nowrap">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background/80 text-base shadow-inner sm:h-9 sm:w-9 md:h-10 md:w-10 md:text-lg">
             {meta.Icon ? <meta.Icon className="h-4 w-4 md:h-5 md:w-5" /> : meta.badge}
           </span>
           {/* Below lg the title has a zero basis and grows to fill the first
               line, so it can never push a control onto the wrapped line (a
               fixed 9rem basis counts toward wrapping); lg+ keeps 9rem. */}
-          <div ref={titleSwipeRef} className="flex min-w-[2rem] flex-[0_1_8rem] flex-col leading-tight [touch-action:pan-y] sm:flex-1 lg:flex-[0_1_9rem]">
+          <div ref={titleSwipeRef} className="flex min-w-[2rem] flex-1 flex-col leading-tight [touch-action:pan-y] lg:flex-[0_1_9rem]">
             {resolvedTitle && (
               <span className="truncate text-xs font-bold text-foreground md:text-sm" aria-label="Track title">{resolvedTitle}</span>
             )}
@@ -578,7 +582,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               (which never got the memo) kept their size and visually spilled
               into the icon buttons after it. Below lg it instead owns the
               wrapped second line (w-full, order-last). */}
-          <div className="flex min-w-[4.5rem] flex-1 items-center gap-1 text-white sm:min-w-[8rem] sm:gap-2">
+          <div className="order-last flex w-full min-w-[4.5rem] items-center gap-1 text-white sm:min-w-[8rem] sm:gap-2 lg:order-none lg:w-auto lg:flex-1">
             <span className="w-7 shrink-0 text-right text-[9px] tabular-nums sm:w-9 sm:text-[10px] md:w-10 md:text-xs" aria-label="Elapsed time">{formatTime(positionSec)}</span>
             <div className="relative min-w-[2rem] flex-1">
               {sections.length > 1 && durationMsSafe > 0 && (
