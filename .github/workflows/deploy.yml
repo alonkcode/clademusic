@@ -49,10 +49,17 @@ jobs:
       - name: Run typecheck
         run: bun run typecheck
 
+      # !cancelled(), not the default success(): an earlier failing step (most
+      # often the typecheck, which carries a backlog of pre-existing errors)
+      # used to skip the browser suite entirely, so a push that broke the
+      # player went out with no Playwright signal at all. The job still fails
+      # on any red step, so the deploy below stays gated the same way.
       - name: Install Playwright (Chromium)
+        if: ${{ !cancelled() }}
         run: bunx playwright install --with-deps chromium
 
       - name: Run Playwright tests
+        if: ${{ !cancelled() }}
         run: bunx playwright test
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
