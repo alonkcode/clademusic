@@ -4,6 +4,7 @@ import {
   chordChoices,
   chordSpansBySection,
   draftChordsFromSections,
+  moveChord,
   MIN_CHORD_MS,
   removeChord,
   replaceChord,
@@ -305,5 +306,63 @@ describe('chordChoices', () => {
         expect(parseRomanChord(numeral, mode), `${mode}: ${numeral}`).not.toBeNull();
       }
     }
+  });
+});
+
+describe('moveChord', () => {
+  /** verse 0-20s: I from the start, V at 5s, vi at 10s. */
+  const VERSE = chords([0, 'I'], [5000, 'V'], [10_000, 'vi']);
+
+  it('puts a chord exactly where it is asked to', () => {
+    expect(moveChord(VERSE, 1, 7000, SECTIONS)).toEqual(chords([0, 'I'], [7000, 'V'], [10_000, 'vi']));
+  });
+
+  it('leaves the other chords, and the original list, alone', () => {
+    const moved = moveChord(VERSE, 1, 7000, SECTIONS);
+    expect(moved).not.toBe(VERSE);
+    expect(VERSE[1].startMs).toBe(5000);
+    expect(moved[0]).toEqual(VERSE[0]);
+    expect(moved[2]).toEqual(VERSE[2]);
+  });
+
+  // Clamped rather than refused: a typed time outside the gap is a time that
+  // was read or guessed slightly wrong, not an edit to throw away.
+  it('holds a chord clear of the one before it', () => {
+    expect(moveChord(VERSE, 1, 0, SECTIONS)[1].startMs).toBe(MIN_CHORD_MS);
+  });
+
+  it('holds a chord clear of the one after it', () => {
+    expect(moveChord(VERSE, 1, 30_000, SECTIONS)[1].startMs).toBe(10_000 - MIN_CHORD_MS);
+  });
+
+  it('holds the last chord of a section inside that section', () => {
+    expect(moveChord(VERSE, 2, 59_000, SECTIONS)[2].startMs).toBe(20_000 - MIN_CHORD_MS);
+  });
+
+  // It plays from the section's start whatever its onset says, so there is
+  // nothing here to move - the boundary is what that edit means.
+  it("refuses to move a section's first chord", () => {
+    expect(moveChord(VERSE, 0, 2000, SECTIONS)).toBe(VERSE);
+  });
+
+  it('refuses when neither neighbour leaves room', () => {
+    const crowded = chords([0, 'I'], [300, 'V'], [400, 'vi']);
+    expect(moveChord(crowded, 1, 350, SECTIONS)).toBe(crowded);
+  });
+
+  it('has nothing to move for a chord outside every section, or no chord at all', () => {
+    const past = chords([0, 'I'], [80_000, 'V']);
+    expect(moveChord(past, 1, 30_000, SECTIONS)).toBe(past);
+    expect(moveChord(VERSE, 9, 7000, SECTIONS)).toBe(VERSE);
+    expect(moveChord(VERSE, 1, Number.NaN, SECTIONS)).toBe(VERSE);
+  });
+
+  it('stores the moved onset relative to its section', () => {
+    const moved = moveChord(chords([0, 'I'], [25_000, 'V'], [30_000, 'vi']), 2, 33_000, SECTIONS);
+    // The chorus starts at 20s, and its first chord plays from there.
+    expect(toChordColumns(moved, SECTIONS)[1]).toEqual({
+      progression_roman: ['V', 'vi'],
+      chord_timings: [0, 13_000],
+    });
   });
 });

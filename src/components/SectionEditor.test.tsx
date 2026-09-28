@@ -89,7 +89,13 @@ async function savedSections() {
   expect(name).toBe('save_track_sections');
   return args as {
     p_with_chords?: boolean;
-    p_sections: Array<{ label: string; progression_roman?: string[]; chord_timings?: number[] }>;
+    p_sections: Array<{
+      label: string;
+      start_ms: number;
+      end_ms: number;
+      progression_roman?: string[];
+      chord_timings?: number[];
+    }>;
   };
 }
 
@@ -99,11 +105,11 @@ describe('SectionEditor chords', () => {
   it('shows each stored chord in the section it belongs to', () => {
     renderChorded();
 
-    expect(chordSelect('0:00.0')).toHaveValue('I');
-    expect(chordSelect('0:18.0')).toHaveValue('I');
-    expect(chordSelect('0:25.0')).toHaveValue('V');
-    expect(chordSelect('0:32.0')).toHaveValue('vi');
-    expect(chordSelect('0:39.0')).toHaveValue('IV');
+    expect(chordSelect('0:00.000')).toHaveValue('I');
+    expect(chordSelect('0:18.000')).toHaveValue('I');
+    expect(chordSelect('0:25.000')).toHaveValue('V');
+    expect(chordSelect('0:32.000')).toHaveValue('vi');
+    expect(chordSelect('0:39.000')).toHaveValue('IV');
     expect(screen.getByText(/3 sections · 5 chords/)).toBeInTheDocument();
   });
 
@@ -134,7 +140,7 @@ describe('SectionEditor chords', () => {
   it('replaces a chord without moving it', async () => {
     renderChorded();
 
-    fireEvent.change(chordSelect('0:25.0'), { target: { value: 'ii' } });
+    fireEvent.change(chordSelect('0:25.000'), { target: { value: 'ii' } });
 
     const saved = await savedSections();
     expect(saved.p_sections[1].progression_roman).toEqual(['I', 'ii', 'vi', 'IV']);
@@ -144,10 +150,10 @@ describe('SectionEditor chords', () => {
   it('splits a chord into two halves that both keep its numeral', async () => {
     renderChorded();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Split the chord at 0:25.0 into two halves' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Split the chord at 0:25.000 into two halves' }));
 
-    // V ran 0:25-0:32, so the halves meet at 0:28.5.
-    expect(chordSelect('0:28.5')).toHaveValue('V');
+    // V ran 0:25-0:32, so the halves meet at 0:28.500.
+    expect(chordSelect('0:28.500')).toHaveValue('V');
     const saved = await savedSections();
     expect(saved.p_sections[1].progression_roman).toEqual(['I', 'V', 'V', 'vi', 'IV']);
     expect(saved.p_sections[1].chord_timings).toEqual([0, 7000, 10500, 14000, 21000]);
@@ -157,7 +163,7 @@ describe('SectionEditor chords', () => {
     renderChorded();
 
     // IV ran 0:39-0:46 (the verse ends there).
-    fireEvent.click(screen.getByRole('button', { name: 'Split the chord at 0:39.0 into two halves' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Split the chord at 0:39.000 into two halves' }));
 
     const saved = await savedSections();
     expect(saved.p_sections[1].chord_timings).toEqual([0, 7000, 14000, 21000, 24500]);
@@ -170,7 +176,7 @@ describe('SectionEditor chords', () => {
     fireEvent.click(screen.getByRole('button', { name: /add chord at 0:30/i }));
 
     // 0:30 is inside V (0:25-0:32).
-    expect(chordSelect('0:30.0')).toHaveValue('V');
+    expect(chordSelect('0:30.000')).toHaveValue('V');
     const saved = await savedSections();
     expect(saved.p_sections[1].progression_roman).toEqual(['I', 'V', 'V', 'vi', 'IV']);
     expect(saved.p_sections[1].chord_timings).toEqual([0, 7000, 12000, 14000, 21000]);
@@ -189,7 +195,7 @@ describe('SectionEditor chords', () => {
   it('removes a chord, and the count follows', async () => {
     renderChorded();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove the chord at 0:32.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the chord at 0:32.000' }));
 
     expect(screen.getByText(/3 sections · 4 chords/)).toBeInTheDocument();
     const saved = await savedSections();
@@ -202,7 +208,7 @@ describe('SectionEditor chords', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^add chord$/i }));
 
-    expect(chordSelect('0:46.0')).toHaveValue('I');
+    expect(chordSelect('0:46.000')).toHaveValue('I');
     const saved = await savedSections();
     expect(saved.p_sections[2]).toMatchObject({ progression_roman: ['I'], chord_timings: [0] });
   });
@@ -212,7 +218,7 @@ describe('SectionEditor chords', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^add chord$/i }));
 
-    expect(chordSelect('0:46.0')).toHaveValue('i');
+    expect(chordSelect('0:46.000')).toHaveValue('i');
   });
 
   // Chords are kept where they were heard: moving a boundary changes which
@@ -220,7 +226,7 @@ describe('SectionEditor chords', () => {
   it('leaves chords where they are when a boundary moves past them', async () => {
     renderChorded();
 
-    // Verse starts 0:18; pushing it 500ms later leaves the I at 0:18.0 in the intro.
+    // Verse starts 0:18; pushing it 500ms later leaves the I at 0:18.000 in the intro.
     fireEvent.click(screen.getAllByLabelText('Move this boundary later')[0]);
 
     const saved = await savedSections();
@@ -244,7 +250,7 @@ describe('SectionEditor chords', () => {
       sections: [{ label: 'verse', start_ms: 0, end_ms: 20000, chords: ['V7'], chord_timings: [0] }],
     });
 
-    expect(chordSelect('0:00.0')).toHaveValue('V7');
+    expect(chordSelect('0:00.000')).toHaveValue('V7');
   });
 
   it('tells the admin which script to run when the database predates chord saving', async () => {
@@ -337,5 +343,85 @@ describe('SectionEditor Save button', () => {
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Section 2 overlaps the one before it'));
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Typed timestamps. Marking by ear and nudging gets a boundary or a chord
+ * close; the exact moment is typed, and every time in the editor is shown to
+ * the millisecond so the difference being corrected is visible.
+ */
+describe('SectionEditor typed timestamps', () => {
+  const chordTime = (time: string) => screen.getByLabelText(`Start of the chord at ${time}`);
+
+  const type = (box: HTMLElement, value: string) => {
+    fireEvent.change(box, { target: { value } });
+    fireEvent.blur(box);
+  };
+
+  it('moves a chord to the moment that was typed', async () => {
+    renderChorded();
+
+    type(chordTime('0:25.000'), '0:26.250');
+
+    expect(chordSelect('0:26.250')).toHaveValue('V');
+    const saved = await savedSections();
+    expect(saved.p_sections[1].progression_roman).toEqual(['I', 'V', 'vi', 'IV']);
+    expect(saved.p_sections[1].chord_timings).toEqual([0, 8250, 14000, 21000]);
+  });
+
+  // Clamped, not thrown away: a time past the next chord is one read slightly
+  // wrong, and the box shows what was actually kept.
+  it('holds a chord typed past its neighbour at the nearest moment that fits', () => {
+    renderChorded();
+
+    type(chordTime('0:25.000'), '5:00.000');
+
+    // vi sounds at 0:32, and two chords cannot land within 250ms of each other.
+    expect(chordSelect('0:31.750')).toHaveValue('V');
+  });
+
+  it('leaves a chord alone when what was typed is not a time', () => {
+    renderChorded();
+
+    type(chordTime('0:25.000'), 'halfway-ish');
+
+    expect(chordSelect('0:25.000')).toHaveValue('V');
+  });
+
+  // It sounds from the section's start whatever its stored onset says, so the
+  // boundary is the only thing there is to move.
+  it("will not retime a section's first chord", () => {
+    renderChorded();
+
+    expect(chordTime('0:18.000')).toBeDisabled();
+    expect(chordTime('0:25.000')).not.toBeDisabled();
+  });
+
+  it('moves a boundary to the moment that was typed, to the millisecond', async () => {
+    renderChorded();
+
+    type(screen.getByLabelText('Start of verse 1'), '0:20.125');
+
+    const saved = await savedSections();
+    expect(saved.p_sections[0].end_ms).toBe(20_125);
+    expect(saved.p_sections[1].start_ms).toBe(20_125);
+  });
+
+  it('keeps a typed boundary clear of its neighbours', async () => {
+    renderChorded();
+
+    type(screen.getByLabelText('Start of verse 1'), '9:00.000');
+
+    // The chorus begins 0:46, and a section cannot be shorter than a second.
+    const saved = await savedSections();
+    expect(saved.p_sections[1].start_ms).toBe(45_000);
+  });
+
+  it('pins the first section to the start of the track', () => {
+    renderChorded();
+
+    expect(screen.getByLabelText('Start of intro 1')).toBeDisabled();
+    expect(screen.getByLabelText('Start of verse 1')).not.toBeDisabled();
   });
 });

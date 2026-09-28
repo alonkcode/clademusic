@@ -1,12 +1,14 @@
-import { Plus, Scissors, X } from 'lucide-react';
+import { Crosshair, Plus, Scissors, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatTime } from '@/lib/timeFormat';
 import { MIN_CHORD_MS, type ChordChoice, type ChordSpan } from '@/lib/harmony/chordDraft';
 import { chordDisplayName, parseRomanChord } from '@/lib/harmony/theory';
+import { TimecodeInput } from '@/components/TimecodeInput';
 
 /**
- * One section's chords in the section editor: change what a chord is, split it
- * into two halves, or take it out. Presentation only - every edit is handed
- * back to the editor, which owns the draft.
+ * One section's chords in the section editor: change what a chord is, move
+ * when it lands, split it into two halves, or take it out. Presentation only -
+ * every edit is handed back to the editor, which owns the draft.
  */
 
 interface SectionChordListProps {
@@ -16,6 +18,8 @@ interface SectionChordListProps {
   /** Pitch class of the key's tonic, when known, so a numeral can also be read as a letter name. */
   tonic: number | null;
   onReplace: (index: number, numeral: string) => void;
+  /** Move a chord's onset; the editor clamps it between its neighbours. */
+  onMove: (index: number, ms: number) => void;
   onSplit: (index: number) => void;
   onRemove: (index: number) => void;
   /** Give a section with no chords its first one. */
@@ -23,13 +27,8 @@ interface SectionChordListProps {
   onSeek: (ms: number) => void;
 }
 
-/** Tenths of a second: chords change far more often than sections do. */
-function formatChordTime(ms: number): string {
-  const tenths = Math.max(0, Math.round(ms / 100));
-  const minutes = Math.floor(tenths / 600);
-  const seconds = Math.floor((tenths % 600) / 10);
-  return `${minutes}:${String(seconds).padStart(2, '0')}.${tenths % 10}`;
-}
+/** Milliseconds, like the boundaries: a chord change is heard, not rounded. */
+const formatChordTime = (ms: number) => formatTime(ms, true);
 
 /** "vi", or "vi · Am" once the key is known. */
 function chordLabel(numeral: string, mode: 'major' | 'minor', tonic: number | null): string {
@@ -47,6 +46,7 @@ export function SectionChordList({
   mode,
   tonic,
   onReplace,
+  onMove,
   onSplit,
   onRemove,
   onAddFirst,
@@ -76,7 +76,7 @@ export function SectionChordList({
 
   return (
     <ul className="mt-1.5 flex flex-wrap gap-1.5">
-      {spans.map((span) => {
+      {spans.map((span, position) => {
         const time = formatChordTime(span.startMs);
         // A numeral that is not one of the offered triads (a 7th, say) must
         // still show as itself rather than a blank select.
@@ -107,11 +107,30 @@ export function SectionChordList({
             <button
               type="button"
               onClick={() => onSeek(span.startMs)}
-              className={cn(TOUCH_TARGET, 'px-1.5 font-mono text-[11px] tabular-nums hover:bg-muted/60')}
+              className={cn(
+                TOUCH_TARGET,
+                'border-l border-border/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              )}
+              aria-label={`Jump to ${time}`}
               title="Jump here"
             >
-              {time}
+              <Crosshair className="h-3.5 w-3.5" />
             </button>
+
+            {/* A section's first chord sounds from the section's start, so its
+                onset is the boundary's - move that instead. */}
+            <TimecodeInput
+              valueMs={span.startMs}
+              disabled={position === 0}
+              onCommit={(ms) => onMove(span.index, ms)}
+              aria-label={`Start of the chord at ${time}`}
+              title={
+                position === 0
+                  ? 'The first chord of a section plays from the start of that section'
+                  : 'Type an exact start, to the millisecond'
+              }
+              className="rounded-none border-y-0 border-l border-r-0"
+            />
 
             <button
               type="button"

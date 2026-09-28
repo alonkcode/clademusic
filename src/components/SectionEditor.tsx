@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Music, Trash2, Save, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Music, Trash2, Save, X, Loader2, ChevronLeft, ChevronRight, Crosshair } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatTime } from '@/lib/timeFormat';
 import { usePlayer } from '@/player/PlayerContext';
 import { useSaveTrackSections } from '@/hooks/api/useTrackSections';
 import { useTrack } from '@/hooks/api/useTracks';
 import { SectionChordList } from '@/components/SectionChordList';
+import { TimecodeInput } from '@/components/TimecodeInput';
 import {
   addBoundary,
   draftFromSections,
@@ -23,6 +25,7 @@ import {
   chordChoices,
   chordSpansBySection,
   draftChordsFromSections,
+  moveChord,
   removeChord,
   replaceChord,
   splitChord,
@@ -57,10 +60,13 @@ interface SectionEditorProps {
 
 const NUDGE_MS = 500;
 
-function formatMs(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}
+/**
+ * Every moment in the editor is shown - and typed back - to the millisecond.
+ * Marking by ear lands within a few frames of the change; the last few are
+ * what the nudge buttons and the typed boxes are for, and a display rounded to
+ * the second would hide exactly the difference being corrected.
+ */
+const timecode = (ms: number) => formatTime(ms, true);
 
 const positiveMs = (ms: unknown): number =>
   typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0;
@@ -141,7 +147,7 @@ export function SectionEditor({
           title="Start a new section at the current position"
         >
           <Plus className="h-3.5 w-3.5" />
-          Mark at {formatMs(positionMs)}
+          Mark at {timecode(positionMs)}
         </button>
 
         <button
@@ -156,7 +162,7 @@ export function SectionEditor({
           title="Start a new chord at the current position"
         >
           <Music className="h-3.5 w-3.5" />
-          Add chord at {formatMs(positionMs)}
+          Add chord at {timecode(positionMs)}
         </button>
 
         <span className="text-[11px] text-muted-foreground">
@@ -195,7 +201,7 @@ export function SectionEditor({
               <select
                 value={section.label}
                 onChange={(e) => setDraft((d) => setLabel(d, index, e.target.value as SectionLabel))}
-                aria-label={`Label for section starting at ${formatMs(section.startMs)}`}
+                aria-label={`Label for section starting at ${timecode(section.startMs)}`}
                 className="h-7 rounded border border-border/60 bg-background px-1.5 text-[11px] capitalize"
               >
                 {SECTION_LABELS.map((label) => (
@@ -211,14 +217,35 @@ export function SectionEditor({
 
               {/* Seeking to a boundary is how you check you put it in the right
                   place - listen to the transition rather than trust the number. */}
-              <button
-                type="button"
-                onClick={() => seekTo(section.startMs / 1000)}
-                className="rounded px-1.5 py-0.5 font-mono text-[11px] tabular-nums hover:bg-background/70"
-                title="Jump here"
-              >
-                {formatMs(section.startMs)}–{formatMs(section.endMs)}
-              </button>
+              <span className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => seekTo(section.startMs / 1000)}
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-muted-foreground hover:bg-background/70 hover:text-foreground sm:min-h-8 sm:min-w-8"
+                  aria-label={`Jump to ${timecode(section.startMs)}`}
+                  title="Jump here"
+                >
+                  <Crosshair className="h-3.5 w-3.5" />
+                </button>
+
+                {/* The first section owns the start of the track, so its start
+                    is not a boundary anyone can move. */}
+                <TimecodeInput
+                  valueMs={section.startMs}
+                  disabled={index === 0}
+                  onCommit={(ms) => setDraft((d) => moveBoundary(d, index, ms, safeDuration))}
+                  aria-label={`Start of ${section.label} ${section.ordinal}`}
+                  title={
+                    index === 0
+                      ? 'The first section starts where the track does'
+                      : 'Type an exact start, to the millisecond'
+                  }
+                />
+
+                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                  –{timecode(section.endMs)}
+                </span>
+              </span>
 
               {index > 0 && (
                 <span className="inline-flex items-center">
@@ -260,6 +287,12 @@ export function SectionEditor({
               mode={mode}
               tonic={tonic}
               onReplace={(chordIndex, numeral) => setChords((c) => replaceChord(c, chordIndex, numeral))}
+              onMove={(chordIndex, ms) =>
+                applyChordEdit(
+                  moveChord(chords, chordIndex, ms, built),
+                  "Can't move that chord: there is no room for it between its neighbours."
+                )
+              }
               onSplit={(chordIndex) =>
                 applyChordEdit(splitChord(chords, chordIndex, built), 'That chord is too short to split.')
               }
@@ -279,7 +312,9 @@ export function SectionEditor({
       <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
         Saving replaces this track's stored sections and chords with what's shown here. A chord stays
         where it is in the song when you move a boundary, and belongs to whichever section it lands
-        in. The first chord of a section plays from the start of that section.
+        in. The first chord of a section plays from the start of that section. Every time can be
+        typed as <span className="font-mono">m:ss.mmm</span> and is kept to the millisecond; one
+        typed outside what fits between its neighbours is held at the nearest moment that does.
       </p>
     </div>
   );
