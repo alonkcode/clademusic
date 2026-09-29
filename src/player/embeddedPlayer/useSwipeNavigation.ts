@@ -25,10 +25,17 @@ export interface SwipeTransport {
  * on them would tear the listeners down and re-attach them several times a
  * second while a track plays. The effect only needs to re-run when the element
  * mounts or unmounts, which is what `mounted` tracks.
+ *
+ * Returns a ref that is true from the moment a swipe is acted on until a
+ * reader clears it. A flick past the browser's tap slop usually suppresses the
+ * click engines synthesize after a touch, but that threshold isn't guaranteed
+ * across engines - anything clickable inside the swiped element should check
+ * this first, or changing track by swipe would also fire that element's click.
  */
 export function useSwipeNavigation(ref: RefObject<HTMLElement | null>, transport: SwipeTransport, mounted: boolean) {
   const transportRef = useRef(transport);
   transportRef.current = transport;
+  const didSwipeRef = useRef(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -42,6 +49,7 @@ export function useSwipeNavigation(ref: RefObject<HTMLElement | null>, transport
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
       startTime = Date.now();
+      didSwipeRef.current = false;
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
@@ -50,6 +58,7 @@ export function useSwipeNavigation(ref: RefObject<HTMLElement | null>, transport
       const isSwipe =
         Math.abs(diffX) > SWIPE_MIN_DISTANCE_PX && Math.abs(diffX) > diffY && Date.now() - startTime < SWIPE_MAX_DURATION_MS;
       if (!isSwipe) return;
+      didSwipeRef.current = true;
 
       const { effectiveCanNext, effectiveCanPrev, handleNext, handlePrev } = transportRef.current;
       if (diffX > 0) {
@@ -66,4 +75,6 @@ export function useSwipeNavigation(ref: RefObject<HTMLElement | null>, transport
       el.removeEventListener('touchend', handleTouchEnd);
     };
   }, [ref, mounted]);
+
+  return didSwipeRef;
 }

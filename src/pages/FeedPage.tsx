@@ -9,6 +9,7 @@ import { BottomNav } from '@/components/BottomNav';
 import { GuestBanner } from '@/components/GuestBanner';
 import { ResponsiveContainer, DesktopColumns } from '@/components/layout/ResponsiveLayout';
 import { usePersonalizedFeed } from '@/hooks/api/useFeed';
+import { useTrack } from '@/hooks/api/useTracks';
 import { useAuth } from '@/hooks/useAuth';
 import { useLastFmRecentTracks } from '@/hooks/api/useLastFm';
 import { useSpotifyRecommendations } from '@/hooks/api/useSpotifyUser';
@@ -17,7 +18,7 @@ import { useSetting } from '@/hooks/useSystemSettings';
 import { InteractionType, Track } from '@/types';
 import { ChevronUp, ChevronDown, LogIn, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { usePlayer } from '@/player/PlayerContext';
 import { CladeBrand, ProfileCircle } from '@/components/shared';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
@@ -27,7 +28,11 @@ export default function FeedPage() {
   const chatEnabled = useSetting('flag.chat_enabled');
   const { data: lastfmRecentRaw = [] } = useLastFmRecentTracks(200);
   const navigate = useNavigate();
-  
+  // Set by the docked player's title tap: the one song the feed should show.
+  const location = useLocation();
+  const focusTrackId = (location.state as { focusTrackId?: string } | null)?.focusTrackId;
+  const locationKey = location.key;
+
   // Fetch from multiple sources
   const { data: trackResult, isLoading: tracksLoading, error: tracksError } = usePersonalizedFeed(50);
   const { data: recommendations = [], isLoading: recommendationsLoading } = useSpotifyRecommendations([], [], 50);
@@ -81,7 +86,7 @@ export default function FeedPage() {
   }, [lastfmRecentRaw]);
 
   // Merge: top of the ranked feed, scrobbles (newest), rest of the feed, Spotify recs; dedupe by provider id or title+artist
-  const tracks: Track[] = useMemo(() => {
+  const rankedTracks: Track[] = useMemo(() => {
     const nameArtistKey = (t: Track) => {
       const title = (t.title || (t as any).name || '').toLowerCase().trim();
       const artist = (t.artist || t.artists?.[0] || '').toLowerCase().trim();
@@ -145,6 +150,32 @@ export default function FeedPage() {
   const [showAuthPrompt, setShowAuthPrompt] = useState(!user);
   const { openPlayer, canonicalTrackId } = usePlayer();
 
+  // A song can be playing that this feed's own list doesn't contain - started
+  // from search, a playlist, a profile or the queue. Tapping the player's
+  // title asks the feed to show what's playing, so with no card for it the
+  // tap would land on whatever card was already up. Fetch that one song and
+  // put it at the front. useTrack resolves catalog ids as well as the
+  // `spotify:`/`youtube:` canonical ids the player synthesizes for a provider
+  // track with no catalog row, and all three of its sources return a row
+  // whose own id is that same canonical id - which is what lets the jump
+  // below, and the player-follows-feed effect, find it by id. A lookup that
+  // fails yields nothing and leaves the feed exactly as it was.
+  const playingIsInFeed = useMemo(
+    () => !!canonicalTrackId && rankedTracks.some((t) => t.id === canonicalTrackId),
+    [rankedTracks, canonicalTrackId]
+  );
+  const { data: playingTrack } = useTrack(
+    canonicalTrackId ?? undefined,
+    !!canonicalTrackId && !playingIsInFeed
+  );
+  const tracks: Track[] = useMemo(
+    () =>
+      playingTrack && !playingIsInFeed && playingTrack.id === canonicalTrackId
+        ? [playingTrack, ...rankedTracks]
+        : rankedTracks,
+    [playingTrack, playingIsInFeed, canonicalTrackId, rankedTracks]
+  );
+
   // The guest-mode prompt sits in normal flow above the card, so its real
   // height (which varies with text wrapping/viewport width) has to come out
   // of the card's own dvh budget below - otherwise the card claims its usual
@@ -175,6 +206,30 @@ export default function FeedPage() {
     // fought back to wherever the player last was.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canonicalTrackId, tracks]);
+
+  // Tapping the docked player's title navigates here asking for one song:
+  // show me that one. The effect above can't serve that on its own - it only
+  // fires when the PLAYING track changes, and this tap changes nothing about
+  // playback, so arriving from a card the listener had swiped away to (or
+  // tapping the title while already on the feed) would otherwise do nothing
+  // at all.
+  //
+  // One jump per navigation, tracked by location.key, which is fresh on every
+  // navigate: a second tap mints a new key and jumps again, but nothing else
+  // does. `tracks` stays in the deps because the list is still loading (or
+  // the off-feed song above is still being fetched) on the render this
+  // arrives at, so the requested song often isn't findable until a later
+  // pass - but the list also gets a new identity on every background
+  // refetch, and without the ref each of those would drag the listener back
+  // to this card however long ago they swiped away from it.
+  const servedFocusKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusTrackId || servedFocusKeyRef.current === locationKey) return;
+    const focusIndex = tracks.findIndex((t) => t.id === focusTrackId);
+    if (focusIndex === -1) return;
+    servedFocusKeyRef.current = locationKey;
+    setCurrentIndex(focusIndex);
+  }, [focusTrackId, locationKey, tracks]);
 
   useLayoutEffect(() => {
     if (!authPromptEl) {

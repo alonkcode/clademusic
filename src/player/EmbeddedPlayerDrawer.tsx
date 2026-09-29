@@ -8,7 +8,7 @@ import { useSpotifyBlocked, useSpotifyConnected } from '@/hooks/api/useSpotifyUs
 import { useIsAdmin } from '@/hooks/api/useAdmin';
 import { sectionDisplayNames } from '@/lib/sections';
 import { useAuth } from '@/hooks/useAuth';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { UniversalPlayerHost } from '@/player/universal/UniversalPlayerHost';
 import { SpotifyWebPlayer } from '@/player/providers/SpotifyWebPlayer';
 import { HarmonicHUD } from '@/components/HarmonicHUD';
@@ -83,6 +83,7 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   } = usePlayer();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: isSpotifyConnected, isLoading: isConnectionLoading } = useSpotifyConnected();
   const { data: isSpotifyBlocked } = useSpotifyBlocked();
   const connectSpotify = useConnectSpotify();
@@ -280,7 +281,33 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
   // Swipe the title/artist block for prev/next track. The block only exists
   // while a track is loaded, hence `!isIdle`.
   const titleSwipeRef = useRef<HTMLDivElement>(null);
-  useSwipeNavigation(titleSwipeRef, { handlePrev, handleNext, effectiveCanPrev, effectiveCanNext }, !isIdle);
+  const didSwipeRef = useSwipeNavigation(
+    titleSwipeRef,
+    { handlePrev, handleNext, effectiveCanPrev, effectiveCanNext },
+    !isIdle
+  );
+
+  // The player bar is global, so its title is the one place on every page that
+  // names what is actually playing. Tapping it takes the main content back to
+  // that song: the feed card, which carries the cover, the metadata and the
+  // split section chips. The track goes as route state rather than a query
+  // param so a repeat tap still lands - each navigate mints a fresh
+  // location.key, which is what FeedPage keys its jump on.
+  const handleTitleClick = useCallback(() => {
+    // A horizontal flick on this block changes track (useSwipeNavigation
+    // above); don't also navigate on the click an engine may synthesize
+    // after that touch.
+    if (didSwipeRef.current) {
+      didSwipeRef.current = false;
+      return;
+    }
+    navigate('/feed', {
+      state: canonicalTrackId ? { focusTrackId: canonicalTrackId } : undefined,
+      // Already on the feed: replace, or every tap stacks another identical
+      // /feed entry for the back button to walk back through.
+      replace: location.pathname === '/feed',
+    });
+  }, [didSwipeRef, navigate, canonicalTrackId, location.pathname]);
 
   // NOT an early return on isIdle: UniversalPlayerHost mounts a single,
   // persistent <iframe id="universal-player"> that every provider switch
@@ -496,7 +523,15 @@ export function EmbeddedPlayerDrawer({ onNext, onPrev, canNext, canPrev }: Embed
               fixed 9rem basis counts toward wrapping); lg+ keeps 9rem. */}
           <div ref={titleSwipeRef} className="flex min-w-[2rem] flex-1 flex-col leading-tight [touch-action:pan-y] lg:flex-[0_1_9rem]">
             {resolvedTitle && (
-              <span className="truncate text-xs font-bold text-foreground md:text-sm" aria-label="Track title">{resolvedTitle}</span>
+              <button
+                type="button"
+                onClick={handleTitleClick}
+                className="truncate text-left text-xs font-bold text-foreground underline-offset-2 hover:underline md:text-sm"
+                aria-label="Track title"
+                title="Show this song in the feed"
+              >
+                {resolvedTitle}
+              </button>
             )}
             {resolvedArtist && !embedError && (
               <span className="truncate text-[11px] text-muted-foreground md:text-xs" aria-label="Artist name">{resolvedArtist}</span>
