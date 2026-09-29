@@ -19,7 +19,8 @@ const clock = (ms: number) => {
  * saved for everyone". See useAnalyzeTrack for what happens behind the button.
  */
 export function AnalyzeTrackPanel({ onSignIn, ...target }: AnalyzeTrackPanelProps) {
-  const { state, live, progress, unaligned, message, start, stop } = useAnalyzeTrack(target);
+  const { state, live, route, progress, unaligned, message, start, stop } = useAnalyzeTrack(target);
+  const byMicrophone = route === 'microphone';
 
   const chord = live.chord
     ? `${pitchClassName(live.chord.root)}${live.chord.quality === 'minor' ? 'm' : ''}`
@@ -45,7 +46,9 @@ export function AnalyzeTrackPanel({ onSignIn, ...target }: AnalyzeTrackPanelProp
                 ? `Heard ${clock(progress.coverageMs)} of about ${clock(progress.requiredCoverageMs)}. Start again and let it play.`
                 : state === 'error'
                   ? (message ?? 'Something went wrong.')
-                  : 'Listen while it plays and its chords, key and BPM are saved for everyone. When your browser asks, pick this tab and tick "Share tab audio".'}
+                  : byMicrophone
+                    ? 'Listen while it plays and its chords, key and BPM are saved for everyone. Allow the microphone when asked, turn the volume up and keep the phone near the speaker.'
+                    : 'Listen while it plays and its chords, key and BPM are saved for everyone. When your browser asks, pick this tab and tick "Share tab audio".'}
             </p>
           </div>
           <Button size="sm" onClick={() => void start()}>
@@ -70,8 +73,8 @@ export function AnalyzeTrackPanel({ onSignIn, ...target }: AnalyzeTrackPanelProp
         <>
           <AudioLines className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <p className="min-w-0 flex-1 basis-56 text-xs text-muted-foreground">
-            No chords for this track yet. Live analysis needs desktop Chrome or Edge; once someone analyzes it there,
-            it is available everywhere.
+            No chords for this track yet. This browser cannot capture audio for analysis; once someone analyzes it
+            elsewhere, it is available everywhere.
           </p>
         </>
       )}
@@ -79,7 +82,7 @@ export function AnalyzeTrackPanel({ onSignIn, ...target }: AnalyzeTrackPanelProp
       {state === 'requesting' && (
         <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          Waiting for you to share this tab's audio…
+          {byMicrophone ? 'Waiting for microphone access…' : "Waiting for you to share this tab's audio…"}
         </p>
       )}
 

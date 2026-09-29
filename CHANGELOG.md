@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Live chord detection on phones (Sep 29, 2026)
+- Analysing a track no longer needs desktop Chrome or Edge. Mobile browsers
+  do not implement `getDisplayMedia`, so there is no tab audio to capture;
+  phones and tablets now capture the room with their own microphone and the
+  `services/live-analysis` WebSocket service runs the DSP, returning chord,
+  key, tempo and section results. Playback is untouched — the track still
+  plays through the provider's own player, and no provider audio reaches
+  Clade's servers (`providerAnalysisCapability` still reports
+  `serverSideAudio: false` for every provider).
+- `useTrackAnalysisSource` picks the route: tab audio wherever
+  `getDisplayMedia` exists, the microphone otherwise. Tab audio stays the
+  default — it is a clean digital signal, costs no server capacity and asks
+  for no microphone. Both `AnalyzeTrackPanel` and the `HarmonicHUD` live
+  button now follow it, so the capability is the same on both surfaces.
+- New client modules under `src/lib/liveAnalysis/`: the WebSocket transport
+  (`liveAnalysisClient.ts`), microphone capture (`micCapture.ts`) and the
+  wire/app unit conversion (`wireDecode.ts`). Only `protocol.ts` is imported
+  from `services/live-analysis`; no server code enters the browser bundle.
+- `VITE_LIVE_ANALYSIS_WS_URL` points the app at the service. **While it is
+  unset the microphone route reports itself unavailable and nothing changes**,
+  so this ships inert until the service is deployed and the variable is set
+  in both GitHub Actions and Vercel (Vite inlines `VITE_*` at build time, so
+  it needs a redeploy without build cache).
+
 ### Added — Automatic section-boundary detection (Aug 31, 2026)
 - Verse/chorus/bridge/intro/outro segmentation from live-captured audio,
   built on the same tab-audio capture already used for live chord detection

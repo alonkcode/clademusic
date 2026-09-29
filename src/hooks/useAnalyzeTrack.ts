@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
-import { useLiveChordDetection, type UseLiveChordDetectionResult } from '@/hooks/useLiveChordDetection';
+import { useTrackAnalysisSource, type AnalysisRoute, type TrackAnalysisSource } from '@/hooks/useTrackAnalysisSource';
 import { parseSyntheticTrackId, resolvedTrackIdKey } from '@/hooks/api/useResolvedTrackId';
 import {
   buildDetectionRunPayload,
@@ -72,7 +72,9 @@ export type AnalyzeState =
 
 export interface UseAnalyzeTrackResult {
   state: AnalyzeState;
-  live: UseLiveChordDetectionResult;
+  live: TrackAnalysisSource;
+  /** Tab audio or microphone - the two ask the listener for different things. */
+  route: AnalysisRoute;
   /** How close the capture is to being saveable. Zeroed until there is anything to judge. */
   progress: AutoPromotionProgress;
   /** Capturing, but the player never reports a moving position - the run could not be tied to the song. */
@@ -114,7 +116,7 @@ export function shouldOfferAnalysis(args: {
 }
 
 export function useAnalyzeTrack(target: AnalyzeTarget): UseAnalyzeTrackResult {
-  const live = useLiveChordDetection();
+  const live = useTrackAnalysisSource();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
@@ -306,6 +308,7 @@ export function useAnalyzeTrack(target: AnalyzeTarget): UseAnalyzeTrackResult {
   return {
     state,
     live,
+    route: live.route,
     progress: verdict?.progress ?? {
       keyConfidence: 0,
       chords: 0,

@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock('@/hooks/useLiveChordDetection', () => ({ useLiveChordDetection: () => mocks.live }));
+// The source selector is what useAnalyzeTrack consumes; mocking it stands in
+// for whichever capture route a device got, tab audio or microphone.
+vi.mock('@/hooks/useTrackAnalysisSource', () => ({ useTrackAnalysisSource: () => mocks.live }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock('@/hooks/use-toast', () => ({ toast: mocks.toast }));
 vi.mock('@/api/detectionRuns', async (importOriginal) => ({
@@ -56,6 +58,7 @@ const baseLive = () => ({
   detectedKey: null,
   tempo: null,
   timingAligned: true,
+  route: 'tab-audio',
   start: vi.fn(async () => {}),
   stop: vi.fn(),
   reset: vi.fn(),
@@ -152,10 +155,24 @@ describe('AnalyzeTrackPanel', () => {
   });
 
   it('explains that this browser cannot do it, with no button to press', () => {
-    mocks.live = { ...baseLive(), supported: false };
+    mocks.live = { ...baseLive(), supported: false, route: 'none' };
     renderPanel();
-    expect(screen.getByText(/needs desktop Chrome or Edge/)).toBeTruthy();
+    expect(screen.getByText(/cannot capture audio for analysis/)).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('asks a phone for the microphone rather than for tab audio', () => {
+    mocks.live = { ...baseLive(), route: 'microphone' };
+    renderPanel();
+    expect(screen.getByText(/keep the phone near the speaker/)).toBeTruthy();
+    // The offer is the same one-click analysis; only what it asks for differs.
+    expect(screen.getByRole('button', { name: 'Analyze this track' })).toBeTruthy();
+  });
+
+  it('names the microphone while waiting for permission', () => {
+    mocks.live = { ...baseLive(), status: 'requesting', route: 'microphone' };
+    renderPanel();
+    expect(screen.getByText('Waiting for microphone access…')).toBeTruthy();
   });
 
   it('shows what is being heard while it listens, without saving yet', () => {

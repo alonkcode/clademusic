@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useSectionSync } from '@/hooks/useSectionSync';
 import { useHarmonicLoop } from '@/hooks/useHarmonicLoop';
-import { useLiveChordDetection } from '@/hooks/useLiveChordDetection';
+import { useTrackAnalysisSource } from '@/hooks/useTrackAnalysisSource';
 import { useAuth } from '@/hooks/useAuth';
 import { useIsAdmin } from '@/hooks/api/useAdmin';
 import { SectionEditor } from '@/components/SectionEditor';
@@ -71,7 +71,7 @@ export function HarmonicHUD({
   className,
 }: HarmonicHUDProps) {
   const [controlsOpen, setControlsOpen] = useState(false);
-  const live = useLiveChordDetection();
+  const live = useTrackAnalysisSource();
   const { user } = useAuth();
   const { data: isAdmin } = useIsAdmin();
   const [editingSections, setEditingSections] = useState(false);
@@ -484,9 +484,10 @@ export function HarmonicHUD({
             </button>
           )}
 
-          {/* Live audio detection - genuine DSP over whatever the browser lets
-              the user share, most often this same tab. Desktop Chrome/Edge
-              only; hidden rather than shown-disabled everywhere else, since a
+          {/* Live audio detection - genuine DSP over whatever audio the device
+              will give a web page: the shared tab on desktop Chrome/Edge, the
+              microphone on a phone. Hidden where neither is available (Safari,
+              or a phone with no analysis service configured), since a
               permanently-dead button reads as broken, not as unsupported. */}
           {live.supported && (
             <button
