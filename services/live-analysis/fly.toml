@@ -1,0 +1,73 @@
+# Clade live analysis on Fly.io.
+#
+# Build context must be the REPOSITORY ROOT: the Dockerfile copies the shared
+# DSP modules from supabase/functions/_shared/dsp, which are outside this
+# directory. Deploy from the root, naming this config:
+#
+#   fly deploy . --config services/live-analysis/fly.toml --ha=false --remote-only
+#
+# [build] dockerfile below resolves relative to this file, and --dockerfile
+# does not override it. --ha=false matters on any deploy that creates
+# machines: Fly otherwise makes two, and a second machine breaks resume.
+#
+# Credentials are not in this file. Set them once, then they persist:
+#
+#   fly secrets set --config services/live-analysis/fly.toml \
+#     SUPABASE_URL=https://<ref>.supabase.co \
+#     SUPABASE_ANON_KEY=<publishable key>
+#
+# The anon/publishable key is public by design (it is already in the browser
+# bundle), but it stays out of git all the same. No service-role key is wanted.
+
+app = 'clademusic-server'
+primary_region = 'fra'
+
+[build]
+  # Relative to this file, not to the build context.
+  dockerfile = 'Dockerfile'
+
+[env]
+  PORT = '8787'
+  # Exact origins, checked as a Set at the WebSocket handshake before `hello`
+  # is read (server.ts). Not a pattern: '*' is refused at startup, and
+  # localhost and 127.0.0.1 are different strings. Every spelling the browser
+  # can put in the address bar has to be here or the socket 403s.
+  #   www.clademusic.com  Vercel production (the apex 308-redirects here, so it needs no entry)
+  #   kaospan.github.io   GitHub Pages, which has no CNAME and so is its own origin
+  #   :8080 both ways     vite dev binds host '::' and answers on either spelling
+  #   127.0.0.1:8090      bun run dev:e2e, so the Playwright suite can use the socket
+  ALLOWED_ORIGINS = 'https://www.clademusic.com,https://kaospan.github.io,http://localhost:8080,http://127.0.0.1:8080,http://127.0.0.1:8090'
+
+[http_service]
+  internal_port = 8787
+  # Fly terminates TLS, so the browser gets wss:// and the container stays plain HTTP.
+  force_https = true
+
+  # Sessions live in one process's memory (SessionManager's Map), and a resume
+  # after a dropped connection has to reach the SAME machine or it is answered
+  # 'session_expired'. So: exactly one machine, never stopped mid-session.
+  # Raising this to 2+ does not double capacity, it breaks resume.
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  # The app refuses its own 201st socket (maxSessions * 4, server.ts) with a
+  # 503. Match that here so Fly's proxy does not start refusing first.
+  [http_service.concurrency]
+    type = 'connections'
+    hard_limit = 200
+    soft_limit = 200
+
+  [[http_service.checks]]
+    method = 'GET'
+    path = '/healthz'
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+
+# 50 sessions at the measured ~0.5% of a core and ~1 MB each: about a quarter
+# of one core, well inside 512 MB. Raise MAX_SESSIONS only with a bigger vm.
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'

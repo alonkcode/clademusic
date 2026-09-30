@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Live-analysis service deploys to Fly.io (Sep 30, 2026)
+- `services/live-analysis/fly.toml` is the deployment of the microphone
+  analysis service: Fly app `clademusic-server` in `fra`, served at
+  `wss://clademusic-server.fly.dev/ws`, with `/healthz` health checks and
+  `ALLOWED_ORIGINS` for www.clademusic.com, kaospan.github.io and local dev.
+- Pinned to exactly one always-on machine (`auto_stop_machines = 'off'`,
+  `min_machines_running = 1`): sessions live in one process's memory, so a
+  second machine would make about half of all resumes fail with
+  `session_expired`. Scale with `MAX_SESSIONS` and the vm size instead.
+- Deploy (from the repo root, which is the build context):
+  `fly deploy . --config services/live-analysis/fly.toml --ha=false --remote-only`.
+  Secrets `SUPABASE_URL` and `SUPABASE_ANON_KEY` are set on the app, not in
+  git. `services/live-analysis/README.md` has the full steps.
+- Operators: the app still reports live analysis unavailable until
+  `VITE_LIVE_ANALYSIS_WS_URL` is set to that address in both GitHub Actions
+  secrets and Vercel, followed by a redeploy without build cache.
+
 ### Added — Live chord detection on phones (Sep 29, 2026)
 - Analysing a track no longer needs desktop Chrome or Edge. Mobile browsers
   do not implement `getDisplayMedia`, so there is no tab audio to capture;

@@ -81,6 +81,37 @@ location /ws {
 }
 ```
 
+### Fly.io
+
+`fly.toml` in this directory is the deployment: app `clademusic-server`
+(region `fra`), served at `wss://clademusic-server.fly.dev/ws`. These commands
+run from the repository root, because the image copies the shared DSP from
+outside this directory and so the build context must be the root:
+
+```
+fly launch --no-deploy --config services/live-analysis/fly.toml      # first time, to create the app
+fly secrets set --config services/live-analysis/fly.toml SUPABASE_URL=https://<ref>.supabase.co SUPABASE_ANON_KEY=<publishable key>
+fly deploy . --config services/live-analysis/fly.toml --ha=false --remote-only
+fly certs add live.clademusic.com --config services/live-analysis/fly.toml   # optional custom domain
+```
+
+`--ha=false` stops Fly from creating a second machine (see below), and no
+`--dockerfile` is needed: `[build] dockerfile` resolves relative to
+`fly.toml` itself. Deploy from a clean export of the commit
+(`git archive HEAD services/live-analysis supabase/functions/_shared/dsp`)
+rather than a working tree holding uncommitted DSP edits, since those would be
+baked into the image. Fly terminates TLS, so `force_https` is all `wss://` needs, and
+`[[http_service.checks]]` polls `/healthz` every 30 s. `ALLOWED_ORIGINS` is
+plain config in `[env]`; only the two Supabase values are secrets.
+
+**Keep it at one machine.** Sessions live in a `Map` in one process, and a
+resume after a dropped connection has to reach the machine that holds it -
+anywhere else it is answered `session_expired`, which is also what a forged
+resume gets. A second machine therefore does not add capacity, it makes
+resumes fail about half the time. `auto_stop_machines = 'off'` and
+`min_machines_running = 1` pin it. To carry more than 50 concurrent sessions,
+raise `MAX_SESSIONS` and the vm size together, never the machine count.
+
 Then set **`VITE_LIVE_ANALYSIS_WS_URL`** (for example `wss://live.clademusic.com/ws`)
 in **both** GitHub Actions secrets and Vercel, and redeploy without build cache
 (Vite inlines `VITE_*` at build time). While it is unset the app simply
