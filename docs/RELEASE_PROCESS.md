@@ -4,6 +4,9 @@ Clade uses Semantic Versioning (SemVer): `MAJOR.MINOR.PATCH`.
 
 - **`package.json`** is the canonical app version used for releases.
 - **`CHANGELOG.md`** is the canonical human-readable history (Keep a Changelog format).
+  Entries are written under `## [Unreleased]` in the same commit as each change,
+  not collected at release time (see `AGENTS.md`, "Documentation"). The `Changelog`
+  workflow flags any push to `main` that changes runtime code without one.
 
 ---
 

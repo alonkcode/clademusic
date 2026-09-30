@@ -149,6 +149,16 @@ When evaluating a diagnosis, implementation plan, or architectural decision:
 
 Do not agree with a technical claim merely because it was proposed by the user.
 
+## Documentation
+
+Documentation is updated in the same commit as the change it describes, not afterwards and not at release time. Work here reaches `main` by direct push, so no PR checklist will remind you.
+
+* A commit that changes what the app, an edge function, a SQL script, or a service does adds an entry under `## [Unreleased]` at the top of `CHANGELOG.md`: a `### Added|Changed|Fixed|Removed|Security — <title> (<Mon D, YYYY>)` heading and a few lines on what changed for users or operators and why. Newest entries go first.
+* If the change makes an architecture or feature doc wrong (`docs/HARMONIC_ANALYSIS_ARCHITECTURE.md`, `docs/PLAYER_ARCHITECTURE.md`, `docs/ARCHITECTURE_SUMMARY.md`, `docs/features.md`, a service README), correct that doc in the same commit.
+* If shipping it needs a manual step (redeploy an edge function, run a SQL script, rebuild `services/live-analysis`), the entry says so.
+* Exempt: commits with no behavior change whose subject starts with `test:`, `refactor:`, `ci:`, `chore:`, `docs:`, `style:` or `build:`, and commits whose message contains `[no changelog]` with a reason.
+* `bun run check:changelog <base>..<head>` (or `node scripts/check-changelog.mjs <base>..<head>`) applies these rules to a range. The `Changelog` workflow runs it on every push to `main` and every PR; run it before pushing.
+
 ## Completion Summary
 
 After modifying code, report:
@@ -156,5 +166,6 @@ After modifying code, report:
 * Root cause or implementation objective
 * Files changed
 * Important behavioral or architectural decisions
+* Documentation updated (changelog entry, docs corrected)
 * Verification commands actually run
 * Remaining risks or unresolved issues

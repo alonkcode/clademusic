@@ -1,0 +1,34 @@
+name: Changelog
+
+# Every commit that changes what the app does must add a CHANGELOG.md entry
+# (AGENTS.md, "Documentation"). Most work reaches main by direct push, where the
+# PR template's checklist is never shown, so the check runs on pushes too.
+#
+# Deliberately its own workflow: a missing entry shows up as a red check on the
+# commit, but it never holds back Deploy or the Vercel build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Changelog entry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check pushed commits
+        if: github.event_name == 'push'
+        run: node scripts/check-changelog.mjs "${{ github.event.before }}..${{ github.sha }}"
+
+      - name: Check pull request commits
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-changelog.mjs "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"

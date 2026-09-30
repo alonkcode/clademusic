@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in both GitHub Actions and Vercel (Vite inlines `VITE_*` at build time, so
   it needs a redeploy without build cache).
 
+### Added — Changelog kept with every change (Sep 29, 2026)
+- `AGENTS.md` ("Documentation") now requires a `CHANGELOG.md` entry in the
+  same commit as any change to what the app, an edge function, a SQL script
+  or a service does, plus corrections to any doc the change makes wrong.
+  Commits with no behavior change are exempt by subject prefix (`test:`,
+  `refactor:`, `ci:`, `chore:`, `docs:`, `style:`, `build:`) or a
+  `[no changelog]` note.
+- `scripts/check-changelog.mjs` applies that rule to a commit range
+  (`bun run check:changelog <base>..<head>`), and the new `Changelog`
+  workflow runs it on every push to `main` and every PR. It shows as a red
+  check but never blocks Deploy or the Vercel build.
+
 ### Added — Refactor audit (Sep 28, 2026)
 - `docs/refactor/`: a ranked refactor register, dependency graph, DRY
   inventory and type-safety audit. Findings only; no code was changed. The
@@ -55,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DB types are missing 25 of the 39 tables the app queries; `bun run
   typecheck` checks nothing; `services/similarityEngine.ts` does not compile;
   one YouTube search path would put `VITE_YOUTUBE_API_KEY` in the bundle.
+
+### Not recorded — Sep 2 to Sep 28, 2026
+- About 170 commits landed between the last changelog update (`b4d1b031`)
+  and `16b1ea41` without entries here. `git log b4d1b031..16b1ea41` is the
+  record for that period.
 
 ### Fixed — Chord detection follows the chords, not the melody (Sep 29, 2026)
 - Live chord detection named whatever was loudest, usually the singer: a bar

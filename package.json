@@ -28,6 +28,7 @@
     "test:pw:install": "bunx playwright install --with-deps chromium",
     "test:e2e": "bunx playwright test",
     "test:e2e:smoke": "bunx playwright test tests/app-routes.spec.ts",
+    "check:changelog": "node scripts/check-changelog.mjs",
     "seed": "node scripts/seed.js",
     "seed:reset": "node scripts/seed.js --reset"
   },
