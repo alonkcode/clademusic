@@ -18,7 +18,7 @@
  * Chord spans grow with the song, but a session has a hard duration cap.
  */
 
-import { ChordSmoother, chromaEnergy, chromaFromMagnitudes, matchChordTemplate } from '../../supabase/functions/_shared/dsp/chordDetection.ts';
+import { ChordSmoother, chordChromas, chromaEnergy, chromaFromMagnitudes, matchChordTemplate } from '../../supabase/functions/_shared/dsp/chordDetection.ts';
 import { ChordDecoder } from '../../supabase/functions/_shared/dsp/chordDecoder.ts';
 import type { ChordSpan } from '../../supabase/functions/_shared/dsp/chordTimeline.ts';
 import { estimateKey } from '../../supabase/functions/_shared/dsp/keyEstimation.ts';
@@ -273,12 +273,14 @@ export class StreamingAnalyzer {
     const linear = this.chordAnalyser.read(rel);
     const chroma = chromaFromMagnitudes(linear, this.sampleRate, this.chordFft);
     const energy = chromaEnergy(linear, this.sampleRate, this.chordFft);
-    const smoothed = this.smoother.push(matchChordTemplate(chroma, energy));
+    // Chords are matched without the lead line (see harmonyChroma); sections use the whole mix.
+    const { harmony, mix } = chordChromas(linear, this.sampleRate, this.chordFft);
+    const smoothed = this.smoother.push(matchChordTemplate(harmony, energy, mix));
     const timeSec = this.trackSecAt(audioSec);
 
     // The recorded progression is decoded from every frame, not from the
     // per-frame vote that drives the live chord events below - see ChordDecoder.
-    this.decoder.push(chroma, energy, timeSec);
+    this.decoder.push(harmony, energy, timeSec);
     this.recordChroma({ chroma, timeSec });
 
     const wire: WireChord | null = smoothed ? [smoothed.root, smoothed.quality === 'minor' ? 1 : 0] : null;

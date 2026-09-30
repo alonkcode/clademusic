@@ -22,7 +22,7 @@
  * function and under Vitest alike.
  */
 
-import { chromaEnergy, chromaFromMagnitudes } from './chordDetection.ts';
+import { chromaEnergy, harmonyChroma } from './chordDetection.ts';
 import type { ChordQuality } from './chordDetection.ts';
 import { ChordDecoder } from './chordDecoder.ts';
 import { estimateKey } from './keyEstimation.ts';
@@ -240,7 +240,7 @@ export function analyzePcm(samples: Float32Array, sampleRate: number): PreviewAn
 
     if (tick % CHORD_TICKS_PER_ONSET_TICK === 0) {
       const linear = chordAnalyser.read(endSample);
-      const chroma = chromaFromMagnitudes(linear, sampleRate, CHORD_FFT_SIZE);
+      const chroma = harmonyChroma(linear, sampleRate, CHORD_FFT_SIZE);
       const energy = chromaEnergy(linear, sampleRate, CHORD_FFT_SIZE);
       decoder.push(chroma, energy, timeSec);
     }

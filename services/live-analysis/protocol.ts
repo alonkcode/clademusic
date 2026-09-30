@@ -336,7 +336,7 @@ const isNumber = (v: unknown, min: number, max: number): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 
 /** Ids and provider names are plain tokens; anything else is refused before it reaches a log line. */
-const TOKEN_CHARS = /^[A-Za-z0-9:_.-]+$/;
+export const TOKEN_CHARS = /^[A-Za-z0-9:_.-]+$/;
 
 /** null unless `text` is a complete, in-range control message. */
 export function parseClientMessage(text: string): ClientMessage | null {

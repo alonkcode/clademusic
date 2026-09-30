@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   CHORD_STATES,
   ChordSmoother,
+  chordChromas,
   chromaEnergy,
   chromaFromMagnitudes,
+  harmonyChroma,
   matchChordTemplate,
   scoreChordTemplates,
 } from './chordDetection';
@@ -132,6 +134,97 @@ describe('chromaFromMagnitudes', () => {
     const chroma = chromaFromMagnitudes(new Array(1024).fill(0), 44100, 2048);
     expect(chroma.every((v) => v === 0)).toBe(true);
     expect(chroma.some((v) => Number.isNaN(v))).toBe(false);
+  });
+});
+
+/**
+ * The spectrum a mix of notes would give at the detector's real resolution:
+ * each partial is a peak at its nearest bin with a little window leakage either
+ * side. `cents` detunes a note, as vibrato does.
+ */
+const MIX_RATE = 44100;
+const MIX_FFT = 8192;
+interface Voice {
+  midi: number;
+  gain: number;
+  partials: number[];
+  cents?: number;
+}
+const PAD_PARTIALS = [1, 0.5, 0.33, 0.25, 0.2, 0.17];
+/** A sung vowel: the 2nd-4th harmonics as strong as the fundamental. */
+const VOICE_PARTIALS = [1, 1.3, 1.1, 0.8, 0.5, 0.35, 0.25, 0.18];
+
+function mixSpectrum(voices: Voice[]): Float32Array {
+  const mags = new Float32Array(MIX_FFT / 2);
+  const binHz = MIX_RATE / MIX_FFT;
+  for (const v of voices) {
+    const f0 = 440 * Math.pow(2, (v.midi - 69 + (v.cents ?? 0) / 100) / 12);
+    v.partials.forEach((g, i) => {
+      const bin = Math.round((f0 * (i + 1)) / binHz);
+      if (bin + 1 >= mags.length) return;
+      mags[bin] += v.gain * g;
+      mags[bin - 1] += 0.4 * v.gain * g;
+      mags[bin + 1] += 0.4 * v.gain * g;
+    });
+  }
+  return mags;
+}
+
+const C_MAJOR_PAD: Voice[] = [
+  { midi: 36, gain: 1, partials: PAD_PARTIALS.slice(0, 4) }, // bass C2
+  { midi: 60, gain: 1, partials: PAD_PARTIALS },
+  { midi: 64, gain: 1, partials: PAD_PARTIALS },
+  { midi: 67, gain: 1, partials: PAD_PARTIALS },
+];
+/** A D sung well over the C chord, a little sharp: a 9th, not a chord tone. */
+const LOUD_SUNG_D: Voice = { midi: 74, gain: 4, partials: VOICE_PARTIALS, cents: 30 };
+
+describe('harmonyChroma', () => {
+  it('takes a loud sung line out, so the chord under it is what gets named', () => {
+    const mags = mixSpectrum([...C_MAJOR_PAD, LOUD_SUNG_D]);
+
+    // The whole mix follows the singer.
+    expect(matchChordTemplate(chromaFromMagnitudes(mags, MIX_RATE, MIX_FFT), 1)).not.toMatchObject({ root: 0, quality: 'major' });
+    // With the line removed, the pad and bass decide.
+    expect(matchChordTemplate(harmonyChroma(mags, MIX_RATE, MIX_FFT), 1)).toMatchObject({ root: 0, quality: 'major' });
+  });
+
+  it('keeps the line when it is all there is, since then it is the harmony', () => {
+    const mags = mixSpectrum([{ midi: 69, gain: 1, partials: VOICE_PARTIALS }]);
+    const { harmony, mix } = chordChromas(mags, MIX_RATE, MIX_FFT);
+    expect(harmony).toEqual(mix);
+    expect(harmony.indexOf(Math.max(...harmony))).toBe(9); // A
+  });
+
+  it('returns unit-normalized chroma, and all zeros for silence', () => {
+    const chroma = harmonyChroma(mixSpectrum(C_MAJOR_PAD), MIX_RATE, MIX_FFT);
+    expect(Math.hypot(...chroma)).toBeCloseTo(1, 5);
+
+    const silent = chordChromas(new Float32Array(MIX_FFT / 2), MIX_RATE, MIX_FFT);
+    expect(silent.harmony.every((v) => v === 0)).toBe(true);
+    expect(silent.mix.every((v) => v === 0)).toBe(true);
+  });
+
+  it('agrees with chordChromas', () => {
+    const mags = mixSpectrum([...C_MAJOR_PAD, LOUD_SUNG_D]);
+    expect(harmonyChroma(mags, MIX_RATE, MIX_FFT)).toEqual(chordChromas(mags, MIX_RATE, MIX_FFT).harmony);
+  });
+});
+
+describe('matchChordTemplate with the whole mix as a second reading', () => {
+  it('still names a bare pad, whose top note the lead-line removal takes for a melody', () => {
+    const { harmony, mix } = chordChromas(mixSpectrum(C_MAJOR_PAD), MIX_RATE, MIX_FFT);
+    expect(matchChordTemplate(harmony, 1, mix)).toMatchObject({ root: 0, quality: 'major' });
+  });
+
+  it('still names the chord under a loud sung line', () => {
+    const { harmony, mix } = chordChromas(mixSpectrum([...C_MAJOR_PAD, LOUD_SUNG_D]), MIX_RATE, MIX_FFT);
+    expect(matchChordTemplate(harmony, 1, mix)).toMatchObject({ root: 0, quality: 'major' });
+  });
+
+  it('keeps the silence gate', () => {
+    const { harmony, mix } = chordChromas(mixSpectrum(C_MAJOR_PAD), MIX_RATE, MIX_FFT);
+    expect(matchChordTemplate(harmony, 0, mix)).toBeNull();
   });
 });
 

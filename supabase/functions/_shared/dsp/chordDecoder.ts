@@ -29,6 +29,7 @@ import { CHORD_STATES, scoreChordTemplates } from './chordDetection.ts';
 import type { DetectedChord } from './chordDetection.ts';
 import { ChordTimeline, SEEK_DISCONTINUITY_SEC } from './chordTimeline.ts';
 import type { ChordSpan } from './chordTimeline.ts';
+import { estimateKey, fitsKey } from './keyEstimation.ts';
 
 /**
  * What a change of chord costs, in the same units as the evidence: cosine
@@ -42,6 +43,26 @@ import type { ChordSpan } from './chordTimeline.ts';
  * neighbours. It assumes the 120ms frame the detector ticks at.
  */
 export const CHORD_SWITCH_COST = 0.7;
+
+/**
+ * Extra evidence per frame for a chord that belongs to the song's key, on the
+ * second decoding pass.
+ *
+ * Template matching alone has no idea what key it is in, so a frame that is a
+ * near tie between the key's own chord and an outside one is a coin toss. Songs
+ * mostly stay in key, so the tie should go to the chord that fits. The bonus is
+ * small next to a clear match (the right triad scores ~0.9 against ~0.6 for its
+ * neighbours), so a borrowed chord that is really there, like a bVII or a
+ * secondary dominant, still wins on its own evidence.
+ */
+export const KEY_FIT_BONUS = 0.15;
+
+/**
+ * Voiced audio needed before the key is trusted enough to lean on. With less,
+ * the estimate comes from a chord or two, and biasing toward it would only
+ * repeat that guess back.
+ */
+const KEY_BIAS_MIN_SEC = 8;
 
 interface RecordedFrame {
   timeSec: number;
@@ -59,7 +80,7 @@ export class ChordDecoder {
   /**
    * Record one analysis frame.
    *
-   * @param chroma  Unit-normalized 12-bin chroma (chromaFromMagnitudes).
+   * @param chroma  Unit-normalized 12-bin chroma of the accompaniment (harmonyChroma).
    * @param energy  Its pre-normalization energy (chromaEnergy), which is what
    *                tells a quiet passage from silence.
    * @param timeSec Frame time on the timeline being built against.
@@ -85,7 +106,23 @@ export class ChordDecoder {
     this.cached = null;
   }
 
+  /**
+   * Decode once with no idea of the key, estimate the key from that, then
+   * decode again with KEY_FIT_BONUS for the chords that belong to it.
+   */
   private decode(): ChordSpan[] {
+    const firstPass = this.decodeWith(null);
+    const heardSec = firstPass.reduce((sum, s) => sum + (s.endSec - s.startSec), 0);
+    if (heardSec < KEY_BIAS_MIN_SEC) return firstPass;
+
+    const key = estimateKey(firstPass);
+    if (!key) return firstPass;
+    const bias = Float64Array.from(CHORD_STATES, (chord) => (fitsKey(chord, key) ? KEY_FIT_BONUS : 0));
+    return this.decodeWith(bias);
+  }
+
+  /** `bias`, when given, is added to each chord's evidence in every frame (CHORD_STATES order). */
+  private decodeWith(bias: Float64Array | null): ChordSpan[] {
     const frames = this.frames;
     const labels: Array<DetectedChord | null> = new Array(frames.length).fill(null);
 
@@ -97,7 +134,7 @@ export class ChordDecoder {
       const frame = i < frames.length ? frames[i] : null;
       const continues = runStart >= 0 && frame?.scores && !isSeek(frames[i - 1].timeSec, frame.timeSec);
       if (runStart >= 0 && !continues) {
-        this.decodeRun(runStart, i, labels);
+        this.decodeRun(runStart, i, labels, bias);
         runStart = -1;
       }
       if (runStart < 0 && frame?.scores) runStart = i;
@@ -109,7 +146,12 @@ export class ChordDecoder {
   }
 
   /** Viterbi over frames [from, to), writing each frame's chord into `labels`. */
-  private decodeRun(from: number, to: number, labels: Array<DetectedChord | null>): void {
+  private decodeRun(
+    from: number,
+    to: number,
+    labels: Array<DetectedChord | null>,
+    bias: Float64Array | null
+  ): void {
     const states = CHORD_STATES.length;
     const length = to - from;
     // came[i * states + k]: the chord before frame i on the best path that has
@@ -135,7 +177,7 @@ export class ChordDecoder {
           current[k] = switched;
           came[i * states + k] = best;
         }
-        current[k] += scores[k];
+        current[k] += bias ? scores[k] + bias[k] : scores[k];
       }
       [previous, current] = [current, previous];
     }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { estimateKey, toRomanNumeral, toRomanProgression } from './keyEstimation';
+import { estimateKey, fitsKey, toRomanNumeral, toRomanProgression } from './keyEstimation';
 import { parseRomanChord, pitchClassName } from './theory';
 import { ChordTimeline, sectionProgressions, type ChordSpan } from './chordTimeline';
 import type { DetectedSection } from './sectionDetection';
@@ -133,6 +133,28 @@ describe('estimateKey', () => {
   it('returns null when there is nothing to go on', () => {
     expect(estimateKey([])).toBeNull();
     expect(estimateKey([{ root: 0, quality: 'major', startSec: 5, endSec: 5, confidence: 1 }])).toBeNull();
+  });
+});
+
+describe('fitsKey', () => {
+  const C_MAJOR = { tonic: PC.C, mode: 'major' as const };
+  const A_MINOR = { tonic: PC.A, mode: 'minor' as const };
+
+  it('accepts the triads the key is built from', () => {
+    for (const [root, quality] of [[PC.C, 'major'], [PC.D, 'minor'], [PC.E, 'minor'], [PC.F, 'major'], [PC.G, 'major'], [PC.A, 'minor']] as const) {
+      expect(fitsKey({ root, quality }, C_MAJOR)).toBe(true);
+    }
+  });
+
+  it('rejects chords from outside it, including the wrong quality on a scale degree', () => {
+    expect(fitsKey({ root: PC.E, quality: 'major' }, C_MAJOR)).toBe(false); // V/vi
+    expect(fitsKey({ root: PC.Bb, quality: 'major' }, C_MAJOR)).toBe(false); // bVII
+    expect(fitsKey({ root: PC.C, quality: 'minor' }, C_MAJOR)).toBe(false);
+  });
+
+  it('counts the major V in minor, as estimateKey does', () => {
+    expect(fitsKey({ root: PC.E, quality: 'major' }, A_MINOR)).toBe(true);
+    expect(fitsKey({ root: PC.E, quality: 'minor' }, A_MINOR)).toBe(true);
   });
 });
 

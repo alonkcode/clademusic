@@ -17,8 +17,11 @@ import { toRomanNumeral, toRomanProgression, type KeyEstimate } from '@/lib/harm
 import { AUTO_PROMOTION } from '@/lib/harmony/autoPromotion';
 
 /** Bumped whenever the detection pipeline changes shape enough to invalidate
- *  older runs. Stored on every run so they can be found and re-derived. */
-export const DETECTION_ANALYSIS_VERSION = '1.0.0';
+ *  older runs. Stored on every run so they can be found and re-derived.
+ *  1.1.0: chords are matched with the lead line removed and decoded with a
+ *  key-aware second pass (harmonyChroma, ChordDecoder); 1.0.0 runs followed
+ *  the melody far more often. */
+export const DETECTION_ANALYSIS_VERSION = '1.1.0';
 
 export interface DetectionChordPayload {
   numeral: string;

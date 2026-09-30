@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { matchChordTemplate } from './chordDetection';
-import { ChordDecoder, CHORD_SWITCH_COST } from './chordDecoder';
+import { ChordDecoder, CHORD_SWITCH_COST, KEY_FIT_BONUS } from './chordDecoder';
 import { estimateKey } from './keyEstimation';
 import { analyzePcm } from '../../../supabase/functions/_shared/dsp/previewAnalysis';
 
@@ -155,6 +155,54 @@ describe('ChordDecoder', () => {
   });
 });
 
+describe('ChordDecoder key pass', () => {
+  // A and E with both a C and a C# in between: a near tie between A minor
+  // (in C major) and A major (not), which A major wins by a hair on its own.
+  const A_MINOR_OR_MAJOR = chroma({ 9: 1, 4: 1, 0: 0.5, 1: 0.6 });
+  const F_TRIAD = chroma({ 5: 1, 9: 1, 0: 1 });
+  const A_MINOR = chroma({ 9: 1, 0: 1, 4: 1 });
+  const E_MAJOR = chroma({ 4: 1, 8: 1, 11: 1 });
+
+  /**
+   * About eleven seconds of C major I-vi-IV-V, so the key is settled. It ends
+   * on G, so whatever follows has to be chosen afresh rather than held over.
+   */
+  function establishCMajor(decoder: ChordDecoder): number {
+    let t = 0;
+    for (let round = 0; round < 3; round++) {
+      for (const frame of [C_TRIAD, A_MINOR, F_TRIAD, G_TRIAD]) t = feed(decoder, frame, 8, t);
+    }
+    return t;
+  }
+
+  it('is not applied until enough has been heard to trust the key', () => {
+    // Under the threshold the decoder behaves exactly as a single pass would.
+    const decoder = new ChordDecoder();
+    const t = feed(decoder, C_TRIAD, 10, 0);
+    feed(decoder, G_TRIAD, 10, t);
+    expect(names(decoder)).toEqual(['0', '7']);
+  });
+
+  it('still lets a chord from outside the key through when it is really there', () => {
+    // E major in C major: a secondary dominant (V/vi), not diatonic.
+    const decoder = new ChordDecoder();
+    let t = establishCMajor(decoder);
+    t = feed(decoder, E_MAJOR, 12, t);
+    feed(decoder, A_MINOR, 12, t);
+    expect(names(decoder).slice(-2)).toEqual(['4', '9m']);
+    expect(KEY_FIT_BONUS).toBeLessThan(0.3); // a nudge, not a veto
+  });
+
+  it('settles a near tie on the chord that belongs to the key', () => {
+    expect(matchChordTemplate(A_MINOR_OR_MAJOR, LOUD)).toMatchObject({ root: 9, quality: 'major' });
+
+    const decoder = new ChordDecoder();
+    const t = establishCMajor(decoder);
+    feed(decoder, A_MINOR_OR_MAJOR, 12, t);
+    expect(decoder.toSpans().at(-1)).toMatchObject({ root: 9, quality: 'minor' });
+  });
+});
+
 /**
  * Real PCM through the same pipeline the edge function runs. C - G - Am - F at
  * 120 BPM, one chord per two-second bar, played the way it is on records: with
@@ -164,6 +212,12 @@ describe('ChordDecoder', () => {
  * Measured on these exact clips (8 bars, so 8 chords is the right answer), the
  * frame-by-frame smoother that predates ChordDecoder produced 14 spans and got
  * 6 of 8 bars right for the arpeggio, and 23 spans and 1 of 8 for the melody.
+ * ChordDecoder over the whole mix got the melody to 6 of 8; with the lead line
+ * taken out first (harmonyChroma) it gets all 8, in 8 spans.
+ *
+ * The voice clip is the hard case: a sustained line with vibrato, four times
+ * the level of the chords, held on non-chord tones for whole beats. Over the
+ * whole mix the decoder named the notes being sung rather than the chords.
  */
 describe('against synthesized arrangements', () => {
   const SAMPLE_RATE = 44100;
@@ -188,13 +242,20 @@ describe('against synthesized arrangements', () => {
     };
   }
 
-  function synth(kind: 'arpeggio' | 'melody'): Float32Array {
+  function synth(kind: 'arpeggio' | 'melody' | 'voice'): Float32Array {
     const out = new Float32Array(BARS * BAR_SEC * SAMPLE_RATE);
     const noise = lcg(7);
     const partials = Array.from({ length: 8 }, (_, i) => ({ k: i + 1, gain: 1 / Math.pow(i + 1, 0.8) }));
     // arpeggio: no sustained chord at all, just its notes one after another.
     // melody: the harmony is a weak pad under a melody several times louder.
-    const level = kind === 'arpeggio' ? { pad: 0, note: 0.1, bass: 0.1, decay: 3 } : { pad: 0.02, note: 0.15, bass: 0.05, decay: 4 };
+    const level =
+      kind === 'arpeggio'
+        ? { pad: 0, note: 0.1, bass: 0.1, decay: 3 }
+        : kind === 'melody'
+          ? { pad: 0.02, note: 0.15, bass: 0.05, decay: 4 }
+          : { pad: 0.02, note: 0.08, bass: 0.05, decay: 0 };
+    /** A sung vowel: the 2nd-4th harmonics as strong as the fundamental. */
+    const vowel = [1, 1.3, 1.1, 0.8, 0.5, 0.35, 0.25, 0.18];
     const padNotes = [
       [48, 52, 55],
       [43, 47, 50],
@@ -218,10 +279,24 @@ describe('against synthesized arrangements', () => {
       for (const p of partials.slice(0, 4)) {
         v += level.bass * p.gain * Math.exp(-sinceBass * 2) * Math.sin(2 * Math.PI * midiHz(bar.bass) * p.k * t);
       }
-      const step = Math.floor(inBar / 0.25);
-      const envelope = Math.exp(-(inBar - step * 0.25) * level.decay);
-      const note = kind === 'arpeggio' ? bar.arpeggio[step] : bar.melody[step];
-      for (const p of partials) v += level.note * p.gain * envelope * Math.sin(2 * Math.PI * midiHz(note) * p.k * t);
+      if (kind === 'voice') {
+        // One held note per beat, sung on the bar's 2nd, 4th, 6th and 8th
+        // melody notes - mostly passing tones - with 5.5 Hz vibrato of about
+        // 35 cents (phase-modulated, so each harmonic wobbles in proportion).
+        const beat = Math.floor(inBar / 0.5);
+        const note = bar.melody[beat * 2 + 1];
+        const f = midiHz(note);
+        const depth = (f * (Math.pow(2, 35 / 1200) - 1)) / 5.5;
+        const wobble = Math.sin(2 * Math.PI * 5.5 * t);
+        vowel.forEach((gain, i) => {
+          v += level.note * gain * Math.sin(2 * Math.PI * f * (i + 1) * t + (i + 1) * depth * wobble);
+        });
+      } else {
+        const step = Math.floor(inBar / 0.25);
+        const envelope = Math.exp(-(inBar - step * 0.25) * level.decay);
+        const note = kind === 'arpeggio' ? bar.arpeggio[step] : bar.melody[step];
+        for (const p of partials) v += level.note * p.gain * envelope * Math.sin(2 * Math.PI * midiHz(note) * p.k * t);
+      }
 
       const sinceBeat = t % 0.5;
       if (sinceBeat < 0.05) v += 0.25 * noise() * Math.exp(-sinceBeat / 0.012);
@@ -268,7 +343,14 @@ describe('against synthesized arrangements', () => {
   it('does not turn every melody note into a chord when the melody outshouts the harmony', { timeout: 30_000 }, () => {
     const result = analyzePcm(synth('melody'), SAMPLE_RATE);
 
-    expect(result.chords.length).toBeLessThanOrEqual(BARS + 4);
-    expect(barsRight(result.chords)).toBeGreaterThanOrEqual(6);
+    expect(result.chords.length).toBeLessThanOrEqual(BARS + 1);
+    expect(barsRight(result.chords)).toBe(BARS);
+  });
+
+  it('names the chords under a sustained sung line, not the notes being sung', { timeout: 30_000 }, () => {
+    const result = analyzePcm(synth('voice'), SAMPLE_RATE);
+
+    expect(result.chords.length).toBeLessThanOrEqual(BARS + 2);
+    expect(barsRight(result.chords)).toBeGreaterThanOrEqual(7);
   });
 });

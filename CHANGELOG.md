@@ -48,6 +48,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in both GitHub Actions and Vercel (Vite inlines `VITE_*` at build time, so
   it needs a redeploy without build cache).
 
+### Fixed — Chord detection follows the chords, not the melody (Sep 29, 2026)
+- Live chord detection named whatever was loudest, usually the singer: a bar
+  over one chord came out as three or four as the melody moved, and the key
+  and the saved Roman numerals inherited the errors. Chords are now matched
+  after the lead line is taken out of the spectrum: the most salient pitch in
+  the vocal range and its harmonics are removed before folding to chroma.
+  This is signal processing on the frame already being analysed; no audio is
+  separated, kept, or put through a model. (ML stem separation was ruled out:
+  provider terms bar ML ingestion of Spotify content, see
+  `docs/LICENSING_AND_UNIVERSAL_PLAYER.md` §11.2.)
+- The recorded progression is decoded twice. The second pass slightly favours
+  chords that belong to the key found by the first, so near-ties go to the
+  chord that fits; borrowed chords (bVII, secondary dominants) still win on
+  their own evidence.
+- The live "now playing" chord scores each triad against both the
+  lead-removed and the whole-mix reading, so music with no melody reads as
+  before. Section detection and the silence gate are unchanged.
+- On synthesized test arrangements: time on the right chord 52% -> 93%, keys
+  right 8/16 -> 13/16, live readout 42% -> 76%. Not yet measured on real
+  recordings. Songs that are ambiguous between relative major and minor, or
+  Mixolydian ones (Am-F-C-G, D-C-G-D), can still get the wrong key, which
+  shifts their numerals.
+- New runs carry `DETECTION_ANALYSIS_VERSION` 1.1.0; 1.0.0 runs came from the
+  old detector.
+- Deploy: the front end ships with the push. The phone (microphone) route runs
+  on `services/live-analysis`, which picks this up only when the Fly app is
+  redeployed (`fly deploy . --config services/live-analysis/fly.toml
+  --ha=false --remote-only`, from a clean export of the commit; see its
+  README). No edge function or SQL change.
+- `supabase/functions/_shared/dsp/` (`chordDetection`, `chordDecoder`,
+  `keyEstimation`, `previewAnalysis`), `src/hooks/useLiveChordDetection.ts`,
+  `services/live-analysis/streamingAnalyzer.ts`
+
 ### Added — Automatic section-boundary detection (Aug 31, 2026)
 - Verse/chorus/bridge/intro/outro segmentation from live-captured audio,
   built on the same tab-audio capture already used for live chord detection

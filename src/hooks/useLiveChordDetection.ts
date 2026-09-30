@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChordSmoother,
+  chordChromas,
   chromaEnergy,
   chromaFromMagnitudes,
   matchChordTemplate,
@@ -315,7 +316,10 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
         }
         const chroma = chromaFromMagnitudes(linear, ctx.sampleRate, FFT_SIZE);
         const energy = chromaEnergy(linear, ctx.sampleRate, FFT_SIZE);
-        const raw = matchChordTemplate(chroma, energy);
+        // Chords are matched against the accompaniment with the lead line taken
+        // out (see harmonyChroma); sections still compare the whole mix.
+        const { harmony, mix } = chordChromas(linear, ctx.sampleRate, FFT_SIZE);
+        const raw = matchChordTemplate(harmony, energy, mix);
         const smoothed = smootherRef.current.push(raw);
         setChord(smoothed);
 
@@ -344,7 +348,7 @@ export function useLiveChordDetection(): UseLiveChordDetectionResult {
         // arpeggio put several chords in every bar. ChordDecoder keeps the
         // frame itself and settles the chord from everything heard, the way
         // the key is settled - see chordDecoder.ts.
-        chordDecoderRef.current.push(chroma, energy, timeSec);
+        chordDecoderRef.current.push(harmony, energy, timeSec);
       }, TICK_MS);
 
       onsetIntervalRef.current = setInterval(() => {

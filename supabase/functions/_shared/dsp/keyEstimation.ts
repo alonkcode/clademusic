@@ -73,6 +73,15 @@ function weightFor(offset: number, quality: ChordQuality, mode: 'major' | 'minor
 }
 
 /**
+ * Whether a chord is one this key's own harmony uses, by the same tables that
+ * estimateKey weighs evidence with (so minor includes the major V).
+ */
+export function fitsKey(chord: ChordRef, key: Pick<KeyEstimate, 'tonic' | 'mode'>): boolean {
+  const offset = (((chord.root - key.tonic) % 12) + 12) % 12;
+  return weightFor(offset, chord.quality, key.mode) > 0;
+}
+
+/**
  * Estimate the key from timed chord spans.
  *
  * Chords are weighted by how long they were actually held, not merely counted:
