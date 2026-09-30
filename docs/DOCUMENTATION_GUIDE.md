@@ -28,6 +28,7 @@ This document outlines the organization of Clade's documentation.
 - [RELEASE_PROCESS.md](RELEASE_PROCESS.md) — Versioning + release steps
 - [CODE_REVIEW.md](CODE_REVIEW.md) — Code review checklist (default for every PR)
 - [KNOWN_ISSUES.md](KNOWN_ISSUES.md) — Open issues + operational notes
+- [refactor/REFACTOR_REGISTER.md](refactor/REFACTOR_REGISTER.md) — Refactor audit: ranked register, with dependency graph, DRY inventory and type-safety audit alongside
 
 #### Architecture Documents
 - [HARMONIC_ANALYSIS_ARCHITECTURE.md](HARMONIC_ANALYSIS_ARCHITECTURE.md) — **Core system design** (35KB, comprehensive)

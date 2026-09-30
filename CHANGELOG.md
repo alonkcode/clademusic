@@ -48,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in both GitHub Actions and Vercel (Vite inlines `VITE_*` at build time, so
   it needs a redeploy without build cache).
 
+### Added — Refactor audit (Sep 28, 2026)
+- `docs/refactor/`: a ranked refactor register, dependency graph, DRY
+  inventory and type-safety audit. Findings only; no code was changed. The
+  top items: the exported Supabase client is typed `any` and the generated
+  DB types are missing 25 of the 39 tables the app queries; `bun run
+  typecheck` checks nothing; `services/similarityEngine.ts` does not compile;
+  one YouTube search path would put `VITE_YOUTUBE_API_KEY` in the bundle.
+
 ### Fixed — Chord detection follows the chords, not the melody (Sep 29, 2026)
 - Live chord detection named whatever was loudest, usually the singer: a bar
   over one chord came out as three or four as the melody moved, and the key
